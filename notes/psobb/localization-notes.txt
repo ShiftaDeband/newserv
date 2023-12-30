@@ -19,9 +19,84 @@ From nol-rinale:
 
 Other hex values and their corresponding languages:
 
-B802000000C3909090909090909090909090909090909090909090909 for German (_g)
+B802000000C3909090909090909090909090909090909090909090909 for German (_g - also references _d?)
 B803000000C3909090909090909090909090909090909090909090909 for French (_f)
 B804000000C3909090909090909090909090909090909090909090909 for Spanish (_s)
 B805000000C3909090909090909090909090909090909090909090909 for Chinese Simplified (_cs)
-B806000000C3909090909090909090909090909090909090909090909 for Chinese Traditional (_ct)
-B807000000C3909090909090909090909090909090909090909090909 for Korean (_k, but _h for unitxt?)
+B806000000C3909090909090909090909090909090909090909090909 for Chinese Traditional (_ct) [may not be fully implemented]
+B807000000C3909090909090909090909090909090909090909090909 for Korean (_h - also references _k?) [may not be fully implemented]
+
+_j
+_e
+_d
+_f
+_s
+_cs
+_ct
+_h
+
+unitxt_j.prs
+unitxt_e.prs
+unitxt_g.prs
+unitxt_f.prs
+unitxt_s.prs
+unitxt_cs.prs
+unitxt_ct.prs
+unitxt_h.prs
+
+unitxt_shop_j.prs
+unitxt_shop_e.prs
+unitxt_shop_g.prs
+unitxt_shop_f.prs
+unitxt_shop_s.prs
+unitxt_shop_cs.prs
+unitxt_shop_ct.prs
+unitxt_shop_h.prs
+
+TextureJapanese.gvm
+TextureGerman.gvm
+TextureFrench.gvm
+TextureSpanish.gvm
+TextureChineseS.gvm
+TextureEnglish.gvm
+
+f256_slot_eng
+f256_slot
+f256_slot_cs
+
+f256_ad_eng
+f256_ad
+
+f256_selectgamen_a_eng
+f256_selectgamen_b_eng
+f256_selectgamen_a
+f256_selectgamen_b
+
+f256_tag
+f256_tag_eng
+
+f512_midashi_eng
+f512_midashi_eng_b
+f512_midashi
+f512_midashi_b
+f512_midashi_cs
+f512_midashi_cs_b
+
+f256_player_tex_eng
+f256_player_tex
+
+logo_cs
+logo
+
+TitleEP4
+Title_cs
+Title
+
+openning_j
+openning_e
+openning_g
+openning_f
+openning_s
+openning_cs
+openning_ct
+openning_h
