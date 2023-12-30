@@ -1,0 +1,27 @@
+--
+From nol-rinale:
+  PSOBB has an internal switch which allows the client to be set into 
+  English or Japanese modes, this was the hidden switch Sega of America
+  used to localize the game from Japanese.
+  
+  To enable it open the decompressed psobb.exe (it should be about 7MB) 
+  in a hex editor and try the following:
+  
+  search for: 
+  
+  E82B91F4FF83F8017506B805000000C385C0750333C0C3B801000000C3
+  
+  replace with:
+  
+  B800000000C39090909090909090909090909090909090909090909090 for Japanese
+  B801000000C39090909090909090909090909090909090909090909090 for English
+--
+
+Other hex values and their corresponding languages:
+
+B802000000C3909090909090909090909090909090909090909090909 for German (_g)
+B803000000C3909090909090909090909090909090909090909090909 for French (_f)
+B804000000C3909090909090909090909090909090909090909090909 for Spanish (_s)
+B805000000C3909090909090909090909090909090909090909090909 for Chinese Simplified (_cs)
+B806000000C3909090909090909090909090909090909090909090909 for Chinese Traditional (_ct)
+B807000000C3909090909090909090909090909090909090909090909 for Korean (_k)
