@@ -42,8 +42,8 @@ Lobby Language Code
   G
   F
   S
-  B
-  T
+  B (CS on PSOPC - is this a client issue?)
+  T (CT on PSOPC - is this a client issue?)
   K
 
 Text - Includes Items, System Text, etc. (Items in German, French, and Spanish use English item names, but have localized descriptions.)
