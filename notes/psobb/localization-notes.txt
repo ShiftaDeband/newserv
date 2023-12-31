@@ -69,33 +69,12 @@ Slot Selection - Slot A/B, Main/Temp Character. Unused? Does the client crash wi
   f256_slot
   f256_slot_cs
 
-Main Title Buttons - Press Start Button, Online/Online Game, Options, etc. Unused? Does the client crash without this?
-  f256_ad_eng.prs
-  f256_ad.prs
-
-Difficulty/Episode/Mode Select - Unused? Does the client crash without this?
-  f256_selectgamen_a_eng.prs
-  f256_selectgamen_b_eng.prs (missing)
-  f256_selectgamen_a.prs
-  f256_selectgamen_b.prs (missing)
-
-Xbox Characters, Game Data, etc - Unused? Does the client crash without this?
-  f256_tag.prs
-  f256_tag_eng.prs
-
-Player 1/2/3/4 (Gamecube, inc. Enter, Esc, Tab) - Unused? Does the client crash without this?
-  f256_player_tex_eng.prs
-  f256_player_tex.prs
-
-Select Character - Also includes Episode/Options/Game Mode/Serial Number, etc. Unused? Does the client crash without this?
+Select Character - Also includes Episode/Options/Game Mode/Serial Number, etc.
   f512_midashi_eng.prs
-  f512_midashi_eng_b.prs
   f512_midashi.prs
-  f512_midashi_b.prs
   f512_midashi_cs.prs
-  f512_midashi_cs_b.prs
 
-Logo - Presented by Sega/Created bt Sonic Team
+Logo - Presented by Sega/Created by Sonic Team
   logo_cs.prs
   logo.prs
 
@@ -118,3 +97,25 @@ Character Creation - Includes text for Character Creation, Name, Proportions, et
   ccconsole_j.pvm
   ccconsole_e.pvm
   ccconsole_cs.pvm
+
+----
+
+**Unused, but Referenced in Executable**
+
+Main Title Buttons - Press Start Button, Online/Online Game, Options, etc.
+  f256_ad_eng.prs
+  f256_ad.prs
+
+Difficulty/Episode/Mode Select - Unused? Does the client crash without this?
+  f256_selectgamen_a_eng.prs
+  f256_selectgamen_b_eng.prs (missing)
+  f256_selectgamen_a.prs
+  f256_selectgamen_b.prs (missing)
+
+Xbox Characters, Game Data, etc - Unused? Does the client crash without this?
+  f256_tag.prs
+  f256_tag_eng.prs
+
+Player 1/2/3/4 (Gamecube, inc. Enter, Esc, Tab) - Unused? Does the client crash without this?
+  f256_player_tex_eng.prs
+  f256_player_tex.prs
