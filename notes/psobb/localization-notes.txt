@@ -26,77 +26,95 @@ B805000000C3909090909090909090909090909090909090909090909 for Chinese Simplified
 B806000000C3909090909090909090909090909090909090909090909 for Chinese Traditional (_ct) [may not be fully implemented]
 B807000000C3909090909090909090909090909090909090909090909 for Korean (_h - also references _k?) [may not be fully implemented]
 
-_j
-_e
-_d
-_f
-_s
-_cs
-_ct
-_h
+Appended Language Code
+  _j
+  _e
+  _d
+  _f
+  _s
+  _cs
+  _ct
+  _h
 
-unitxt_j.prs
-unitxt_e.prs
-unitxt_g.prs
-unitxt_f.prs
-unitxt_s.prs
-unitxt_cs.prs
-unitxt_ct.prs
-unitxt_h.prs
+Text - Includes Items, System Text, etc.
+  unitxt_j.prs
+  unitxt_e.prs
+  unitxt_g.prs
+  unitxt_f.prs
+  unitxt_s.prs
+  unitxt_cs.prs
+  unitxt_ct.prs
+  unitxt_h.prs
 
-unitxt_shop_j.prs
-unitxt_shop_e.prs
-unitxt_shop_g.prs
-unitxt_shop_f.prs
-unitxt_shop_s.prs
-unitxt_shop_cs.prs
-unitxt_shop_ct.prs
-unitxt_shop_h.prs
+Text - Shops, Tekkers, etc.
+  unitxt_shop_j.prs
+  unitxt_shop_e.prs
+  unitxt_shop_g.prs
+  unitxt_shop_f.prs
+  unitxt_shop_s.prs
+  unitxt_shop_cs.prs
+  unitxt_shop_ct.prs
+  unitxt_shop_h.prs
 
-TextureJapanese.gvm
-TextureGerman.gvm
-TextureFrench.gvm
-TextureSpanish.gvm
-TextureChineseS.gvm
-TextureEnglish.gvm
+Text - Pause Menu, Stats (Character, Items, etc.)
+  TextureJapanese.gvm
+  TextureGerman.gvm
+  TextureFrench.gvm
+  TextureSpanish.gvm
+  TextureChineseS.gvm
+  TextureEnglish.gvm
 
-f256_slot_eng
-f256_slot
-f256_slot_cs
+Slot Selection - Slot A/B, Main/Temp Character. Unused? Does the client crash without this?
+  f256_slot_eng
+  f256_slot
+  f256_slot_cs
 
-f256_ad_eng
-f256_ad
+Main Title Buttons - Press Start Button, Online/Online Game, Options, etc. Unused? Does the client crash without this?
+  f256_ad_eng.prs
+  f256_ad.prs
 
-f256_selectgamen_a_eng
-f256_selectgamen_b_eng
-f256_selectgamen_a
-f256_selectgamen_b
+Difficulty/Episode/Mode Select - Unused? Does the client crash without this?
+  f256_selectgamen_a_eng.prs
+  f256_selectgamen_b_eng.prs (missing)
+  f256_selectgamen_a.prs
+  f256_selectgamen_b.prs (missing)
 
-f256_tag
-f256_tag_eng
+Xbox Characters, Game Data, etc - Unused? Does the client crash without this?
+  f256_tag.prs
+  f256_tag_eng.prs
 
-f512_midashi_eng
-f512_midashi_eng_b
-f512_midashi
-f512_midashi_b
-f512_midashi_cs
-f512_midashi_cs_b
+Player 1/2/3/4 (Gamecube, inc. Enter, Esc, Tab) - Unused? Does the client crash without this?
+  f256_player_tex_eng.prs
+  f256_player_tex.prs
 
-f256_player_tex_eng
-f256_player_tex
+Select Character - Also includes Episode/Options/Game Mode/Serial Number, etc. Unused? Does the client crash without this?
+  f512_midashi_eng.prs
+  f512_midashi_eng_b.prs
+  f512_midashi.prs
+  f512_midashi_b.prs
+  f512_midashi_cs.prs
+  f512_midashi_cs_b.prs
 
-logo_cs
-logo
+Logo - Presented by Sega/Created bt Sonic Team
+  logo_cs.prs
+  logo.prs
 
-TitleEP4
-Title_cs
-Title
+Main Title Screen - Press Enter Key, Main BG title image
+  TitleEP4.prs
+  Title_cs.prs
+  Title.prs
 
-openning_j
-openning_e
-openning_g
-openning_f
-openning_s
-openning_cs
-openning_ct
-openning_h
+Opening Movie - Includes opening movie text including 'The Pioneer Project...'
+  openning_j.pae
+  openning_e.pae
+  openning_g.pae
+  openning_f.pae
+  openning_s.pae
+  openning_cs.pae
+  openning_ct.pae
+  openning_h.pae
+
+Character Creation - Includes text for Character Creation, Name, Proportions, etc.
+  ccconsole_j.pvm
+  ccconsole_e.pvm
+  ccconsole_cs.pvm
