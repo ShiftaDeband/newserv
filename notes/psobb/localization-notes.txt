@@ -29,12 +29,22 @@ B807000000C3909090909090909090909090909090909090909090909 for Korean (_h - also 
 Appended Language Code
   _j
   _e
-  _d
+  _d (needs confirmation - _g?)
   _f
   _s
   _cs
   _ct
-  _h
+  _h (needs confirmation - _k?)
+
+Lobby Code
+  J
+  E
+  G
+  F
+  S
+  B
+  T
+  K
 
 Text - Includes Items, System Text, etc.
   unitxt_j.prs
@@ -46,7 +56,7 @@ Text - Includes Items, System Text, etc.
   unitxt_ct.prs
   unitxt_h.prs
 
-Text - Shops, Tekkers, etc.
+Text - Includes Shops, Tekkers, etc.
   unitxt_shop_j.prs
   unitxt_shop_e.prs
   unitxt_shop_g.prs
@@ -64,7 +74,7 @@ Text - Pause Menu, Stats (Character, Items, etc.)
   TextureChineseS.gvm
   TextureEnglish.gvm
 
-Slot Selection - Slot A/B, Main/Temp Character. Unused? Does the client crash without this?
+Slot Selection - Slot A/B, Main/Temp Character. Required but appears not to be rendered.
   f256_slot_eng
   f256_slot
   f256_slot_cs
@@ -106,16 +116,16 @@ Main Title Buttons - Press Start Button, Online/Online Game, Options, etc.
   f256_ad_eng.prs
   f256_ad.prs
 
-Difficulty/Episode/Mode Select - Unused? Does the client crash without this?
+Difficulty/Episode/Mode Select
   f256_selectgamen_a_eng.prs
   f256_selectgamen_b_eng.prs (missing)
   f256_selectgamen_a.prs
   f256_selectgamen_b.prs (missing)
 
-Xbox Characters, Game Data, etc - Unused? Does the client crash without this?
+Xbox Characters, Game Data, etc.
   f256_tag.prs
   f256_tag_eng.prs
 
-Player 1/2/3/4 (Gamecube, inc. Enter, Esc, Tab) - Unused? Does the client crash without this?
+Player 1/2/3/4 (Gamecube, inc. Enter, Esc, Tab)
   f256_player_tex_eng.prs
   f256_player_tex.prs
