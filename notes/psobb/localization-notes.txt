@@ -36,7 +36,7 @@ Appended Language Code
   _ct
   _h (needs confirmation - _k?)
 
-Lobby Code
+Lobby Language Code
   J
   E
   G
@@ -53,7 +53,7 @@ Text - Includes Items, System Text, etc. (Items in German, French, and Spanish u
   unitxt_f.prs
   unitxt_s.prs
   unitxt_cs.prs
-  unitxt_ct.prs
+  unitxt_ct.prs (missing)
   unitxt_h.prs
 
 Text - Includes Shops, Tekkers, etc.
@@ -63,7 +63,7 @@ Text - Includes Shops, Tekkers, etc.
   unitxt_shop_f.prs
   unitxt_shop_s.prs
   unitxt_shop_cs.prs
-  unitxt_shop_ct.prs
+  unitxt_shop_ct.prs (missing)
   unitxt_shop_h.prs
 
 Text - Pause Menu, Stats (Character, Items, etc.) (Pause menu only: German, French, and Spanish use English. Korean pause menu should be translated, but may not be implemented, falls back to English in current client. When 'TextureKorean.gvm' is placed in the data directory, it is ignored.)
@@ -77,15 +77,15 @@ Text - Pause Menu, Stats (Character, Items, etc.) (Pause menu only: German, Fren
 Slot Selection - Slot A/B, Main/Temp Character. Required but appears not to be rendered. (Even if it was, German, French, and Spanish would use _eng, Korean unknown)
   f256_slot_eng.prs
   f256_slot.prs
-  f256_slot_cs.prs
+  f256_slot_cs.prs (missing, but was likely a copy of the base file)
 
 Select Character - Also includes Episode/Options/Game Mode/Serial Number, etc. (German, French, Spanish, and Korean use _eng)
   f512_midashi_eng.prs
   f512_midashi.prs
-  f512_midashi_cs.prs
+  f512_midashi_cs.prs (missing)
 
-Logo - Presented by Sega/Created by Sonic Team (Everyone uses the base logo except _cs/ct)
-  logo_cs.prs
+Logo - Presented by Sega/Created by Sonic Team (All clients uses the base logo except _cs/ct)
+  logo_cs.prs (missing)
   logo.prs
 
 Main Title Screen - Press Enter Key, Main BG title image (is there a flag to enable TitleEP4? otherwise everyone but _cs/ct uses title)
@@ -93,17 +93,17 @@ Main Title Screen - Press Enter Key, Main BG title image (is there a flag to ena
   Title_cs.prs
   Title.prs
 
-Opening Movie - Includes opening movie text including 'The Pioneer Project...'
+Opening Movie - Includes opening 'movie'/text including 'The Pioneer Project...'
   openning_j.pae
   openning_e.pae
-  openning_g.pae
-  openning_f.pae
-  openning_s.pae
+  openning_g.pae (missing)
+  openning_f.pae (missing)
+  openning_s.pae (missing)
   openning_cs.pae (missing)
   openning_ct.pae (missing, never localized?)
-  openning_h.pae (never localized?)
+  openning_h.pae (missing, never localized?)
 
 Character Creation - Includes text for Character Creation, Name, Proportions, etc. (German, French, Spanish, and Korean use _e)
   ccconsole_j.pvm
   ccconsole_e.pvm
-  ccconsole_cs.pvm
+  ccconsole_cs.pvm (missing)
