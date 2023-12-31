@@ -19,22 +19,22 @@ From nol-rinale:
 
 Other hex values and their corresponding languages:
 
-B802000000C3909090909090909090909090909090909090909090909 for German (_g - also references _d?)
+B802000000C3909090909090909090909090909090909090909090909 for German (_g - also references _d)
 B803000000C3909090909090909090909090909090909090909090909 for French (_f)
 B804000000C3909090909090909090909090909090909090909090909 for Spanish (_s)
 B805000000C3909090909090909090909090909090909090909090909 for Chinese Simplified (_cs)
 B806000000C3909090909090909090909090909090909090909090909 for Chinese Traditional (_ct)
-B807000000C3909090909090909090909090909090909090909090909 for Korean (_h - also references _k?) [not fully implemented]
+B807000000C3909090909090909090909090909090909090909090909 for Korean (_h - also references _k) [not fully implemented]
 
-Appended Language Code
+Appended Language Code (according to the exe)
   _j
   _e
-  _d (needs confirmation - _g?)
+  _d (needs confirmation - _g? may be _g for files listed below, _d for map data? seems to be _g for map data. what is this line in the executable? typo?)
   _f
   _s
   _cs
   _ct
-  _h (needs confirmation - _k?)
+  _h (needs confirmation - _k? may be _h for files listed below, _k for map data? seems confirmed by data.gsl.)
 
 Lobby Language Code
   J
@@ -65,6 +65,13 @@ Text - Includes Shops, Tekkers, etc.
   unitxt_shop_cs.prs
   unitxt_shop_ct.prs (missing)
   unitxt_shop_h.prs
+
+Word Select Data (missing cs, ct, kr in executable? these are also missing in general.)
+  ws_data_jp.bin
+  ws_data_us.bin
+  ws_data_es.bin
+  ws_data_de.bin
+  ws_data_fr.bin
 
 Text - Pause Menu, Stats (Character, Items, etc.) (Pause menu only: German, French, and Spanish use English. Korean pause menu should be translated, but may not be implemented, falls back to English in current client. When 'TextureKorean.gvm' is placed in the data directory, it is ignored.)
   TextureJapanese.gvm
