@@ -46,6 +46,94 @@ Lobby Language Code
   T (CT on PSOPC - seems to match executable? seems not to be changed by any modifications to the executable.)
   K
 
+Executable Lines/Notes - legacy strings for 'select language' from old versions of the game? changing things here doesn't seem to do anything.
+  J
+  j
+  japanese
+  j a p a n e s e 
+  J A P A N E S E
+  J
+  J p n .
+  J
+  00 00 00 00 01
+  
+  E
+  e
+  english
+  e n g l i s h
+  E N G L I S H
+  E
+  E n g .
+  E
+  E n g l i s h 
+  01 00 00 00 01
+  
+  E
+  g
+  german
+  g e r m a n
+  G E R M A N
+  G
+  G e r . 
+  E
+  D e u t s c h
+  02 00 00 00 01
+  
+  E
+  f
+  french
+  f r e n c h
+  F R E N C H
+  F
+  F r .
+  E
+  F r a n ç a i s 
+  03 00 00 00 01
+  
+  E
+  s
+  spanish
+  s p a n i s h
+  S P A N I S H
+  S
+  S p a n .
+  E
+  E s p a ñ o l
+  04 00 00 00 01
+  
+  B
+  b
+  chinese-simplified
+  c h i n e s e - s i m p l i f i e d
+  C H I N E S E - S I M P L I F I E D
+  C S
+  C - S
+  B
+  [Unknown] (聻协ⵎ蝥) (80 7B 53 4F 2D 4E 87 65)
+  05 00 00 00 02
+  
+  T
+  t
+  chinese-traditional
+  c h i n e s e - t r a d i t i o n a l
+  C H I N E S E - T R A D I T I O N A L
+  C T
+  C - T .
+  T
+  [Unknown] (䅾协ⵎ蝥) (41 7E 53 4F 2D 4E 87 65)
+  05 00 00 00 03
+  
+  K
+  k
+  korean
+  k o r e a n
+  K O R E A N
+  K
+  K o r .
+  K
+  [Unknown] (峕涭듅) (5C D5 6D AD B4 C5 00)
+  06 00 00 00 04
+
 Text - Includes Items, System Text, etc. (Items in German, French, and Spanish use English item names, but have localized descriptions.)
   unitxt_j.prs
   unitxt_e.prs
