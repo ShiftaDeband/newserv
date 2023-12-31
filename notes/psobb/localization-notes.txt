@@ -100,12 +100,12 @@ Main Title Screen - Press Enter Key, Main BG title image (is there a flag to ena
   Title_cs.prs
   Title.prs
 
-Opening Movie - Includes opening 'movie'/text including 'The Pioneer Project...'
+Opening Movie - Includes opening 'movie'/text including 'The Pioneer Project...' (PSOPC and PSOGC only used Japanese and English cutscenes, but PSOX has cutscenes for Japanese, English, German, French, and Spanish)
   openning_j.pae
   openning_e.pae
-  openning_g.pae (missing)
-  openning_f.pae (missing)
-  openning_s.pae (missing)
+  openning_g.pae
+  openning_f.pae
+  openning_s.pae
   openning_cs.pae (missing)
   openning_ct.pae (missing, never localized?)
   openning_h.pae (missing, never localized?)
