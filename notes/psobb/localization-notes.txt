@@ -55,6 +55,7 @@ Executable Lines/Notes - legacy strings for 'select language' from old versions 
   J
   J p n .
   J
+  日本語
   00 00 00 00 01
   
   E
@@ -109,7 +110,7 @@ Executable Lines/Notes - legacy strings for 'select language' from old versions 
   C S
   C - S
   B
-  [Unknown] (聻协ⵎ蝥) (80 7B 53 4F 2D 4E 87 65)
+  简体中文
   05 00 00 00 02
   
   T
@@ -120,7 +121,7 @@ Executable Lines/Notes - legacy strings for 'select language' from old versions 
   C T
   C - T .
   T
-  [Unknown] (䅾协ⵎ蝥) (41 7E 53 4F 2D 4E 87 65)
+  繁体中文
   05 00 00 00 03
   
   K
@@ -131,7 +132,7 @@ Executable Lines/Notes - legacy strings for 'select language' from old versions 
   K
   K o r .
   K
-  [Unknown] (峕涭듅) (5C D5 6D AD B4 C5 00)
+  한국어
   06 00 00 00 04
 
 Text - Includes Items, System Text, etc. (Items in German, French, and Spanish use English item names, but have localized descriptions.)
