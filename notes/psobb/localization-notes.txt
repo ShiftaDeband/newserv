@@ -23,8 +23,8 @@ B802000000C3909090909090909090909090909090909090909090909 for German (_g - also 
 B803000000C3909090909090909090909090909090909090909090909 for French (_f)
 B804000000C3909090909090909090909090909090909090909090909 for Spanish (_s)
 B805000000C3909090909090909090909090909090909090909090909 for Chinese Simplified (_cs)
-B806000000C3909090909090909090909090909090909090909090909 for Chinese Traditional (_ct) [may not be fully implemented]
-B807000000C3909090909090909090909090909090909090909090909 for Korean (_h - also references _k?) [may not be fully implemented]
+B806000000C3909090909090909090909090909090909090909090909 for Chinese Traditional (_ct)
+B807000000C3909090909090909090909090909090909090909090909 for Korean (_h - also references _k?) [not fully implemented]
 
 Appended Language Code
   _j
@@ -46,7 +46,7 @@ Lobby Code
   T
   K
 
-Text - Includes Items, System Text, etc.
+Text - Includes Items, System Text, etc. (Items in German, French, and Spanish use English item names, but have localized descriptions.)
   unitxt_j.prs
   unitxt_e.prs
   unitxt_g.prs
@@ -66,7 +66,7 @@ Text - Includes Shops, Tekkers, etc.
   unitxt_shop_ct.prs
   unitxt_shop_h.prs
 
-Text - Pause Menu, Stats (Character, Items, etc.)
+Text - Pause Menu, Stats (Character, Items, etc.) (Pause menu only: German, French, and Spanish use English. Korean pause menu should be translated, but may not be implemented, falls back to English in current client. When 'TextureKorean.gvm' is placed in the data directory, it is ignored.)
   TextureJapanese.gvm
   TextureGerman.gvm
   TextureFrench.gvm
@@ -74,21 +74,21 @@ Text - Pause Menu, Stats (Character, Items, etc.)
   TextureChineseS.gvm
   TextureEnglish.gvm
 
-Slot Selection - Slot A/B, Main/Temp Character. Required but appears not to be rendered.
-  f256_slot_eng
-  f256_slot
-  f256_slot_cs
+Slot Selection - Slot A/B, Main/Temp Character. Required but appears not to be rendered. (Even if it was, German, French, and Spanish would use _eng, Korean unknown)
+  f256_slot_eng.prs
+  f256_slot.prs
+  f256_slot_cs.prs
 
-Select Character - Also includes Episode/Options/Game Mode/Serial Number, etc.
+Select Character - Also includes Episode/Options/Game Mode/Serial Number, etc. (German, French, Spanish, and Korean use _eng)
   f512_midashi_eng.prs
   f512_midashi.prs
   f512_midashi_cs.prs
 
-Logo - Presented by Sega/Created by Sonic Team
+Logo - Presented by Sega/Created by Sonic Team (Everyone uses the base logo except _cs/ct)
   logo_cs.prs
   logo.prs
 
-Main Title Screen - Press Enter Key, Main BG title image
+Main Title Screen - Press Enter Key, Main BG title image (is there a flag to enable TitleEP4? otherwise everyone but _cs/ct uses title)
   TitleEP4.prs
   Title_cs.prs
   Title.prs
@@ -99,33 +99,11 @@ Opening Movie - Includes opening movie text including 'The Pioneer Project...'
   openning_g.pae
   openning_f.pae
   openning_s.pae
-  openning_cs.pae
-  openning_ct.pae
-  openning_h.pae
+  openning_cs.pae (missing)
+  openning_ct.pae (missing, never localized?)
+  openning_h.pae (never localized?)
 
-Character Creation - Includes text for Character Creation, Name, Proportions, etc.
+Character Creation - Includes text for Character Creation, Name, Proportions, etc. (German, French, Spanish, and Korean use _e)
   ccconsole_j.pvm
   ccconsole_e.pvm
   ccconsole_cs.pvm
-
-----
-
-**Unused, but Referenced in Executable**
-
-Main Title Buttons - Press Start Button, Online/Online Game, Options, etc.
-  f256_ad_eng.prs
-  f256_ad.prs
-
-Difficulty/Episode/Mode Select
-  f256_selectgamen_a_eng.prs
-  f256_selectgamen_b_eng.prs (missing)
-  f256_selectgamen_a.prs
-  f256_selectgamen_b.prs (missing)
-
-Xbox Characters, Game Data, etc.
-  f256_tag.prs
-  f256_tag_eng.prs
-
-Player 1/2/3/4 (Gamecube, inc. Enter, Esc, Tab)
-  f256_player_tex_eng.prs
-  f256_player_tex.prs
