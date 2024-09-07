@@ -19,26 +19,27 @@ public:
       std::shared_ptr<const WeaponRandomSet> weapon_random_set,
       std::shared_ptr<const TekkerAdjustmentSet> tekker_adjustment_set,
       std::shared_ptr<const ItemParameterTable> item_parameter_table,
-      Version version,
+      std::shared_ptr<const ItemData::StackLimits> stack_limits,
       Episode episode,
       GameMode mode,
       uint8_t difficulty,
       uint8_t section_id,
-      uint32_t random_seed,
+      std::shared_ptr<PSOLFGEncryption> opt_rand_crypt,
       std::shared_ptr<const BattleRules> restrictions = nullptr);
   ~ItemCreator() = default;
 
-  void set_random_state(uint32_t seed, uint32_t absolute_offset);
-  void clear_destroyed_entities();
+  void set_random_crypt(std::shared_ptr<PSOLFGEncryption> new_random_crypt);
 
-  ItemData on_monster_item_drop(uint16_t entity_id, uint32_t enemy_type, uint8_t area);
-  ItemData on_box_item_drop(uint16_t entity_id, uint8_t area);
-  ItemData on_specialized_box_item_drop(uint16_t entity_id, uint8_t area, float def_z, uint32_t def0, uint32_t def1, uint32_t def2);
+  struct DropResult {
+    ItemData item;
+    bool is_from_rare_table = false;
+  };
 
-  void set_monster_destroyed(uint16_t entity_id);
-  void set_box_destroyed(uint16_t entity_id);
+  DropResult on_monster_item_drop(uint32_t enemy_type, uint8_t area);
+  DropResult on_box_item_drop(uint8_t area);
+  DropResult on_specialized_box_item_drop(uint8_t area, float def_z, uint32_t def0, uint32_t def1, uint32_t def2);
 
-  static ItemData base_item_for_specialized_box(uint32_t def0, uint32_t def1, uint32_t def2);
+  ItemData base_item_for_specialized_box(uint32_t def0, uint32_t def1, uint32_t def2) const;
 
   std::vector<ItemData> generate_armor_shop_contents(size_t player_level);
   std::vector<ItemData> generate_tool_shop_contents(size_t player_level);
@@ -51,10 +52,15 @@ public:
   inline void set_restrictions(std::shared_ptr<const BattleRules> restrictions) {
     this->restrictions = restrictions;
   }
+  inline uint8_t get_section_id() const {
+    return this->section_id;
+  }
+  void set_section_id(uint8_t new_section_id);
 
 private:
-  PrefixedLogger log;
-  Version version;
+  phosg::PrefixedLogger log;
+  Version logic_version;
+  std::shared_ptr<const ItemData::StackLimits> stack_limits;
   Episode episode;
   GameMode mode;
   uint8_t difficulty;
@@ -65,30 +71,43 @@ private:
   std::shared_ptr<const WeaponRandomSet> weapon_random_set;
   std::shared_ptr<const TekkerAdjustmentSet> tekker_adjustment_set;
   std::shared_ptr<const ItemParameterTable> item_parameter_table;
+  std::shared_ptr<const CommonItemSet> common_item_set;
   std::shared_ptr<const CommonItemSet::Table> pt;
   std::shared_ptr<const BattleRules> restrictions;
 
   struct UnitResult {
     uint8_t unit;
     int8_t modifier;
-  } __attribute__((packed));
+  } __packed_ws__(UnitResult, 2);
   std::array<std::vector<UnitResult>, 13> unit_results_by_star_count;
 
   // Note: The original implementation uses 17 different random states for some
   // reason. We forego that and use only one for simplicity.
-  PSOV2Encryption random_crypt;
-  std::unordered_set<uint16_t> destroyed_monsters;
-  std::unordered_set<uint16_t> destroyed_boxes;
-
-  inline bool is_v3() const {
-    return !is_v1_or_v2(this->version);
-  }
+  // Originally, the 17 random states were used for:
+  //   [0x00] - drop-anything rate check
+  //   [0x01] - common item class check
+  //   [0x02] - get_rand_from_weighted_tables16 determinants
+  //   [0x03] - get_rand_from_weighted_tables8 determinants
+  //   [0x04] - tech disk levels
+  //   [0x05] - meseta amounts
+  //   [0x06] - rare drop rate check
+  //   [0x07] - rare weapon special table index
+  //   [0x08] - apparently unused
+  //   [0x09] - whether to generate a common weapon special
+  //   [0x0A] - number of stars for common weapon special
+  //   [0x0B] - unit modifiers
+  //   [0x0C] - common armor DFP bonuses
+  //   [0x0D] - common armor EVP bonuses
+  //   [0x0E] - apparently unused
+  //   [0x0F] - which common weapon special to generate
+  //   [0x10] - apparently unused
+  std::shared_ptr<PSOLFGEncryption> opt_rand_crypt;
 
   bool are_rare_drops_allowed() const;
   uint8_t normalize_area_number(uint8_t area) const;
 
-  ItemData on_monster_item_drop_with_area_norm(uint32_t enemy_type, uint8_t area_norm);
-  ItemData on_box_item_drop_with_area_norm(uint8_t area_norm);
+  DropResult on_monster_item_drop_with_area_norm(uint32_t enemy_type, uint8_t area_norm);
+  DropResult on_box_item_drop_with_area_norm(uint8_t area_norm);
 
   uint32_t rand_int(uint64_t max);
   float rand_float_0_1_from_crypt();
@@ -116,7 +135,7 @@ private:
   void generate_common_armor_or_shield_type_and_variances(char area_norm, ItemData& item);
   void generate_common_tool_variances(uint32_t area_norm, ItemData& item);
   uint8_t generate_tech_disk_level(uint32_t tech_num, uint32_t area_norm);
-  void generate_common_mag_variances(ItemData& item) const;
+  void generate_common_mag_variances(ItemData& item);
   void generate_common_weapon_variances(uint8_t area_norm, ItemData& item);
   void generate_common_weapon_grind(ItemData& item, uint8_t offset_within_subtype_range);
   void generate_common_weapon_bonuses(ItemData& item, uint8_t area_norm);
@@ -135,7 +154,7 @@ private:
       const std::vector<ItemData>& shop, const ItemData& item);
   static bool shop_does_not_contain_duplicate_or_too_many_similar_weapons(
       const std::vector<ItemData>& shop, const ItemData& item);
-  static bool shop_does_not_contain_duplicate_item_by_primary_identifier(
+  static bool shop_does_not_contain_duplicate_item_by_data1_0_1_2(
       const std::vector<ItemData>& shop, const ItemData& item);
   void generate_armor_shop_armors(
       std::vector<ItemData>& shop, size_t player_level);

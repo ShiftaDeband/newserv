@@ -1174,7 +1174,7 @@ static uint64_t decode_dc_serial_number_str(const string& s) {
     if (new_ch == '\0') {
       return INVALID_PRODUCT;
     }
-    serial_number = (serial_number << 4) | value_for_hex_char(new_ch);
+    serial_number = (serial_number << 4) | phosg::value_for_hex_char(new_ch);
   }
   return serial_number;
 }
@@ -1291,12 +1291,12 @@ string generate_dc_serial_number(uint8_t domain, uint8_t subdomain) {
     throw runtime_error("invalid domain");
   }
 
-  size_t det1 = (subdomain == 0xFF) ? random_object<uint32_t>() : subdomain;
+  size_t det1 = (subdomain == 0xFF) ? phosg::random_object<uint32_t>() : subdomain;
   size_t index1 = offset1 + (det1 % (limit1 - offset1));
-  size_t index2 = random_object<uint32_t>() % (sizeof(primes2) / sizeof(primes2[0]));
-  size_t index3 = random_object<uint32_t>() % (sizeof(primes3) / sizeof(primes3[0]));
+  size_t index2 = phosg::random_object<uint32_t>() % (sizeof(primes2) / sizeof(primes2[0]));
+  size_t index3 = phosg::random_object<uint32_t>() % (sizeof(primes3) / sizeof(primes3[0]));
   uint32_t value = primes1[index1] * primes2[index2] * primes3[index3];
-  string s = string_printf("%08X", value);
+  string s = phosg::string_printf("%08X", value);
 
   string ret;
   for (char ch : s) {
@@ -1355,7 +1355,7 @@ unordered_map<uint32_t, string> generate_all_dc_serial_numbers(uint8_t domain, u
 }
 
 void dc_serial_number_speed_test(uint64_t seed) {
-  uint32_t effective_seed = (seed & 0xFFFFFFFF00000000) ? random_object<uint32_t>() : seed;
+  uint32_t effective_seed = (seed & 0xFFFFFFFF00000000) ? phosg::random_object<uint32_t>() : seed;
   fprintf(stderr, "Product speed test with seed=%08" PRIX32 "\n", effective_seed);
   PSOV2Encryption crypt(effective_seed);
   uint64_t time_slow = 0;
@@ -1363,15 +1363,15 @@ void dc_serial_number_speed_test(uint64_t seed) {
   size_t num_disagreements = 0;
   static constexpr size_t count = 0x1000;
   for (size_t z = 0; z < count; z++) {
-    string s = string_printf("%08X", crypt.next());
+    string s = phosg::string_printf("%08X", crypt.next());
 
-    uint64_t start = now();
+    uint64_t start = phosg::now();
     bool is_valid_fast = dc_serial_number_is_valid_fast(s, 1, 0xFF);
-    time_fast += now() - start;
+    time_fast += phosg::now() - start;
 
-    start = now();
+    start = phosg::now();
     bool is_valid_slow = dc_serial_number_is_valid_slow(s, 1, 0xFF);
-    time_slow += now() - start;
+    time_slow += phosg::now() - start;
 
     if (((z & 0xF) == 0) || is_valid_slow || is_valid_fast) {
       fprintf(stderr, "... %02zX: %s => %s %s%s\n", z, s.c_str(), is_valid_slow ? "SLOW" : "----", is_valid_fast ? "FAST" : "----", is_valid_slow != is_valid_fast ? " !!!" : "");
@@ -1385,4 +1385,75 @@ void dc_serial_number_speed_test(uint64_t seed) {
   fprintf(stderr, "Total time (fast): %" PRId64 " usecs (%" PRIu64 " per serial number)\n", time_fast, time_fast / count);
   fprintf(stderr, "Fast vs. slow speedup: %zux\n", static_cast<size_t>(time_slow / time_fast));
   fprintf(stderr, "Disagreements: %zu\n", num_disagreements);
+}
+
+string decrypt_dp_address_jpn(
+    const string& executable,
+    const string& values,
+    const string& indexes) {
+  phosg::StringReader values_r(values);
+  phosg::StringReader indexes_r(indexes);
+
+  size_t fixup_values_offset = values_r.pget_u32l(0x3FFC) - 0x8C004000;
+  size_t fixup_steps_offset = indexes_r.pget_u32l(0x3BFC) - 0x8C008400;
+  phosg::StringReader fixup_values_r = values_r.sub(fixup_values_offset);
+  phosg::StringReader fixup_steps_r = indexes_r.sub(fixup_steps_offset);
+
+  auto decrypted = decrypt_pr2_data<false>(executable);
+  size_t fixup_offset = 0;
+  while (fixup_steps_r.get_u8(false)) {
+    fixup_offset += (fixup_steps_r.get_u8() << 2);
+    fixup_steps_r.skip(1);
+    if (fixup_offset + 4 > decrypted.compressed_data.size()) {
+      throw runtime_error("fixup beyond end of compressed data");
+    }
+    *reinterpret_cast<le_uint32_t*>(decrypted.compressed_data.data() + fixup_offset) = fixup_values_r.get_u32l();
+  }
+
+  return prs_decompress(decrypted.compressed_data);
+}
+
+EncryptedDCv2Executables encrypt_dp_address_jpn(const string& executable, const string& indexes) {
+  EncryptedDCv2Executables ret;
+
+  string compressed = prs_compress(executable);
+  ret.executable = encrypt_pr2_data<false>(compressed, executable.size(), phosg::random_object<uint32_t>() & 0x7FFFFF7F);
+
+  phosg::StringReader indexes_r(indexes);
+  size_t fixup_steps_offset = indexes_r.pget_u32l(0x3BFC) - 0x8C008400;
+  ret.indexes = indexes;
+  ret.indexes.at(fixup_steps_offset) = 0;
+  return ret;
+}
+
+std::string crypt_dp_address_jpn_simple(const std::string& data, int64_t mask_key) {
+  if (data.size() & 3) {
+    throw runtime_error("size is not a multiple of 4");
+  }
+
+  phosg::StringReader r(data);
+  if (mask_key < 0) {
+    unordered_map<uint32_t, size_t> key_freq;
+    while (!r.eof()) {
+      key_freq[r.get_u32l()] += 1;
+    }
+    size_t max_v = 0;
+    for (const auto& it : key_freq) {
+      if (it.second > max_v) {
+        max_v = it.second;
+        mask_key = it.first;
+      }
+    }
+    if (mask_key < 0) {
+      throw runtime_error("cannot determine mask key");
+    }
+    phosg::log_info("Determined %08" PRIX64 " to be the most likely mask key", mask_key);
+    r.go(0);
+  }
+
+  phosg::StringWriter w;
+  while (!r.eof()) {
+    w.put_u32l(r.get_u32l() ^ mask_key);
+  }
+  return std::move(w.str());
 }

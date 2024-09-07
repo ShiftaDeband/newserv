@@ -6,6 +6,7 @@
 
 #include "../Text.hh"
 #include "DataIndexes.hh"
+#include "Server.hh"
 
 namespace Episode3 {
 
@@ -45,52 +46,56 @@ public:
   };
 
   struct AttackEnvStats {
-    uint32_t num_set_cards; // "f" in expr
-    uint32_t dice_roll_value1; // "d" in expr
-    uint32_t effective_ap; // "ap" in expr
-    uint32_t effective_tp; // "tp" in expr
-    uint32_t current_hp; // "hp" in expr
-    uint32_t max_hp; // "mhp" in expr
-    uint32_t effective_ap_if_not_tech; // "dm" in expr
-    uint32_t effective_ap_if_not_physical; // "tdm" in expr
-    uint32_t player_num_destroyed_fcs; // "tf" in expr
-    uint32_t player_num_atk_points; // "ac" in expr
-    uint32_t defined_max_hp; // "php" in expr
-    uint32_t dice_roll_value2; // "dc" in expr
-    uint32_t card_cost; // "cs" in expr
-    uint32_t total_num_set_cards; // "a" in expr
-    uint32_t action_cards_ap; // "kap" in expr
-    uint32_t action_cards_tp; // "ktp" in expr
-    uint32_t unknown_a1; // "dn" in expr
-    uint32_t num_item_or_creature_cards_in_hand; // "hf" in expr
-    uint32_t num_destroyed_ally_fcs; // "df" in expr
-    uint32_t target_team_num_set_cards; // "ff" in expr
-    uint32_t condition_giver_team_num_set_cards; // "ef" in expr
-    uint32_t num_native_creatures; // "bi" in expr
-    uint32_t num_a_beast_creatures; // "ab" in expr
-    uint32_t num_machine_creatures; // "mc" in expr
-    uint32_t num_dark_creatures; // "dk" in expr
-    uint32_t num_sword_type_items; // "sa" in expr
-    uint32_t num_gun_type_items; // "gn" in expr
-    uint32_t num_cane_type_items; // "wd" in expr
-    uint32_t effective_ap_if_not_tech2; // "tt" in expr
-    uint32_t team_dice_boost; // "lv" in expr
-    uint32_t sc_effective_ap; // "adm" in expr
-    uint32_t attack_bonus; // "ddm" in expr
-    uint32_t num_sword_type_items_on_team; // "sat" in expr
-    uint32_t target_attack_bonus; // "edm" in expr
-    uint32_t last_attack_preliminary_damage; // "ldm" in expr
-    uint32_t last_attack_damage; // "rdm" in expr
-    uint32_t total_last_attack_damage; // "fdm" in expr
-    uint32_t last_attack_damage_count; // "ndm" in expr
-    uint32_t target_current_hp; // "ehp" in expr
+    /* 00 */ uint32_t num_set_cards; // "f" in expr
+    /* 04 */ uint32_t dice_roll_value1; // "d" in expr
+    /* 08 */ uint32_t effective_ap; // "ap" in expr
+    /* 0C */ uint32_t effective_tp; // "tp" in expr
+    /* 10 */ uint32_t current_hp; // "hp" in expr
+    /* 14 */ uint32_t max_hp; // "mhp" in expr
+    /* 18 */ uint32_t effective_ap_if_not_tech; // "dm" in expr
+    /* 1C */ uint32_t effective_ap_if_not_physical; // "tdm" in expr
+    /* 20 */ uint32_t player_num_destroyed_fcs; // "tf" in expr
+    /* 24 */ uint32_t player_num_atk_points; // "ac" in expr
+    /* 28 */ uint32_t defined_max_hp; // "php" in expr
+    /* 2C */ uint32_t dice_roll_value2; // "dc" in expr
+    /* 30 */ uint32_t card_cost; // "cs" in expr
+    /* 34 */ uint32_t total_num_set_cards; // "a" in expr
+    /* 38 */ uint32_t action_cards_ap; // "kap" in expr
+    /* 3C */ uint32_t action_cards_tp; // "ktp" in expr
+    /* 40 */ uint32_t unknown_a1; // "dn" in expr
+    /* 44 */ uint32_t num_item_or_creature_cards_in_hand; // "hf" in expr
+    /* 48 */ uint32_t num_destroyed_ally_fcs; // "df" in expr
+    /* 4C */ uint32_t target_team_num_set_cards; // "ff" in expr
+    /* 50 */ uint32_t non_target_team_num_set_cards; // "ef" in expr
+    /* 54 */ uint32_t num_native_creatures; // "bi" in expr
+    /* 58 */ uint32_t num_a_beast_creatures; // "ab" in expr
+    /* 5C */ uint32_t num_machine_creatures; // "mc" in expr
+    /* 60 */ uint32_t num_dark_creatures; // "dk" in expr
+    /* 64 */ uint32_t num_sword_type_items; // "sa" in expr
+    /* 68 */ uint32_t num_gun_type_items; // "gn" in expr
+    /* 6C */ uint32_t num_cane_type_items; // "wd" in expr
+    /* 70 */ uint32_t effective_ap_if_not_tech2; // "tt" in expr
+    /* 74 */ uint32_t team_dice_bonus; // "lv" in expr
+    /* 78 */ uint32_t sc_effective_ap; // "adm" in expr
+    // The following fields do not exist in Trial Edition. Because this struct
+    // is never sent to the client, we use the full struct even when playing
+    // Trial Edition, just for simplicity.
+    /* 7C */ uint32_t attack_bonus; // "ddm" in expr
+    /* 80 */ uint32_t num_sword_type_items_on_team; // "sat" in expr
+    /* 84 */ uint32_t target_attack_bonus; // "edm" in expr
+    /* 88 */ uint32_t last_attack_preliminary_damage; // "ldm" in expr
+    /* 8C */ uint32_t last_attack_damage; // "rdm" in expr
+    /* 90 */ uint32_t final_last_attack_damage; // "fdm" in expr
+    /* 94 */ uint32_t last_attack_damage_count; // "ndm" in expr
+    /* 98 */ uint32_t target_current_hp; // "ehp" in expr
+    /* 9C */
 
     AttackEnvStats();
     void clear();
     void print(FILE* stream) const;
 
     uint32_t at(size_t index) const;
-  } __attribute__((packed));
+  } __packed_ws__(AttackEnvStats, 0x9C);
 
   CardSpecial(std::shared_ptr<Server> server);
   std::shared_ptr<Server> server();
@@ -101,7 +106,7 @@ public:
   void adjust_dice_boost_if_team_has_condition_52(
       uint8_t team_id, uint8_t* inout_dice_boost, std::shared_ptr<const Card> card);
   void apply_action_conditions(
-      uint8_t when,
+      EffectWhen when,
       std::shared_ptr<const Card> attacker_card,
       std::shared_ptr<Card> defender_card,
       uint32_t flags,
@@ -113,7 +118,7 @@ public:
       uint16_t condition_giver_card_ref,
       uint16_t attacker_card_ref);
   bool apply_defense_condition(
-      uint8_t when,
+      EffectWhen when,
       Condition* defender_cond,
       uint8_t cond_index,
       const ActionState& defense_state,
@@ -122,7 +127,7 @@ public:
       bool unknown_p8);
   bool apply_defense_conditions(
       const ActionState& as,
-      uint8_t when,
+      EffectWhen when,
       std::shared_ptr<Card> defender_card,
       uint32_t flags);
   bool apply_stat_deltas_to_all_cards_from_all_conditions_with_card_ref(
@@ -159,8 +164,8 @@ public:
       uint32_t* unknown_p11,
       uint16_t sc_card_ref);
   StatSwapType compute_stat_swap_type(std::shared_ptr<const Card> card) const;
-  void compute_team_dice_boost(uint8_t team_id);
-  bool condition_has_when_20_or_21(const Condition& cond) const;
+  void compute_team_dice_bonus(uint8_t team_id);
+  bool condition_applies_on_sc_or_item_attack(const Condition& cond) const;
   size_t count_action_cards_with_condition_for_all_current_attacks(
       ConditionType cond_type, uint16_t card_ref) const;
   size_t count_action_cards_with_condition_for_current_attack(
@@ -184,7 +189,7 @@ public:
       uint16_t set_card_ref,
       uint16_t sc_card_ref,
       uint8_t random_percent,
-      uint8_t when) const;
+      EffectWhen when) const;
   int32_t evaluate_effect_expr(
       const AttackEnvStats& ast,
       const char* expr,
@@ -271,13 +276,13 @@ public:
       size_t* out_damage_count) const;
   void update_condition_orders(std::shared_ptr<Card> card);
   int16_t max_all_attack_bonuses(size_t* out_count) const;
-  void unknown_80244AA8(std::shared_ptr<Card> card);
+  void apply_effects_after_card_move(std::shared_ptr<Card> card);
   void check_for_defense_interference(
       std::shared_ptr<const Card> attacker_card,
       std::shared_ptr<Card> target_card,
       int16_t* inout_unknown_p4);
   void evaluate_and_apply_effects(
-      uint8_t when,
+      EffectWhen when,
       uint16_t set_card_ref,
       const ActionState& as,
       uint16_t sc_card_ref,
@@ -308,23 +313,26 @@ public:
       std::shared_ptr<const Card> card1,
       const Location& card1_loc,
       std::shared_ptr<const Card> card2) const;
-  void unknown_8024AAB8(const ActionState& as);
-  void unknown_80244BE4(std::shared_ptr<Card> unknown_p2);
-  void unknown_80244CA8(std::shared_ptr<Card> card);
-  template <uint8_t When1, uint8_t When2>
-  void unknown1_t(
-      std::shared_ptr<Card> unknown_p2, const ActionState* existing_as = nullptr);
-  void unknown_80249060(std::shared_ptr<Card> unknown_p2);
-  void unknown_80249254(std::shared_ptr<Card> unknown_p2);
-  void unknown_8024945C(std::shared_ptr<Card> unknown_p2, const ActionState& existing_as);
+  void apply_effects_after_attack_target_resolution(const ActionState& as);
+  void move_phase_before_for_card(std::shared_ptr<Card> unknown_p2);
+  void dice_phase_before_for_card(std::shared_ptr<Card> card);
+  template <EffectWhen When1, EffectWhen When2>
+  void apply_effects_on_phase_change_t(std::shared_ptr<Card> unknown_p2, const ActionState* existing_as = nullptr);
+  void draw_phase_before_for_card(std::shared_ptr<Card> unknown_p2);
+  void action_phase_before_for_card(std::shared_ptr<Card> unknown_p2);
+  void unknown_8024945C(std::shared_ptr<Card> unknown_p2, const ActionState* existing_as);
   void unknown_8024966C(std::shared_ptr<Card> unknown_p2, const ActionState* existing_as);
   static std::shared_ptr<Card> sc_card_for_card(std::shared_ptr<Card> unknown_p2);
   void unknown_8024A9D8(const ActionState& pa, uint16_t action_card_ref);
   void check_for_attack_interference(std::shared_ptr<Card> unknown_p2);
-  template <uint8_t When1, uint8_t When2, uint8_t When3, uint8_t When4>
-  void unknown_t2(std::shared_ptr<Card> unknown_p2);
-  void unknown_8024997C(std::shared_ptr<Card> card);
-  void unknown_8024A394(std::shared_ptr<Card> card);
+  template <
+      EffectWhen WhenAllCards,
+      EffectWhen WhenAttackerAndActionCards,
+      EffectWhen WhenAttackerOrHunterSCCard,
+      EffectWhen WhenTargetsAndActionCards>
+  void apply_effects_before_or_after_attack(std::shared_ptr<Card> unknown_p2);
+  void apply_effects_before_attack(std::shared_ptr<Card> card);
+  void apply_effects_after_attack(std::shared_ptr<Card> card);
   bool client_has_atk_dice_boost_condition(uint8_t client_id);
   void unknown_8024A6DC(
       std::shared_ptr<Card> unknown_p2, std::shared_ptr<Card> unknown_p3);
@@ -333,9 +341,6 @@ public:
 
 private:
   std::weak_ptr<Server> w_server;
-  ActionState unknown_action_state_a1;
-  ActionState action_state;
-  uint16_t unknown_a2;
 };
 
 } // namespace Episode3

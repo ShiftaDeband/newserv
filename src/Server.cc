@@ -28,10 +28,10 @@ using namespace std;
 using namespace std::placeholders;
 
 void Server::disconnect_client(shared_ptr<Client> c) {
-  if (c->channel.is_virtual_connection) {
-    server_log.info("Client disconnected: C-%" PRIX64 " on virtual connection %p", c->id, c->channel.bev.get());
+  if (c->channel.virtual_network_id) {
+    server_log.info("Client disconnected: C-%" PRIX64 " on N-%" PRIu64, c->id, c->channel.virtual_network_id);
   } else if (c->channel.bev) {
-    server_log.info("Client disconnected: C-%" PRIX64 " on fd %d", c->id, bufferevent_getfd(c->channel.bev.get()));
+    server_log.info("Client disconnected: C-%" PRIX64, c->id);
   } else {
     server_log.info("Client C-%" PRIX64 " removed from game server", c->id);
   }
@@ -55,7 +55,7 @@ void Server::disconnect_client(shared_ptr<Client> c) {
 }
 
 void Server::enqueue_destroy_clients() {
-  auto tv = usecs_to_timeval(0);
+  auto tv = phosg::usecs_to_timeval(0);
   event_add(this->destroy_clients_ev.get(), &tv);
 }
 
@@ -85,17 +85,20 @@ void Server::destroy_clients() {
 void Server::dispatch_on_listen_accept(
     struct evconnlistener* listener, evutil_socket_t fd,
     struct sockaddr* address, int socklen, void* ctx) {
-  reinterpret_cast<Server*>(ctx)->on_listen_accept(listener, fd, address,
-      socklen);
+  reinterpret_cast<Server*>(ctx)->on_listen_accept(listener, fd, address, socklen);
 }
 
-void Server::dispatch_on_listen_error(
-    struct evconnlistener* listener, void* ctx) {
+void Server::dispatch_on_listen_error(struct evconnlistener* listener, void* ctx) {
   reinterpret_cast<Server*>(ctx)->on_listen_error(listener);
 }
 
-void Server::on_listen_accept(
-    struct evconnlistener* listener, evutil_socket_t fd, struct sockaddr*, int) {
+void Server::on_listen_accept(struct evconnlistener* listener, evutil_socket_t fd, struct sockaddr*, int) {
+  struct sockaddr_storage remote_addr;
+  phosg::get_socket_addresses(fd, nullptr, &remote_addr);
+  if (this->state->banned_ipv4_ranges->check(remote_addr)) {
+    close(fd);
+    return;
+  }
 
   int listen_fd = evconnlistener_get_fd(listener);
   ListeningSocket* listening_socket;
@@ -108,9 +111,8 @@ void Server::on_listen_accept(
     return;
   }
 
-  struct bufferevent* bev = bufferevent_socket_new(this->base.get(), fd,
-      BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
-  auto c = make_shared<Client>(this->shared_from_this(), bev, listening_socket->version, listening_socket->behavior);
+  struct bufferevent* bev = bufferevent_socket_new(this->base.get(), fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
+  auto c = make_shared<Client>(this->shared_from_this(), bev, 0, listening_socket->version, listening_socket->behavior);
   c->channel.on_command_received = Server::on_client_input;
   c->channel.on_error = Server::on_client_error;
   c->channel.context_obj = this;
@@ -127,23 +129,27 @@ void Server::on_listen_accept(
   }
 }
 
-void Server::connect_client(
-    struct bufferevent* bev, uint32_t address, uint16_t client_port,
-    uint16_t server_port, Version version, ServerBehavior initial_state) {
-  auto c = make_shared<Client>(this->shared_from_this(), bev, version, initial_state);
+void Server::connect_virtual_client(
+    struct bufferevent* bev,
+    uint64_t virtual_network_id,
+    uint32_t address,
+    uint16_t client_port,
+    uint16_t server_port,
+    Version version,
+    ServerBehavior initial_state) {
+  auto c = make_shared<Client>(this->shared_from_this(), bev, virtual_network_id, version, initial_state);
   c->channel.on_command_received = Server::on_client_input;
   c->channel.on_error = Server::on_client_error;
   c->channel.context_obj = this;
+  this->state->channel_to_client.emplace(&c->channel, c);
 
   server_log.info(
-      "Client connected: C-%" PRIX64 " on virtual connection %p via T-%hu-%s-%s-VI",
+      "Client connected: C-%" PRIX64 " on virtual network N-%" PRIu64 " via T-%hu-%s-%s-VI",
       c->id,
-      bev,
+      virtual_network_id,
       server_port,
-      name_for_enum(version),
-      name_for_enum(initial_state));
-
-  this->state->channel_to_client.emplace(&c->channel, c);
+      phosg::name_for_enum(version),
+      phosg::name_for_enum(initial_state));
 
   // Manually set the remote address, since the bufferevent has no fd and the
   // Channel constructor can't figure out the virtual remote address
@@ -160,8 +166,8 @@ void Server::connect_client(
   }
 }
 
-void Server::connect_client(shared_ptr<Client> c, Channel&& ch) {
-  c->channel.replace_with(std::move(ch), Server::on_client_input, Server::on_client_error, this, string_printf("C-%" PRIX64, c->id));
+void Server::connect_virtual_client(shared_ptr<Client> c, Channel&& ch) {
+  c->channel.replace_with(std::move(ch), Server::on_client_input, Server::on_client_error, this, phosg::string_printf("C-%" PRIX64, c->id));
   this->state->channel_to_client.emplace(&c->channel, c);
   server_log.info("Client C-%" PRIX64 " added to game server", c->id);
 }
@@ -217,14 +223,9 @@ Server::Server(
       destroy_clients_ev(event_new(this->base.get(), -1, EV_TIMEOUT, &Server::dispatch_destroy_clients, this), event_free),
       state(state) {}
 
-void Server::listen(
-    const std::string& addr_str,
-    const string& socket_path,
-    Version version,
-    ServerBehavior behavior) {
-  int fd = ::listen(socket_path, 0, SOMAXCONN);
-  server_log.info("Listening on Unix socket %s on fd %d as %s",
-      socket_path.c_str(), fd, addr_str.c_str());
+void Server::listen(const std::string& addr_str, const string& socket_path, Version version, ServerBehavior behavior) {
+  int fd = phosg::listen(socket_path, 0, SOMAXCONN);
+  server_log.info("Listening on Unix socket %s on fd %d as %s", socket_path.c_str(), fd, addr_str.c_str());
   this->add_socket(addr_str, fd, version, behavior);
 }
 
@@ -237,10 +238,9 @@ void Server::listen(
   if (port == 0) {
     this->listen(addr_str, addr, version, behavior);
   } else {
-    int fd = ::listen(addr, port, SOMAXCONN);
-    string netloc_str = render_netloc(addr, port);
-    server_log.info("Listening on TCP interface %s on fd %d as %s",
-        netloc_str.c_str(), fd, addr_str.c_str());
+    int fd = phosg::listen(addr, port, SOMAXCONN);
+    string netloc_str = phosg::render_netloc(addr, port);
+    server_log.info("Listening on TCP interface %s on fd %d as %s", netloc_str.c_str(), fd, addr_str.c_str());
     this->add_socket(addr_str, fd, version, behavior);
   }
 }
@@ -286,14 +286,14 @@ shared_ptr<Client> Server::get_client() const {
 }
 
 vector<shared_ptr<Client>> Server::get_clients_by_identifier(const string& ident) const {
-  int64_t serial_number_hex = -1;
-  int64_t serial_number_dec = -1;
+  int64_t account_id_hex = -1;
+  int64_t account_id_dec = -1;
   try {
-    serial_number_dec = stoul(ident, nullptr, 10);
+    account_id_dec = stoul(ident, nullptr, 10);
   } catch (const invalid_argument&) {
   }
   try {
-    serial_number_hex = stoul(ident, nullptr, 16);
+    account_id_hex = stoul(ident, nullptr, 16);
   } catch (const invalid_argument&) {
   }
 
@@ -302,36 +302,48 @@ vector<shared_ptr<Client>> Server::get_clients_by_identifier(const string& ident
   vector<shared_ptr<Client>> results;
   for (const auto& it : this->state->channel_to_client) {
     auto c = it.second;
-    if (c->license && c->license->serial_number == serial_number_dec) {
-      results.emplace_back(std::move(c));
+    if (c->login && c->login->account->account_id == account_id_hex) {
+      results.emplace_back(c);
       continue;
     }
-    if (c->license && c->license->serial_number == serial_number_hex) {
-      results.emplace_back(std::move(c));
+    if (c->login && c->login->account->account_id == account_id_dec) {
+      results.emplace_back(c);
       continue;
     }
-    if (c->license && c->license->bb_username == ident) {
-      results.emplace_back(std::move(c));
+    if (c->login && c->login->xb_license && c->login->xb_license->gamertag == ident) {
+      results.emplace_back(c);
+      continue;
+    }
+    if (c->login && c->login->bb_license && c->login->bb_license->username == ident) {
+      results.emplace_back(c);
       continue;
     }
 
     auto p = c->character(false, false);
     if (p && p->disp.name.eq(ident, p->inventory.language)) {
-      results.emplace_back(std::move(c));
+      results.emplace_back(c);
       continue;
     }
 
     if (c->channel.name == ident) {
-      results.emplace_back(std::move(c));
+      results.emplace_back(c);
       continue;
     }
-    if (starts_with(c->channel.name, ident + " ")) {
-      results.emplace_back(std::move(c));
+    if (phosg::starts_with(c->channel.name, ident + " ")) {
+      results.emplace_back(c);
       continue;
     }
   }
 
   return results;
+}
+
+vector<shared_ptr<Client>> Server::all_clients() const {
+  vector<shared_ptr<Client>> ret;
+  for (const auto& it : this->state->channel_to_client) {
+    ret.emplace_back(it.second);
+  }
+  return ret;
 }
 
 shared_ptr<struct event_base> Server::get_base() const {

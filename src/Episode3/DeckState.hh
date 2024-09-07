@@ -10,32 +10,36 @@
 
 namespace Episode3 {
 
+class Server;
+
 struct NameEntry {
-  parray<char, 0x10> name;
-  uint8_t client_id;
-  uint8_t present;
-  uint8_t is_cpu_player;
-  uint8_t unused;
+  /* 00 */ pstring<TextEncoding::MARKED, 0x10> name;
+  /* 10 */ uint8_t client_id;
+  /* 11 */ uint8_t present;
+  /* 12 */ uint8_t is_cpu_player;
+  /* 13 */ uint8_t unused;
+  /* 14 */
 
   NameEntry();
   void clear();
-} __attribute__((packed));
+} __packed_ws__(NameEntry, 0x14);
 
 struct DeckEntry {
-  pstring<TextEncoding::SJIS, 0x10> name;
-  le_uint32_t team_id;
-  parray<le_uint16_t, 31> card_ids;
+  /* 00 */ pstring<TextEncoding::MARKED, 0x10> name;
+  /* 10 */ le_uint32_t team_id;
+  /* 14 */ parray<le_uint16_t, 31> card_ids;
   // If the following flag is not set to 3, then the God Whim assist effect can
   // use cards that are hidden from the player during deck building. The client
   // always sets this to 3, and it's not clear why this even exists.
-  uint8_t god_whim_flag;
-  uint8_t unused1;
-  le_uint16_t player_level;
-  parray<uint8_t, 2> unused2;
+  /* 52 */ uint8_t god_whim_flag;
+  /* 53 */ uint8_t unused1;
+  /* 54 */ le_uint16_t player_level;
+  /* 56 */ parray<uint8_t, 2> unused2;
+  /* 58 */
 
   DeckEntry();
   void clear();
-} __attribute__((packed));
+} __packed_ws__(DeckEntry, 0x58);
 
 uint8_t index_for_card_ref(uint16_t card_ref);
 uint8_t client_id_for_card_ref(uint16_t card_ref);
@@ -55,13 +59,13 @@ public:
   DeckState(
       uint8_t client_id,
       const parray<CardIDT, 0x1F>& card_ids,
-      std::shared_ptr<PSOLFGEncryption> random_crypt)
-      : client_id(client_id),
+      std::shared_ptr<Server> server)
+      : server(server),
+        client_id(client_id),
         draw_index(1),
         card_ref_base(this->client_id << 8),
         shuffle_enabled(true),
-        loop_enabled(true),
-        random_crypt(random_crypt) {
+        loop_enabled(true) {
     for (size_t z = 0; z < card_ids.size(); z++) {
       auto& e = this->entries[z];
       e.card_id = card_ids[z];
@@ -92,11 +96,13 @@ public:
 
   void restart();
   void shuffle();
-  void do_mulligan();
+  void do_mulligan(bool is_nte);
 
   void print(FILE* stream, std::shared_ptr<const CardIndex> card_index = nullptr) const;
 
 private:
+  std::weak_ptr<Server> server;
+
   struct CardEntry {
     uint16_t card_id;
     uint8_t deck_index;
@@ -109,8 +115,6 @@ private:
   bool loop_enabled;
   parray<CardEntry, 31> entries;
   parray<uint16_t, 31> card_refs;
-
-  std::shared_ptr<PSOLFGEncryption> random_crypt;
 };
 
 } // namespace Episode3

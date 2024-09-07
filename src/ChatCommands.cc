@@ -38,11 +38,11 @@ private:
   std::string user_msg;
 };
 
-static void check_license_flags(shared_ptr<Client> c, uint32_t mask) {
-  if (!c->license) {
+static void check_account_flag(shared_ptr<Client> c, Account::Flag flag) {
+  if (!c->login) {
     throw precondition_failed("$C6You are not\nlogged in.");
   }
-  if ((c->license->flags & mask) != mask) {
+  if (!c->login->account->check_flag(flag)) {
     throw precondition_failed("$C6You do not have\npermission to\nrun this command.");
   }
 }
@@ -65,20 +65,29 @@ static void check_is_ep3(shared_ptr<Client> c, bool is_ep3) {
   }
 }
 
+static void check_debug_enabled(shared_ptr<Client> c) {
+  if (!c->config.check_flag(Client::Flag::DEBUG_ENABLED)) {
+    throw precondition_failed("$C6This command can only\nbe run in debug mode\n(run %sdebug first)");
+  }
+}
+
 static void check_cheats_enabled(shared_ptr<Lobby> l, shared_ptr<Client> c) {
-  if (!l->check_flag(Lobby::Flag::CHEATS_ENABLED) && !(c->license->flags & License::Flag::CHEAT_ANYWHERE)) {
+  if (!l->check_flag(Lobby::Flag::CHEATS_ENABLED) &&
+      !c->login->account->check_flag(Account::Flag::CHEAT_ANYWHERE)) {
     throw precondition_failed("$C6This command can\nonly be used in\ncheat mode.");
   }
 }
 
 static void check_cheats_allowed(shared_ptr<ServerState> s, shared_ptr<Client> c) {
-  if ((s->cheat_mode_behavior == ServerState::BehaviorSwitch::OFF) && !(c->license->flags & License::Flag::CHEAT_ANYWHERE)) {
+  if ((s->cheat_mode_behavior == ServerState::BehaviorSwitch::OFF) &&
+      !c->login->account->check_flag(Account::Flag::CHEAT_ANYWHERE)) {
     throw precondition_failed("$C6Cheats are disabled\non this server.");
   }
 }
 
 static void check_cheats_allowed(shared_ptr<ServerState> s, shared_ptr<ProxyServer::LinkedSession> ses) {
-  if ((s->cheat_mode_behavior == ServerState::BehaviorSwitch::OFF) && (!ses->license || !(ses->license->flags & License::Flag::CHEAT_ANYWHERE))) {
+  if ((s->cheat_mode_behavior == ServerState::BehaviorSwitch::OFF) &&
+      (!ses->login || !ses->login->account->check_flag(Account::Flag::CHEAT_ANYWHERE))) {
     throw precondition_failed("$C6Cheats are disabled\non this proxy.");
   }
 }
@@ -94,12 +103,9 @@ static void check_is_leader(shared_ptr<Lobby> l, shared_ptr<Client> c) {
 
 static void server_command_server_info(shared_ptr<Client> c, const std::string&) {
   auto s = c->require_server_state();
-  string uptime_str = format_duration(now() - s->creation_time);
-  string build_date = format_time(BUILD_TIMESTAMP);
+  string uptime_str = phosg::format_duration(phosg::now() - s->creation_time);
   send_text_message_printf(c,
-      "Revision: $C6%s$C7\n$C6%s$C7\nUptime: $C6%s$C7\nLobbies: $C6%zu$C7\nClients: $C6%zu$C7(g) $C6%zu$C7(p)",
-      GIT_REVISION_HASH,
-      build_date.c_str(),
+      "Uptime: $C6%s$C7\nLobbies: $C6%zu$C7\nClients: $C6%zu$C7(g) $C6%zu$C7(p)",
       uptime_str.c_str(),
       s->id_to_lobby.size(),
       s->channel_to_client.size(),
@@ -117,11 +123,11 @@ static void server_command_lobby_info(shared_ptr<Client> c, const std::string&) 
     if (l->is_game()) {
       if (!l->is_ep3()) {
         if (l->max_level == 0xFFFFFFFF) {
-          lines.emplace_back(string_printf("$C6%08X$C7 L$C6%d+$C7", l->lobby_id, l->min_level + 1));
+          lines.emplace_back(phosg::string_printf("$C6%08X$C7 L$C6%d+$C7", l->lobby_id, l->min_level + 1));
         } else {
-          lines.emplace_back(string_printf("$C6%08X$C7 L$C6%d-%d$C7", l->lobby_id, l->min_level + 1, l->max_level + 1));
+          lines.emplace_back(phosg::string_printf("$C6%08X$C7 L$C6%d-%d$C7", l->lobby_id, l->min_level + 1, l->max_level + 1));
         }
-        lines.emplace_back(string_printf("$C7Section ID: $C6%s$C7", name_for_section_id(l->section_id)));
+        lines.emplace_back(phosg::string_printf("$C7Section ID: $C6%s$C7", name_for_section_id(l->effective_section_id())));
 
         switch (l->drop_mode) {
           case Lobby::DropMode::DISABLED:
@@ -147,45 +153,45 @@ static void server_command_lobby_info(shared_ptr<Client> c, const std::string&) 
         }
 
       } else {
-        lines.emplace_back(string_printf("$C7State seed: $C6%08X$C7", l->random_seed));
+        lines.emplace_back(phosg::string_printf("$C7State seed: $C6%08X$C7", l->random_seed));
       }
 
     } else {
-      lines.emplace_back(string_printf("$C7Lobby ID: $C6%08X$C7", l->lobby_id));
+      lines.emplace_back(phosg::string_printf("$C7Lobby ID: $C6%08X$C7", l->lobby_id));
     }
 
     string slots_str = "Slots: ";
     for (size_t z = 0; z < l->clients.size(); z++) {
       if (!l->clients[z]) {
-        slots_str += string_printf("$C0%zX$C7", z);
+        slots_str += phosg::string_printf("$C0%zX$C7", z);
       } else {
         bool is_self = l->clients[z] == c;
         bool is_leader = z == l->leader_id;
         if (is_self && is_leader) {
-          slots_str += string_printf("$C6%zX$C7", z);
+          slots_str += phosg::string_printf("$C6%zX$C7", z);
         } else if (is_self) {
-          slots_str += string_printf("$C2%zX$C7", z);
+          slots_str += phosg::string_printf("$C2%zX$C7", z);
         } else if (is_leader) {
-          slots_str += string_printf("$C4%zX$C7", z);
+          slots_str += phosg::string_printf("$C4%zX$C7", z);
         } else {
-          slots_str += string_printf("%zX", z);
+          slots_str += phosg::string_printf("%zX", z);
         }
       }
     }
     lines.emplace_back(std::move(slots_str));
   }
 
-  send_text_message(c, join(lines, "\n"));
+  send_text_message(c, phosg::join(lines, "\n"));
 }
 
 static void server_command_ping(shared_ptr<Client> c, const std::string&) {
-  c->ping_start_time = now();
+  c->ping_start_time = phosg::now();
   send_command(c, 0x1D, 0x00);
 }
 
 static void proxy_command_ping(shared_ptr<ProxyServer::LinkedSession> ses, const std::string&) {
-  ses->client_ping_start_time = now();
-  ses->server_ping_start_time = now();
+  ses->client_ping_start_time = phosg::now();
+  ses->server_ping_start_time = ses->client_ping_start_time;
 
   C_GuildCardSearch_40 cmd = {0x00010000, ses->remote_guild_card_number, ses->remote_guild_card_number};
   ses->client_channel.send(0x1D, 0x00);
@@ -198,7 +204,7 @@ static void proxy_command_lobby_info(shared_ptr<ProxyServer::LinkedSession> ses,
   // don't show it. (The user can see it in the pause menu, unlike in masked-GC
   // sessions like GC.)
   if (ses->remote_guild_card_number >= 0) {
-    msg = string_printf("$C7GC: $C6%" PRId64 "$C7\n", ses->remote_guild_card_number);
+    msg = phosg::string_printf("$C7GC: $C6%" PRId64 "$C7\n", ses->remote_guild_card_number);
   }
   msg += "Slots: ";
 
@@ -206,15 +212,15 @@ static void proxy_command_lobby_info(shared_ptr<ProxyServer::LinkedSession> ses,
     bool is_self = z == ses->lobby_client_id;
     bool is_leader = z == ses->leader_client_id;
     if (ses->lobby_players[z].guild_card_number == 0) {
-      msg += string_printf("$C0%zX$C7", z);
+      msg += phosg::string_printf("$C0%zX$C7", z);
     } else if (is_self && is_leader) {
-      msg += string_printf("$C6%zX$C7", z);
+      msg += phosg::string_printf("$C6%zX$C7", z);
     } else if (is_self) {
-      msg += string_printf("$C2%zX$C7", z);
+      msg += phosg::string_printf("$C2%zX$C7", z);
     } else if (is_leader) {
-      msg += string_printf("$C4%zX$C7", z);
+      msg += phosg::string_printf("$C4%zX$C7", z);
     } else {
-      msg += string_printf("%zX", z);
+      msg += phosg::string_printf("%zX", z);
     }
   }
 
@@ -227,7 +233,7 @@ static void proxy_command_lobby_info(shared_ptr<ProxyServer::LinkedSession> ses,
   }
   if (!cheats_tokens.empty()) {
     msg += "\n$C7Cheats: $C6";
-    msg += join(cheats_tokens, ",");
+    msg += phosg::join(cheats_tokens, ",");
   }
 
   vector<const char*> behaviors_tokens;
@@ -245,7 +251,7 @@ static void proxy_command_lobby_info(shared_ptr<ProxyServer::LinkedSession> ses,
   }
   if (!behaviors_tokens.empty()) {
     msg += "\n$C7Flags: $C6";
-    msg += join(behaviors_tokens, ",");
+    msg += phosg::join(behaviors_tokens, ",");
   }
 
   if (ses->config.override_section_id != 0xFF) {
@@ -257,14 +263,20 @@ static void proxy_command_lobby_info(shared_ptr<ProxyServer::LinkedSession> ses,
 }
 
 static void server_command_ax(shared_ptr<Client> c, const std::string& args) {
-  check_license_flags(c, License::Flag::ANNOUNCE);
+  check_account_flag(c, Account::Flag::ANNOUNCE);
   ax_messages_log.info("%s", args.c_str());
 }
 
 static void server_command_announce(shared_ptr<Client> c, const std::string& args) {
   auto s = c->require_server_state();
-  check_license_flags(c, License::Flag::ANNOUNCE);
+  check_account_flag(c, Account::Flag::ANNOUNCE);
   send_text_message(s, args);
+}
+
+static void server_command_announce_mail(shared_ptr<Client> c, const std::string& args) {
+  auto s = c->require_server_state();
+  check_account_flag(c, Account::Flag::ANNOUNCE);
+  send_simple_mail(s, 0, s->name, args);
 }
 
 static void server_command_arrow(shared_ptr<Client> c, const std::string& args) {
@@ -280,44 +292,179 @@ static void proxy_command_arrow(shared_ptr<ProxyServer::LinkedSession> ses, cons
 }
 
 static void server_command_debug(shared_ptr<Client> c, const std::string&) {
-  check_license_flags(c, License::Flag::DEBUG);
+  check_account_flag(c, Account::Flag::DEBUG);
   c->config.toggle_flag(Client::Flag::DEBUG_ENABLED);
   send_text_message_printf(c, "Debug %s", (c->config.check_flag(Client::Flag::DEBUG_ENABLED) ? "enabled" : "disabled"));
 }
 
 static void server_command_quest(shared_ptr<Client> c, const std::string& args) {
-  if (!c->config.check_flag(Client::Flag::DEBUG_ENABLED)) {
-    send_text_message(c, "$C6This command can only\nbe run in debug mode\n(run %sdebug first)");
-    return;
+  auto s = c->require_server_state();
+  auto l = c->require_lobby();
+  if (!l->is_game()) {
+    throw precondition_failed("$C6Quests cannot be\nstarted from the\nlobby");
   }
 
   Version effective_version = is_ep3(c->version()) ? Version::GC_V3 : c->version();
-
-  auto s = c->require_server_state();
-  auto l = c->require_lobby();
-  auto q = s->quest_index_for_version(effective_version)->get(stoul(args));
+  auto q = s->quest_index(effective_version)->get(stoul(args));
   if (!q) {
     send_text_message(c, "$C6Quest not found");
-  } else {
-    set_lobby_quest(c->require_lobby(), q, true);
+    return;
   }
+
+  if (!c->config.check_flag(Client::Flag::DEBUG_ENABLED)) {
+    if (l->count_clients() > 1) {
+      throw precondition_failed("$C6This command can only\nbe used with no\nother players present");
+    }
+    if (!q->allow_start_from_chat_command) {
+      throw precondition_failed("$C6This quest cannot\nbe started with the\n%squest command");
+    }
+  }
+
+  set_lobby_quest(c->require_lobby(), q, true);
 }
 
 static void server_command_qcheck(shared_ptr<Client> c, const std::string& args) {
   auto l = c->require_lobby();
   uint16_t flag_num = stoul(args, nullptr, 0);
 
-  send_text_message_printf(c, "$C7Quest flag 0x%hX (%hu)\nis %s on %s",
-      flag_num, flag_num,
-      c->character()->quest_flags.get(l->difficulty, flag_num) ? "set" : "not set",
-      name_for_difficulty(l->difficulty));
+  if (l->is_game()) {
+    if (!l->quest_flags_known || l->quest_flags_known->get(l->difficulty, flag_num)) {
+      send_text_message_printf(c, "$C7Game: flag 0x%hX (%hu)\nis %s on %s",
+          flag_num, flag_num,
+          c->character()->quest_flags.get(l->difficulty, flag_num) ? "set" : "not set",
+          name_for_difficulty(l->difficulty));
+    } else {
+      send_text_message_printf(c, "$C7Game: flag 0x%hX (%hu)\nis unknown on %s",
+          flag_num, flag_num, name_for_difficulty(l->difficulty));
+    }
+  } else if (c->version() == Version::BB_V4) {
+    send_text_message_printf(c, "$C7Player: flag 0x%hX (%hu)\nis %s on %s",
+        flag_num, flag_num,
+        c->character()->quest_flags.get(l->difficulty, flag_num) ? "set" : "not set",
+        name_for_difficulty(l->difficulty));
+  }
+}
+
+static void server_command_swset_swclear(shared_ptr<Client> c, const std::string& args, bool should_set) {
+  check_debug_enabled(c);
+  auto l = c->require_lobby();
+  if (!l->is_game()) {
+    send_text_message(c, "$C6This command cannot\nbe used in the lobby");
+    return;
+  }
+
+  auto tokens = phosg::split(args, ' ');
+  uint8_t floor, flag_num;
+  if (tokens.size() == 1) {
+    floor = c->floor;
+    flag_num = stoul(tokens[0], nullptr, 0);
+  } else if (tokens.size() == 2) {
+    floor = stoul(tokens[0], nullptr, 0);
+    flag_num = stoul(tokens[1], nullptr, 0);
+  } else {
+    send_text_message(c, "$C4Incorrect parameters");
+    return;
+  }
+
+  if (should_set) {
+    l->switch_flags->set(floor, flag_num);
+  } else {
+    l->switch_flags->clear(floor, flag_num);
+  }
+
+  uint8_t cmd_flags = should_set ? 0x01 : 0x00;
+  G_SwitchStateChanged_6x05 cmd = {{0x05, 0x03, 0xFFFF}, 0, 0, flag_num, floor, cmd_flags};
+  send_command_t(l, 0x60, 0x00, cmd);
+}
+
+static void server_command_swset(shared_ptr<Client> c, const std::string& args) {
+  return server_command_swset_swclear(c, args, true);
+}
+
+static void server_command_swclear(shared_ptr<Client> c, const std::string& args) {
+  return server_command_swset_swclear(c, args, false);
+}
+
+static void proxy_command_swset_swclear(shared_ptr<ProxyServer::LinkedSession> ses, const std::string& args, bool should_set) {
+  if (!ses->is_in_game) {
+    send_text_message(ses->client_channel, "$C6This command cannot\nbe used in the lobby");
+    return;
+  }
+
+  auto tokens = phosg::split(args, ' ');
+  uint8_t floor, flag_num;
+  if (tokens.size() == 1) {
+    floor = ses->floor;
+    flag_num = stoul(tokens[0], nullptr, 0);
+  } else if (tokens.size() == 2) {
+    floor = stoul(tokens[0], nullptr, 0);
+    flag_num = stoul(tokens[1], nullptr, 0);
+  } else {
+    send_text_message(ses->client_channel, "$C4Incorrect parameters");
+    return;
+  }
+
+  uint8_t cmd_flags = should_set ? 0x01 : 0x00;
+  G_SwitchStateChanged_6x05 cmd = {{0x05, 0x03, 0xFFFF}, 0, 0, flag_num, floor, cmd_flags};
+  ses->client_channel.send(0x60, 0x00, &cmd, sizeof(cmd));
+  ses->server_channel.send(0x60, 0x00, &cmd, sizeof(cmd));
+}
+
+static void proxy_command_swset(shared_ptr<ProxyServer::LinkedSession> ses, const std::string& args) {
+  return proxy_command_swset_swclear(ses, args, true);
+}
+
+static void proxy_command_swclear(shared_ptr<ProxyServer::LinkedSession> ses, const std::string& args) {
+  return proxy_command_swset_swclear(ses, args, false);
+}
+
+static void server_command_swsetall(shared_ptr<Client> c, const std::string&) {
+  check_debug_enabled(c);
+  auto l = c->require_lobby();
+  if (!l->is_game()) {
+    send_text_message(c, "$C6This command cannot\nbe used in the lobby");
+    return;
+  }
+
+  l->switch_flags->data[c->floor].clear(0xFF);
+
+  parray<G_SwitchStateChanged_6x05, 0x100> cmds;
+  for (size_t z = 0; z < cmds.size(); z++) {
+    auto& cmd = cmds[z];
+    cmd.header.subcommand = 0x05;
+    cmd.header.size = 0x03;
+    cmd.header.object_id = 0xFFFF;
+    cmd.switch_flag_floor = c->floor;
+    cmd.switch_flag_num = z;
+    cmd.flags = 0x01;
+  }
+  cmds[0].flags = 0x03; // Play room unlock sound
+  send_command_t(l, 0x6C, 0x00, cmds);
+}
+
+static void proxy_command_swsetall(shared_ptr<ProxyServer::LinkedSession> ses, const std::string&) {
+  if (!ses->is_in_game) {
+    send_text_message(ses->client_channel, "$C6This command cannot\nbe used in the lobby");
+    return;
+  }
+
+  parray<G_SwitchStateChanged_6x05, 0x100> cmds;
+  for (size_t z = 0; z < cmds.size(); z++) {
+    auto& cmd = cmds[z];
+    cmd.header.subcommand = 0x05;
+    cmd.header.size = 0x03;
+    cmd.header.object_id = 0xFFFF;
+    cmd.switch_flag_floor = ses->floor;
+    cmd.switch_flag_num = z;
+    cmd.flags = 0x01;
+  }
+  cmds[0].flags = 0x03; // Play room unlock sound
+  ses->client_channel.send(0x6C, 0x00, &cmds, sizeof(cmds));
+  ses->server_channel.send(0x6C, 0x00, &cmds, sizeof(cmds));
 }
 
 static void server_command_qset_qclear(shared_ptr<Client> c, const std::string& args, bool should_set) {
-  if (!c->config.check_flag(Client::Flag::DEBUG_ENABLED)) {
-    send_text_message(c, "$C6This command can only\nbe run in debug mode\n(run %sdebug first)");
-    return;
-  }
+  check_debug_enabled(c);
   auto l = c->require_lobby();
   if (!l->is_game()) {
     send_text_message(c, "$C6This command cannot\nbe used in the lobby");
@@ -326,10 +473,24 @@ static void server_command_qset_qclear(shared_ptr<Client> c, const std::string& 
 
   uint16_t flag_num = stoul(args, nullptr, 0);
 
-  if (should_set) {
-    c->character()->quest_flags.set(l->difficulty, flag_num);
-  } else {
-    c->character()->quest_flags.clear(l->difficulty, flag_num);
+  if (l->is_game()) {
+    if (l->quest_flags_known) {
+      l->quest_flags_known->set(l->difficulty, flag_num);
+    }
+    if (should_set) {
+      l->quest_flag_values->set(l->difficulty, flag_num);
+    } else {
+      l->quest_flag_values->clear(l->difficulty, flag_num);
+    }
+  }
+
+  auto p = c->character(false);
+  if (p) {
+    if (should_set) {
+      p->quest_flags.set(l->difficulty, flag_num);
+    } else {
+      p->quest_flags.clear(l->difficulty, flag_num);
+    }
   }
 
   if (is_v1_or_v2(c->version())) {
@@ -361,7 +522,7 @@ static void proxy_command_qset_qclear(shared_ptr<ProxyServer::LinkedSession> ses
     ses->client_channel.send(0x60, 0x00, &cmd, sizeof(cmd));
     ses->server_channel.send(0x60, 0x00, &cmd, sizeof(cmd));
   } else {
-    G_UpdateQuestFlag_V3_BB_6x75 cmd = {{{0x75, 0x03, 0x0000}, flag_num, should_set ? 0 : 1}, ses->difficulty, 0x0000};
+    G_UpdateQuestFlag_V3_BB_6x75 cmd = {{{0x75, 0x03, 0x0000}, flag_num, should_set ? 0 : 1}, ses->lobby_difficulty, 0x0000};
     ses->client_channel.send(0x60, 0x00, &cmd, sizeof(cmd));
     ses->server_channel.send(0x60, 0x00, &cmd, sizeof(cmd));
   }
@@ -375,24 +536,93 @@ static void proxy_command_qclear(shared_ptr<ProxyServer::LinkedSession> ses, con
   return proxy_command_qset_qclear(ses, args, false);
 }
 
-static void server_command_qsync_qsyncall(shared_ptr<Client> c, const std::string& args, bool send_to_lobby) {
-  if (!c->config.check_flag(Client::Flag::DEBUG_ENABLED)) {
-    send_text_message(c, "$C6This command can only\nbe run in debug mode\n(run %sdebug first)");
+static void server_command_qgread(shared_ptr<Client> c, const std::string& args) {
+  uint8_t flag_num = stoul(args, nullptr, 0);
+  const auto& flags = c->character()->quest_counters;
+  if (flag_num >= flags.size()) {
+    send_text_message_printf(c, "$C7Flag number must be\nless than %zu", flags.size());
+  } else {
+    send_text_message_printf(c, "$C7Quest counter %hhu\nhas value %" PRIu32, flag_num, flags[flag_num].load());
+  }
+}
+
+static void server_command_qfread(shared_ptr<Client> c, const std::string& args) {
+  auto s = c->require_server_state();
+
+  uint8_t counter_index;
+  uint32_t mask;
+  try {
+    const auto& def = s->quest_counter_fields.at(args);
+    counter_index = def.first;
+    mask = def.second;
+  } catch (const out_of_range&) {
+    send_text_message(c, "$C4Invalid field name");
     return;
   }
+  if (mask == 0) {
+    throw runtime_error("invalid quest counter definition");
+  }
+
+  uint32_t counter_value = c->character()->quest_counters.at(counter_index) & mask;
+
+  while (!(mask & 1)) {
+    mask >>= 1;
+    counter_value >>= 1;
+  }
+
+  if (mask == 1) {
+    send_text_message_printf(c, "$C7Field %s\nhas value %s", args.c_str(), counter_value ? "TRUE" : "FALSE");
+  } else {
+    send_text_message_printf(c, "$C7Field %s\nhas value %" PRIu32, args.c_str(), counter_value);
+  }
+}
+
+static void server_command_qgwrite(shared_ptr<Client> c, const std::string& args) {
+  if (c->version() != Version::BB_V4) {
+    send_text_message(c, "$C6This command can\nonly be used on BB");
+    return;
+  }
+  check_debug_enabled(c);
   auto l = c->require_lobby();
   if (!l->is_game()) {
     send_text_message(c, "$C6This command cannot\nbe used in the lobby");
     return;
   }
 
-  auto tokens = split(args, ' ');
+  auto tokens = phosg::split(args, ' ');
+  if (tokens.size() != 2) {
+    send_text_message(c, "$C6Incorrect number\nof arguments");
+    return;
+  }
+
+  uint8_t flag_num = stoul(tokens[0], nullptr, 0);
+  uint32_t value = stoul(tokens[1], nullptr, 0);
+  auto& flags = c->character()->quest_counters;
+  if (flag_num >= flags.size()) {
+    send_text_message_printf(c, "$C7Flag number must be\nless than %zu", flags.size());
+  } else {
+    c->character()->quest_counters[flag_num] = value;
+    G_SetQuestCounter_BB_6xD2 cmd = {{0xD2, sizeof(G_SetQuestCounter_BB_6xD2) / 4, c->lobby_client_id}, flag_num, value};
+    send_command_t(c, 0x60, 0x00, cmd);
+    send_text_message_printf(c, "$C7Quest counter %hhu\nset to %" PRIu32, flag_num, value);
+  }
+}
+
+static void server_command_qsync_qsyncall(shared_ptr<Client> c, const std::string& args, bool send_to_lobby) {
+  check_debug_enabled(c);
+  auto l = c->require_lobby();
+  if (!l->is_game()) {
+    send_text_message(c, "$C6This command cannot\nbe used in the lobby");
+    return;
+  }
+
+  auto tokens = phosg::split(args, ' ');
   if (tokens.size() != 2) {
     send_text_message(c, "$C6Incorrect number of\narguments");
     return;
   }
 
-  G_SyncQuestData_6x77 cmd;
+  G_SyncQuestRegister_6x77 cmd;
   cmd.header = {0x77, 0x03, 0x0000};
   cmd.register_number = stoul(tokens[0].substr(1), nullptr, 0);
   cmd.unused = 0;
@@ -425,13 +655,13 @@ static void proxy_command_qsync_qsyncall(shared_ptr<ProxyServer::LinkedSession> 
     return;
   }
 
-  auto tokens = split(args, ' ');
+  auto tokens = phosg::split(args, ' ');
   if (tokens.size() != 2) {
     send_text_message(ses->client_channel, "$C6Incorrect number of\narguments");
     return;
   }
 
-  G_SyncQuestData_6x77 cmd;
+  G_SyncQuestRegister_6x77 cmd;
   cmd.header = {0x77, 0x03, 0x0000};
   cmd.register_number = stoul(tokens[0].substr(1), nullptr, 0);
   cmd.unused = 0;
@@ -458,10 +688,7 @@ static void proxy_command_qsyncall(shared_ptr<ProxyServer::LinkedSession> ses, c
 }
 
 static void server_command_qcall(shared_ptr<Client> c, const std::string& args) {
-  if (!c->config.check_flag(Client::Flag::DEBUG_ENABLED)) {
-    send_text_message(c, "$C6This command can only\nbe run in debug mode\n(run %sdebug first)");
-    return;
-  }
+  check_debug_enabled(c);
 
   auto l = c->require_lobby();
   if (l->is_game() && l->quest) {
@@ -497,18 +724,47 @@ static void server_command_show_material_counts(shared_ptr<Client> c, const std:
   }
 }
 
+static void server_command_show_kill_count(shared_ptr<Client> c, const std::string&) {
+  auto p = c->character();
+  size_t item_index;
+  try {
+    item_index = p->inventory.find_equipped_item(EquipSlot::WEAPON);
+  } catch (const out_of_range&) {
+    send_text_message(c, "No weapon equipped");
+    return;
+  }
+
+  const auto& item = p->inventory.items.at(item_index);
+  if (!item.data.has_kill_count()) {
+    send_text_message(c, "Weapon does not\nhave a kill count");
+    return;
+  }
+
+  // Kill counts are only accurate on the server side at all times on BB. On
+  // other versions, we update the server's view of the client's inventory
+  // during games, but we can't track kills because the client doesn't inform
+  // the server whether it counted a kill for any individual enemy. So, on
+  // non-BB versions, the kill count is accurate at all times in the lobby
+  // (since kills can't occur there), or at the beginning of a game.
+  if ((c->version() == Version::BB_V4) || !c->require_lobby()->is_game()) {
+    send_text_message_printf(c, "%hu kills", item.data.get_kill_count());
+  } else {
+    send_text_message_printf(c, "%hu kills as of\ngame join", item.data.get_kill_count());
+  }
+}
+
 static void server_command_auction(shared_ptr<Client> c, const std::string&) {
-  check_license_flags(c, License::Flag::DEBUG);
+  check_account_flag(c, Account::Flag::DEBUG);
   auto l = c->require_lobby();
   if (l->is_game() && l->is_ep3()) {
-    G_InitiateCardAuction_GC_Ep3_6xB5x42 cmd;
+    G_InitiateCardAuction_Ep3_6xB5x42 cmd;
     cmd.header.sender_client_id = c->lobby_client_id;
     send_command_t(l, 0xC9, 0x00, cmd);
   }
 }
 
 static void proxy_command_auction(shared_ptr<ProxyServer::LinkedSession> ses, const std::string&) {
-  G_InitiateCardAuction_GC_Ep3_6xB5x42 cmd;
+  G_InitiateCardAuction_Ep3_6xB5x42 cmd;
   cmd.header.sender_client_id = ses->lobby_client_id;
   ses->client_channel.send(0xC9, 0x00, &cmd, sizeof(cmd));
   ses->server_channel.send(0xC9, 0x00, &cmd, sizeof(cmd));
@@ -524,8 +780,7 @@ static void server_command_patch(shared_ptr<Client> c, const std::string& args) 
       auto s = c->require_server_state();
       // Note: We can't look this up outside of the closure because
       // c->specific_version can change during prepare_client_for_patches
-      auto fn = s->function_code_index->name_and_specific_version_to_patch_function.at(
-          string_printf("%s-%08" PRIX32, args.c_str(), c->config.specific_version));
+      auto fn = s->function_code_index->get_patch(args, c->config.specific_version);
       send_function_call(c, fn);
       c->function_call_response_queue.emplace_back(empty_function_call_response_handler);
     } catch (const out_of_range&) {
@@ -544,8 +799,7 @@ static void proxy_command_patch(shared_ptr<ProxyServer::LinkedSession> ses, cons
         ses->log.info("Version detected as %08" PRIX32, ses->config.specific_version);
       }
       auto s = ses->require_server_state();
-      auto fn = s->function_code_index->name_and_specific_version_to_patch_function.at(
-          string_printf("%s-%08" PRIX32, args.c_str(), ses->config.specific_version));
+      auto fn = s->function_code_index->get_patch(args, ses->config.specific_version);
       send_function_call(ses->client_channel, ses->config, fn);
       // Don't forward the patch response to the server
       ses->function_call_return_handler_queue.emplace_back(empty_patch_return_handler);
@@ -555,13 +809,14 @@ static void proxy_command_patch(shared_ptr<ProxyServer::LinkedSession> ses, cons
   };
 
   auto send_version_detect_or_send_call = [args, ses, send_call]() {
-    if (is_gc(ses->version()) &&
-        ses->config.specific_version == default_specific_version_for_version(ses->version(), -1)) {
+    bool is_gc = ::is_gc(ses->version());
+    bool is_xb = (ses->version() == Version::XB_V3);
+    if ((is_gc || is_xb) && specific_version_is_indeterminate(ses->config.specific_version)) {
       auto s = ses->require_server_state();
       send_function_call(
           ses->client_channel,
           ses->config,
-          s->function_code_index->name_to_function.at("VersionDetect"));
+          s->function_code_index->name_to_function.at(is_xb ? "VersionDetectXB" : "VersionDetectGC"));
       ses->function_call_return_handler_queue.emplace_back(send_call);
     } else {
       send_call(ses->config.specific_version, 0);
@@ -590,7 +845,7 @@ static void server_command_persist(shared_ptr<Client> c, const std::string&) {
   auto l = c->require_lobby();
   if (l->check_flag(Lobby::Flag::DEFAULT)) {
     send_text_message(c, "$C6Default lobbies\ncannot be marked\ntemporary");
-  } else if (!l->check_flag(Lobby::Flag::GAME)) {
+  } else if (!l->is_game()) {
     send_text_message(c, "$C6Private lobbies\ncannot be marked\npersistent");
   } else if (l->check_flag(Lobby::Flag::QUEST_IN_PROGRESS) || l->check_flag(Lobby::Flag::JOINABLE_QUEST_IN_PROGRESS)) {
     send_text_message(c, "$C6Games cannot be\npersistent if a\nquest has already\nbegun");
@@ -609,6 +864,7 @@ static void server_command_exit(shared_ptr<Client> c, const std::string&) {
       G_UnusedHeader cmd = {0x73, 0x01, 0x0000};
       c->channel.send(0x60, 0x00, cmd);
       c->floor = 0;
+      c->recent_switch_flags.clear();
     } else if (is_ep3(c->version())) {
       c->channel.send(0xED, 0x00);
     } else {
@@ -668,21 +924,39 @@ static void proxy_command_get_player_card(shared_ptr<ProxyServer::LinkedSession>
 }
 
 static void server_command_send_client(shared_ptr<Client> c, const std::string& args) {
-  string data = parse_data_string(args);
+  check_debug_enabled(c);
+  string data = phosg::parse_data_string(args);
   data.resize((data.size() + 3) & (~3));
   c->channel.send(data);
 }
 
+static void server_command_send_server(shared_ptr<Client> c, const std::string& args) {
+  check_debug_enabled(c);
+  string data = phosg::parse_data_string(args);
+  data.resize((data.size() + 3) & (~3));
+  on_command_with_header(c, data);
+}
+
 static void proxy_command_send_client(shared_ptr<ProxyServer::LinkedSession> ses, const std::string& args) {
-  string data = parse_data_string(args);
+  string data = phosg::parse_data_string(args);
   data.resize((data.size() + 3) & (~3));
   ses->client_channel.send(data);
 }
 
 static void proxy_command_send_server(shared_ptr<ProxyServer::LinkedSession> ses, const std::string& args) {
-  string data = parse_data_string(args);
+  string data = phosg::parse_data_string(args);
   data.resize((data.size() + 3) & (~3));
   ses->server_channel.send(data);
+}
+
+static void server_command_send_both(shared_ptr<Client> c, const std::string& args) {
+  server_command_send_client(c, args);
+  server_command_send_server(c, args);
+}
+
+static void proxy_command_send_both(shared_ptr<ProxyServer::LinkedSession> ses, const std::string& args) {
+  proxy_command_send_client(ses, args);
+  proxy_command_send_server(ses, args);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -698,13 +972,21 @@ static void server_command_cheat(shared_ptr<Client> c, const std::string&) {
   } else {
     l->toggle_flag(Lobby::Flag::CHEATS_ENABLED);
     send_text_message_printf(l, "Cheat mode %s", l->check_flag(Lobby::Flag::CHEATS_ENABLED) ? "enabled" : "disabled");
+
+    if (!c->login->account->check_flag(Account::Flag::CHEAT_ANYWHERE)) {
+      size_t default_min_level = s->default_min_level_for_game(l->base_version, l->episode, l->difficulty);
+      if (l->min_level < default_min_level) {
+        l->min_level = default_min_level;
+        send_text_message_printf(l, "$C6Minimum level set\nto %" PRIu32, l->min_level + 1);
+      }
+    }
   }
 }
 
 static void server_command_lobby_event(shared_ptr<Client> c, const std::string& args) {
   auto l = c->require_lobby();
   check_is_game(l, false);
-  check_license_flags(c, License::Flag::CHANGE_EVENT);
+  check_account_flag(c, Account::Flag::CHANGE_EVENT);
 
   uint8_t new_event = event_for_name(args);
   if (new_event == 0xFF) {
@@ -733,7 +1015,7 @@ static void proxy_command_lobby_event(shared_ptr<ProxyServer::LinkedSession> ses
 }
 
 static void server_command_lobby_event_all(shared_ptr<Client> c, const std::string& args) {
-  check_license_flags(c, License::Flag::CHANGE_EVENT);
+  check_account_flag(c, Account::Flag::CHANGE_EVENT);
 
   uint8_t new_event = event_for_name(args);
   if (new_event == 0xFF) {
@@ -785,13 +1067,13 @@ static void proxy_command_lobby_type(shared_ptr<ProxyServer::LinkedSession> ses,
   ses->config.override_lobby_number = new_type;
 }
 
-static string file_path_for_recording(const std::string& args, uint32_t serial_number) {
+static string file_path_for_recording(const std::string& args, uint32_t account_id) {
   for (char ch : args) {
     if (ch <= 0x20 || ch > 0x7E || ch == '/') {
       throw runtime_error("invalid recording name");
     }
   }
-  return string_printf("system/ep3/battle-records/%010" PRIu32 "_%s.mzrd", serial_number, args.c_str());
+  return phosg::string_printf("system/ep3/battle-records/%010" PRIu32 "_%s.mzrd", account_id, args.c_str());
 }
 
 static void server_command_saverec(shared_ptr<Client> c, const std::string& args) {
@@ -799,9 +1081,9 @@ static void server_command_saverec(shared_ptr<Client> c, const std::string& args
     send_text_message(c, "$C4No finished\nrecording is\npresent");
     return;
   }
-  string file_path = file_path_for_recording(args, c->license->serial_number);
+  string file_path = file_path_for_recording(args, c->login->account->account_id);
   string data = c->ep3_prev_battle_record->serialize();
-  save_file(file_path, data);
+  phosg::save_file(file_path, data);
   send_text_message(c, "$C7Recording saved");
   c->ep3_prev_battle_record.reset();
 }
@@ -816,7 +1098,7 @@ static void server_command_playrec(shared_ptr<Client> c, const std::string& args
   if (l->is_game() && l->battle_player) {
     l->battle_player->start();
   } else if (!l->is_game()) {
-    string file_path = file_path_for_recording(args, c->license->serial_number);
+    string file_path = file_path_for_recording(args, c->login->account->account_id);
 
     auto s = c->require_server_state();
     string filename = args;
@@ -827,8 +1109,8 @@ static void server_command_playrec(shared_ptr<Client> c, const std::string& args
 
     string data;
     try {
-      data = load_file(file_path);
-    } catch (const cannot_open_file&) {
+      data = phosg::load_file(file_path);
+    } catch (const phosg::cannot_open_file&) {
       send_text_message(c, "$C4The recording does\nnot exist");
       return;
     }
@@ -842,6 +1124,7 @@ static void server_command_playrec(shared_ptr<Client> c, const std::string& args
       }
       s->change_client_lobby(c, game);
       c->config.set_flag(Client::Flag::LOADING);
+      c->log.info("LOADING flag set");
     }
   } else {
     send_text_message(c, "$C4This command cannot\nbe used in a game");
@@ -850,17 +1133,14 @@ static void server_command_playrec(shared_ptr<Client> c, const std::string& args
 
 static void server_command_meseta(shared_ptr<Client> c, const std::string& args) {
   check_is_ep3(c, true);
-  if (!c->config.check_flag(Client::Flag::DEBUG_ENABLED)) {
-    send_text_message(c, "$C6This command can only\nbe run in debug mode\n(run %sdebug first)");
-    return;
-  }
+  check_debug_enabled(c);
 
   uint32_t amount = stoul(args, nullptr, 0);
-  c->license->ep3_current_meseta += amount;
-  c->license->ep3_total_meseta_earned += amount;
-  c->license->save();
+  c->login->account->ep3_current_meseta += amount;
+  c->login->account->ep3_total_meseta_earned += amount;
+  c->login->account->save();
   send_ep3_rank_update(c);
-  send_text_message_printf(c, "You now have\n$C6%" PRIu32 "$C7 Meseta", c->license->ep3_current_meseta);
+  send_text_message_printf(c, "You now have\n$C6%" PRIu32 "$C7 Meseta", c->login->account->ep3_current_meseta);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -868,20 +1148,27 @@ static void server_command_meseta(shared_ptr<Client> c, const std::string& args)
 
 static void server_command_secid(shared_ptr<Client> c, const std::string& args) {
   auto l = c->require_lobby();
-  check_is_game(l, false);
   check_cheats_allowed(c->require_server_state(), c);
 
+  uint8_t new_override_section_id;
+
   if (!args[0]) {
-    c->config.override_section_id = 0xFF;
+    new_override_section_id = 0xFF;
     send_text_message(c, "$C6Override section ID\nremoved");
   } else {
-    uint8_t new_secid = section_id_for_name(args);
-    if (new_secid == 0xFF) {
+    new_override_section_id = section_id_for_name(args);
+    if (new_override_section_id == 0xFF) {
       send_text_message(c, "$C6Invalid section ID");
+      return;
     } else {
-      c->config.override_section_id = new_secid;
-      send_text_message_printf(c, "$C6Override section ID\nset to %s", name_for_section_id(new_secid));
+      send_text_message_printf(c, "$C6Override section ID\nset to %s", name_for_section_id(new_override_section_id));
     }
+  }
+
+  c->config.override_section_id = new_override_section_id;
+  if (l->is_game() && (l->leader_id == c->lobby_client_id)) {
+    l->override_section_id = new_override_section_id;
+    l->change_section_id();
   }
 }
 
@@ -898,6 +1185,22 @@ static void proxy_command_secid(shared_ptr<ProxyServer::LinkedSession> ses, cons
       ses->config.override_section_id = new_secid;
       send_text_message_printf(ses->client_channel, "$C6Override section ID\nset to %s", name_for_section_id(new_secid));
     }
+  }
+}
+
+static void server_command_variations(shared_ptr<Client> c, const std::string& args) {
+  // Note: This command is intentionally undocumented, since it's primarily used
+  // for testing. If we ever make it public, we should add some kind of user
+  // feedback (currently it sends no message when it runs).
+  auto s = c->require_server_state();
+  auto l = c->require_lobby();
+  check_is_game(l, false);
+  check_cheats_allowed(s, c);
+
+  c->override_variations = make_unique<parray<le_uint32_t, 0x20>>();
+  c->override_variations->clear(0);
+  for (size_t z = 0; z < min<size_t>(c->override_variations->size(), args.size()); z++) {
+    c->override_variations->at(z) = args[z] - '0';
   }
 }
 
@@ -937,7 +1240,7 @@ static void server_command_password(shared_ptr<Client> c, const std::string& arg
   check_is_leader(l, c);
 
   if (!args[0]) {
-    l->password[0] = 0;
+    l->password.clear();
     send_text_message(l, "$C6Game unlocked");
 
   } else {
@@ -985,7 +1288,20 @@ static void server_command_min_level(shared_ptr<Client> c, const std::string& ar
   check_is_game(l, true);
   check_is_leader(l, c);
 
-  l->min_level = stoull(args) - 1;
+  size_t new_min_level = stoull(args) - 1;
+
+  auto s = c->require_server_state();
+  bool cheats_allowed = (l->check_flag(Lobby::Flag::CHEATS_ENABLED) ||
+      c->login->account->check_flag(Account::Flag::CHEAT_ANYWHERE));
+  if (!cheats_allowed) {
+    size_t default_min_level = s->default_min_level_for_game(l->base_version, l->episode, l->difficulty);
+    if (new_min_level < default_min_level) {
+      send_text_message_printf(c, "$C6Cannot set minimum\nlevel below %zu", default_min_level + 1);
+      return;
+    }
+  }
+
+  l->min_level = new_min_level;
   send_text_message_printf(l, "$C6Minimum level set\nto %" PRIu32, l->min_level + 1);
 }
 
@@ -1017,43 +1333,94 @@ static void server_command_edit(shared_ptr<Client> c, const std::string& args) {
     throw precondition_failed("$C6This command cannot\nbe used for your\nversion of PSO.");
   }
 
-  if ((s->cheat_mode_behavior == ServerState::BehaviorSwitch::OFF) && !(c->license->flags & License::Flag::CHEAT_ANYWHERE)) {
-    send_text_message(l, "$C6Cheats are disabled\non this server");
-    return;
-  }
+  bool cheats_allowed = ((s->cheat_mode_behavior != ServerState::BehaviorSwitch::OFF) ||
+      c->login->account->check_flag(Account::Flag::CHEAT_ANYWHERE));
 
-  string encoded_args = tolower(args);
-  vector<string> tokens = split(encoded_args, ' ');
+  string encoded_args = phosg::tolower(args);
+  vector<string> tokens = phosg::split(encoded_args, ' ');
+
+  using MatType = PSOBBCharacterFile::MaterialType;
 
   try {
     auto p = c->character();
-    if (tokens.at(0) == "atp") {
+    if (tokens.at(0) == "atp" && cheats_allowed) {
       p->disp.stats.char_stats.atp = stoul(tokens.at(1));
-    } else if (tokens.at(0) == "mst") {
+    } else if (tokens.at(0) == "mst" && cheats_allowed) {
       p->disp.stats.char_stats.mst = stoul(tokens.at(1));
-    } else if (tokens.at(0) == "evp") {
+    } else if (tokens.at(0) == "evp" && cheats_allowed) {
       p->disp.stats.char_stats.evp = stoul(tokens.at(1));
-    } else if (tokens.at(0) == "hp") {
+    } else if (tokens.at(0) == "hp" && cheats_allowed) {
       p->disp.stats.char_stats.hp = stoul(tokens.at(1));
-    } else if (tokens.at(0) == "dfp") {
+    } else if (tokens.at(0) == "dfp" && cheats_allowed) {
       p->disp.stats.char_stats.dfp = stoul(tokens.at(1));
-    } else if (tokens.at(0) == "ata") {
+    } else if (tokens.at(0) == "ata" && cheats_allowed) {
       p->disp.stats.char_stats.ata = stoul(tokens.at(1));
-    } else if (tokens.at(0) == "lck") {
+    } else if (tokens.at(0) == "lck" && cheats_allowed) {
       p->disp.stats.char_stats.lck = stoul(tokens.at(1));
-    } else if (tokens.at(0) == "meseta") {
+    } else if (tokens.at(0) == "meseta" && cheats_allowed) {
       p->disp.stats.meseta = stoul(tokens.at(1));
-    } else if (tokens.at(0) == "exp") {
+    } else if (tokens.at(0) == "exp" && cheats_allowed) {
       p->disp.stats.experience = stoul(tokens.at(1));
-    } else if (tokens.at(0) == "level") {
-      uint32_t level = stoul(tokens.at(1)) - 1;
-      p->disp.stats.reset_to_base(p->disp.visual.char_class, s->level_table);
-      p->disp.stats.advance_to_level(p->disp.visual.char_class, level, s->level_table);
+    } else if (tokens.at(0) == "level" && cheats_allowed) {
+      p->disp.stats.level = stoul(tokens.at(1)) - 1;
+      p->recompute_stats(s->level_table(c->version()));
+    } else if (((tokens.at(0) == "material") || (tokens.at(0) == "mat")) && !is_v1_or_v2(c->version())) {
+      if (tokens.at(1) == "reset") {
+        const auto& which = tokens.at(2);
+        if (which == "power") {
+          p->set_material_usage(MatType::POWER, 0);
+        } else if (which == "mind") {
+          p->set_material_usage(MatType::MIND, 0);
+        } else if (which == "evade") {
+          p->set_material_usage(MatType::EVADE, 0);
+        } else if (which == "def") {
+          p->set_material_usage(MatType::DEF, 0);
+        } else if (which == "luck") {
+          p->set_material_usage(MatType::LUCK, 0);
+        } else if (which == "hp") {
+          p->set_material_usage(MatType::HP, 0);
+        } else if (which == "tp") {
+          p->set_material_usage(MatType::TP, 0);
+        } else if (which == "all") {
+          p->set_material_usage(MatType::POWER, 0);
+          p->set_material_usage(MatType::MIND, 0);
+          p->set_material_usage(MatType::EVADE, 0);
+          p->set_material_usage(MatType::DEF, 0);
+          p->set_material_usage(MatType::LUCK, 0);
+        } else if (which == "every") {
+          p->set_material_usage(MatType::POWER, 0);
+          p->set_material_usage(MatType::MIND, 0);
+          p->set_material_usage(MatType::EVADE, 0);
+          p->set_material_usage(MatType::DEF, 0);
+          p->set_material_usage(MatType::LUCK, 0);
+          p->set_material_usage(MatType::HP, 0);
+          p->set_material_usage(MatType::TP, 0);
+        } else {
+          send_text_message(c, "$C6Invalid subcommand");
+          return;
+        }
+      } else {
+        send_text_message(c, "$C6Invalid subcommand");
+        return;
+      }
+      p->recompute_stats(s->level_table(c->version()));
     } else if (tokens.at(0) == "namecolor") {
       uint32_t new_color;
       sscanf(tokens.at(1).c_str(), "%8X", &new_color);
       p->disp.visual.name_color = new_color;
-    } else if (tokens.at(0) == "secid") {
+    } else if (tokens.at(0) == "language" || tokens.at(0) == "lang") {
+      if (tokens.at(1).size() != 1) {
+        throw runtime_error("invalid language");
+      }
+      uint8_t new_language = language_code_for_char(tokens.at(1).at(0));
+      c->channel.language = new_language;
+      p->inventory.language = new_language;
+      p->guild_card.language = new_language;
+      auto sys = c->system_file(false);
+      if (sys) {
+        sys->base.language = new_language;
+      }
+    } else if (tokens.at(0) == "secid" && cheats_allowed) {
       uint8_t secid = section_id_for_name(tokens.at(1));
       if (secid == 0xFF) {
         send_text_message(c, "$C6No such section ID");
@@ -1062,24 +1429,56 @@ static void server_command_edit(shared_ptr<Client> c, const std::string& args) {
         p->disp.visual.section_id = secid;
       }
     } else if (tokens.at(0) == "name") {
-      vector<string> orig_tokens = split(args, ' ');
-      string name = ((p->inventory.language == 0) ? "\tE" : "\tJ") + orig_tokens.at(1);
-      p->disp.name.clear();
-      p->disp.name.encode(name, p->inventory.language);
+      vector<string> orig_tokens = phosg::split(args, ' ');
+      p->disp.name.encode(orig_tokens.at(1), p->inventory.language);
     } else if (tokens.at(0) == "npc") {
       if (tokens.at(1) == "none") {
         p->disp.visual.extra_model = 0;
         p->disp.visual.validation_flags &= 0xFD;
+        // Restore saved fields, if any
+        if (p->disp.visual.unused[0] == 0x8D) {
+          p->disp.visual.char_class = p->disp.visual.unused[1];
+          p->disp.visual.head = p->disp.visual.unused[2];
+          p->disp.visual.hair = p->disp.visual.unused[3];
+          p->disp.visual.unused.clear(0);
+        }
       } else {
         uint8_t npc = npc_for_name(tokens.at(1));
         if (npc == 0xFF) {
           send_text_message(c, "$C6No such NPC");
           return;
         }
+
+        // Some NPCs can crash the client if the character's class is
+        // incorrect. To handle this, we save the affected fields in the unused
+        // bytes after extra_model.
+        int8_t replacement_class = -1;
+        switch (npc) {
+          case 1: // Rico (replace with HUnewearl)
+          case 6: // Elly (replace with HUnewearl)
+            replacement_class = 0x01;
+            break;
+          case 0: // Ninja (replace with HUmar)
+          case 5: // Flowen (replace with HUmar)
+            replacement_class = 0x00;
+            break;
+        }
+        if (replacement_class >= 0) {
+          if (p->disp.visual.unused[0] != 0x8D) {
+            p->disp.visual.unused[0] = 0x8D;
+            p->disp.visual.unused[1] = p->disp.visual.char_class;
+            p->disp.visual.unused[2] = p->disp.visual.head;
+            p->disp.visual.unused[3] = p->disp.visual.hair;
+          }
+          p->disp.visual.char_class = replacement_class;
+          p->disp.visual.head = 0x00;
+          p->disp.visual.hair = 0x00;
+        }
+
         p->disp.visual.extra_model = npc;
         p->disp.visual.validation_flags |= 0x02;
       }
-    } else if (tokens.at(0) == "tech") {
+    } else if (tokens.at(0) == "tech" && cheats_allowed) {
       uint8_t level = stoul(tokens.at(2)) - 1;
       if (tokens.at(1) == "all") {
         for (size_t x = 0; x < 0x14; x++) {
@@ -1144,7 +1543,11 @@ static void server_command_change_bank(shared_ptr<Client> c, const std::string& 
     throw runtime_error("invalid bank number");
   }
 
-  const auto& bank = c->current_bank();
+  auto& bank = c->current_bank();
+  bank.assign_ids(0x99000000 + (c->lobby_client_id << 20));
+  c->log.info("Assigned bank item IDs");
+  c->print_bank(stderr);
+
   send_text_message_printf(c, "%" PRIu32 " items\n%" PRIu32 " Meseta", bank.num_items.load(), bank.meseta.load());
 }
 
@@ -1153,11 +1556,15 @@ static void server_command_bbchar_savechar(shared_ptr<Client> c, const std::stri
   auto l = c->require_lobby();
   check_is_game(l, false);
 
+  if (is_bb_conversion && is_ep3(c->version())) {
+    send_text_message(c, "$C6Episode 3 players\ncannot be converted\nto BB format");
+    return;
+  }
+
   auto pending_export = make_unique<Client::PendingCharacterExport>();
-  pending_export->is_bb_conversion = is_bb_conversion;
 
   if (is_bb_conversion) {
-    vector<string> tokens = split(args, ' ');
+    vector<string> tokens = phosg::split(args, ' ');
     if (tokens.size() != 3) {
       send_text_message(c, "$C6Incorrect argument count");
       return;
@@ -1171,7 +1578,9 @@ static void server_command_bbchar_savechar(shared_ptr<Client> c, const std::stri
     }
 
     try {
-      c->pending_character_export->license = s->license_index->verify_bb(tokens[0].c_str(), tokens[1].c_str());
+      auto dest_login = s->account_index->from_bb_credentials(tokens[0], &tokens[1], false);
+      pending_export->dest_account = dest_login->account;
+      pending_export->dest_bb_license = dest_login->bb_license;
     } catch (const exception& e) {
       send_text_message_printf(c, "$C6Login failed: %s", e.what());
       return;
@@ -1179,17 +1588,18 @@ static void server_command_bbchar_savechar(shared_ptr<Client> c, const std::stri
 
   } else {
     pending_export->character_index = stoll(args) - 1;
-    if ((pending_export->character_index > 3) || (pending_export->character_index < 0)) {
-      send_text_message(c, "$C6Player index must\nbe in range 1-4");
+    if ((pending_export->character_index > 15) || (pending_export->character_index < 0)) {
+      send_text_message(c, "$C6Player index must\nbe in range 1-16");
       return;
     }
-    pending_export->license = c->license;
+    pending_export->dest_account = c->login->account;
   }
 
   c->pending_character_export = std::move(pending_export);
-  // Request the player data. The client will respond with a 61, and the handler
-  // for that command will execute the conversion
-  send_get_player_info(c);
+
+  // Request the player data. The client will respond with a 61 or 30, and the
+  // handler for either of those commands will execute the conversion
+  send_get_player_info(c, true);
 }
 
 static void server_command_bbchar(shared_ptr<Client> c, const std::string& args) {
@@ -1197,27 +1607,115 @@ static void server_command_bbchar(shared_ptr<Client> c, const std::string& args)
 }
 
 static void server_command_savechar(shared_ptr<Client> c, const std::string& args) {
+  if (c->login->account->check_flag(Account::Flag::IS_SHARED_ACCOUNT)) {
+    send_text_message(c, "$C7This command cannot\nbe used on a shared\naccount");
+    return;
+  }
   server_command_bbchar_savechar(c, args, false);
 }
 
 static void server_command_loadchar(shared_ptr<Client> c, const std::string& args) {
-  if (!is_v1_or_v2(c->version())) {
-    send_text_message(c, "$C7This command can only\nbe used on v1 or v2");
+  if (c->login->account->check_flag(Account::Flag::IS_SHARED_ACCOUNT)) {
+    send_text_message(c, "$C7This command cannot\nbe used on a shared\naccount");
     return;
   }
   auto l = c->require_lobby();
   check_is_game(l, false);
 
   size_t index = stoull(args, nullptr, 0) - 1;
-  if (index > 3) {
-    send_text_message(c, "$C6Player index must\nbe in range 1-4");
+  if (index > 15) {
+    send_text_message(c, "$C6Player index must\nbe in range 1-16");
     return;
   }
-  c->load_backup_character(c->license->serial_number, index);
 
-  auto s = c->require_server_state();
-  send_player_leave_notification(l, c->lobby_client_id);
-  s->send_lobby_join_notifications(l, c);
+  shared_ptr<PSOGCEp3CharacterFile::Character> ep3_char;
+  if (is_ep3(c->version())) {
+    ep3_char = c->load_ep3_backup_character(c->login->account->account_id, index);
+  } else {
+    c->load_backup_character(c->login->account->account_id, index);
+  }
+
+  if (c->version() == Version::BB_V4) {
+    // On BB, it suffices to simply send the character file again
+    auto s = c->require_server_state();
+    send_complete_player_bb(c);
+    send_player_leave_notification(l, c->lobby_client_id);
+    s->send_lobby_join_notifications(l, c);
+
+  } else if ((c->version() == Version::DC_V2) ||
+      (c->version() == Version::GC_NTE) ||
+      (c->version() == Version::GC_V3) ||
+      (c->version() == Version::GC_EP3_NTE) ||
+      (c->version() == Version::GC_EP3) ||
+      (c->version() == Version::XB_V3)) {
+    // TODO: Support extended player info on other versions
+    auto s = c->require_server_state();
+    if (!c->config.check_flag(Client::Flag::HAS_SEND_FUNCTION_CALL) ||
+        c->config.check_flag(Client::Flag::SEND_FUNCTION_CALL_CHECKSUM_ONLY)) {
+      send_text_message_printf(c, "Can\'t load character\ndata on this game\nversion");
+      return;
+    }
+
+    auto send_set_extended_player_info = []<typename CharT>(shared_ptr<Client> c, shared_ptr<const CharT> char_file) -> void {
+      prepare_client_for_patches(c, [wc = weak_ptr<Client>(c), char_file]() {
+        auto c = wc.lock();
+        if (!c) {
+          return;
+        }
+        try {
+          auto s = c->require_server_state();
+          auto fn = s->function_code_index->get_patch("SetExtendedPlayerInfo", c->config.specific_version);
+          send_function_call(c, fn, {}, char_file.get(), sizeof(CharT));
+          c->function_call_response_queue.emplace_back([wc = weak_ptr<Client>(c)](uint32_t, uint32_t) -> void {
+            auto c = wc.lock();
+            if (!c) {
+              return;
+            }
+            auto l = c->lobby.lock();
+            if (l) {
+              auto s = c->require_server_state();
+              send_player_leave_notification(l, c->lobby_client_id);
+              s->send_lobby_join_notifications(l, c);
+            }
+          });
+        } catch (const exception& e) {
+          c->log.warning("Failed to set extended player info: %s", e.what());
+          send_text_message_printf(c, "Failed to set\nplayer info:\n%s", e.what());
+        }
+      });
+    };
+
+    if (c->version() == Version::DC_V2) {
+      auto dc_char = make_shared<PSODCV2CharacterFile>(c->character()->to_dc_v2());
+      send_set_extended_player_info.operator()<PSODCV2CharacterFile>(c, dc_char);
+    } else if (c->version() == Version::GC_NTE) {
+      auto gc_char = make_shared<PSOGCNTECharacterFileCharacter>(c->character()->to_gc_nte());
+      send_set_extended_player_info.operator()<PSOGCNTECharacterFileCharacter>(c, gc_char);
+    } else if (c->version() == Version::GC_V3) {
+      auto gc_char = make_shared<PSOGCCharacterFile::Character>(c->character()->to_gc());
+      send_set_extended_player_info.operator()<PSOGCCharacterFile::Character>(c, gc_char);
+    } else if (c->version() == Version::GC_EP3_NTE) {
+      auto nte_char = make_shared<PSOGCEp3NTECharacter>(*ep3_char);
+      send_set_extended_player_info.operator()<PSOGCEp3NTECharacter>(c, nte_char);
+    } else if (c->version() == Version::GC_EP3) {
+      send_set_extended_player_info.operator()<PSOGCEp3CharacterFile::Character>(c, ep3_char);
+    } else if (c->version() == Version::XB_V3) {
+      if (!c->login || !c->login->xb_license) {
+        throw runtime_error("XB client is not logged in");
+      }
+      auto xb_char = make_shared<PSOXBCharacterFileCharacter>(c->character()->to_xb(c->login->xb_license->user_id));
+      send_set_extended_player_info.operator()<PSOXBCharacterFileCharacter>(c, xb_char);
+    } else {
+      throw logic_error("unimplemented extended player info version");
+    }
+
+  } else {
+    // On v1 and v2, the client will assign its character data from the lobby
+    // join command, so it suffices to just resend the join notification.
+    auto s = c->require_server_state();
+    send_player_leave_notification(l, c->lobby_client_id);
+    s->send_lobby_join_notifications(l, c);
+  }
 }
 
 static void server_command_save(shared_ptr<Client> c, const std::string&) {
@@ -1240,8 +1738,8 @@ static string name_for_client(shared_ptr<Client> c) {
     return escape_player_name(player->disp.name.decode(player->inventory.language));
   }
 
-  if (c->license.get()) {
-    return string_printf("SN:%" PRIu32, c->license->serial_number);
+  if (c->login) {
+    return phosg::string_printf("SN:%" PRIu32, c->login->account->account_id);
   }
 
   return "Player";
@@ -1250,16 +1748,16 @@ static string name_for_client(shared_ptr<Client> c) {
 static void server_command_silence(shared_ptr<Client> c, const std::string& args) {
   auto s = c->require_server_state();
   auto l = c->require_lobby();
-  check_license_flags(c, License::Flag::SILENCE_USER);
+  check_account_flag(c, Account::Flag::SILENCE_USER);
 
   auto target = s->find_client(&args);
-  if (!target->license) {
+  if (!target->login) {
     // this should be impossible, but I'll bet it's not actually
     send_text_message(c, "$C6Client not logged in");
     return;
   }
 
-  if (target->license->flags & License::Flag::MODERATOR) {
+  if (target->login->account->check_flag(Account::Flag::SILENCE_USER)) {
     send_text_message(c, "$C6You do not have\nsufficient privileges.");
     return;
   }
@@ -1273,21 +1771,21 @@ static void server_command_silence(shared_ptr<Client> c, const std::string& args
 static void server_command_kick(shared_ptr<Client> c, const std::string& args) {
   auto s = c->require_server_state();
   auto l = c->require_lobby();
-  check_license_flags(c, License::Flag::KICK_USER);
+  check_account_flag(c, Account::Flag::KICK_USER);
 
   auto target = s->find_client(&args);
-  if (!target->license) {
+  if (!target->login) {
     // This should be impossible, but I'll bet it's not actually
     send_text_message(c, "$C6Client not logged in");
     return;
   }
 
-  if (target->license->flags & License::Flag::MODERATOR) {
+  if (target->login->account->check_flag(Account::Flag::KICK_USER)) {
     send_text_message(c, "$C6You do not have\nsufficient privileges.");
     return;
   }
 
-  send_message_box(target, "$C6You were kicked off by a moderator.");
+  send_message_box(target, "$C6You have been kicked off the server.");
   target->should_disconnect = true;
   string target_name = name_for_client(target);
   send_text_message_printf(l, "$C6%s kicked off", target_name.c_str());
@@ -1296,7 +1794,7 @@ static void server_command_kick(shared_ptr<Client> c, const std::string& args) {
 static void server_command_ban(shared_ptr<Client> c, const std::string& args) {
   auto s = c->require_server_state();
   auto l = c->require_lobby();
-  check_license_flags(c, License::Flag::BAN_USER);
+  check_account_flag(c, Account::Flag::BAN_USER);
 
   size_t space_pos = args.find(' ');
   if (space_pos == string::npos) {
@@ -1306,13 +1804,13 @@ static void server_command_ban(shared_ptr<Client> c, const std::string& args) {
 
   string identifier = args.substr(space_pos + 1);
   auto target = s->find_client(&identifier);
-  if (!target->license) {
+  if (!target->login) {
     // This should be impossible, but I'll bet it's not actually
     send_text_message(c, "$C6Client not logged in");
     return;
   }
 
-  if (target->license->flags & License::Flag::BAN_USER) {
+  if (target->login->account->check_flag(Account::Flag::BAN_USER)) {
     send_text_message(c, "$C6You do not have\nsufficient privileges.");
     return;
   }
@@ -1336,9 +1834,9 @@ static void server_command_ban(shared_ptr<Client> c, const std::string& args) {
     usecs *= 60 * 60 * 24 * 365;
   }
 
-  target->license->ban_end_time = now() + usecs;
-  target->license->save();
-  send_message_box(target, "$C6You were banned by a moderator.");
+  target->login->account->ban_end_time = phosg::now() + usecs;
+  target->login->account->save();
+  send_message_box(target, "$C6You have been banned.");
   target->should_disconnect = true;
   string target_name = name_for_client(target);
   send_text_message_printf(l, "$C6%s banned", target_name.c_str());
@@ -1351,18 +1849,34 @@ static void server_command_warp(shared_ptr<Client> c, const std::string& args, b
   auto s = c->require_server_state();
   auto l = c->require_lobby();
   check_is_game(l, true);
-  check_cheats_enabled(l, c);
 
   uint32_t floor = stoul(args, nullptr, 0);
   if (c->floor == floor) {
     return;
   }
 
+  // Special case: $warp[me] 0 is allowed in boss arenas if the boss is already
+  // defeated, even if cheats are disabled. This is because if a player returns
+  // to a boss arena after a persistence gap in the game, the exit warp won't
+  // exist, so they need a way to get out.
+  bool should_check_cheats = is_warpall || (floor != 0) || !floor_is_boss_arena(l->episode, c->floor);
+  if (!should_check_cheats) {
+    for (const auto* event : l->map->get_events(c->floor)) {
+      if (!(event->flags & 0x18)) {
+        should_check_cheats = true;
+        break;
+      }
+    }
+  }
+  if (should_check_cheats) {
+    check_cheats_enabled(l, c);
+  }
+
   size_t limit = floor_limit_for_episode(l->episode);
   if (limit == 0) {
     return;
   } else if (floor > limit) {
-    send_text_message_printf(c, "$C6Area numbers must\nbe %zu or less.", limit);
+    send_text_message_printf(c, "$C6Area numbers must\nbe %zu or less", limit);
     return;
   }
 
@@ -1430,7 +1944,16 @@ static void proxy_command_next(shared_ptr<ProxyServer::LinkedSession> ses, const
 }
 
 static void server_command_where(shared_ptr<Client> c, const std::string&) {
-  send_text_message_printf(c, "$C7Floor: %02" PRIX32 "\nX: %g\nZ: %g", c->floor, c->x, c->z);
+  auto l = c->require_lobby();
+  send_text_message_printf(c, "$C7%01" PRIX32 ":%s X:%" PRId32 " Z:%" PRId32,
+      c->floor, short_name_for_floor(l->episode, c->floor), static_cast<int32_t>(c->x), static_cast<int32_t>(c->z));
+  for (auto lc : l->clients) {
+    if (lc && (lc != c)) {
+      string name = lc->character()->disp.name.decode(lc->language());
+      send_text_message_printf(c, "$C6%s$C7 %01" PRIX32 ":%s",
+          name.c_str(), lc->floor, short_name_for_floor(l->episode, lc->floor));
+    }
+  }
 }
 
 static void server_command_what(shared_ptr<Client> c, const std::string&) {
@@ -1479,6 +2002,32 @@ static void proxy_command_song(shared_ptr<ProxyServer::LinkedSession> ses, const
     send_ep3_change_music(ses->server_channel, song);
   }
   send_ep3_change_music(ses->client_channel, song);
+}
+
+static void command_item_notifs(Channel& ch, Client::Config& config, const std::string& args) {
+  if (args == "every" || args == "everything") {
+    config.set_drop_notification_mode(Client::ItemDropNotificationMode::ALL_ITEMS_INCLUDING_MESETA);
+    send_text_message_printf(ch, "$C6Notifications enabled\nfor all items and\nMeseta");
+  } else if (args == "all" || args == "on") {
+    config.set_drop_notification_mode(Client::ItemDropNotificationMode::ALL_ITEMS);
+    send_text_message_printf(ch, "$C6Notifications enabled\nfor all items");
+  } else if (args == "rare" || args == "rares") {
+    config.set_drop_notification_mode(Client::ItemDropNotificationMode::RARES_ONLY);
+    send_text_message_printf(ch, "$C6Notifications enabled\nfor rare items only");
+  } else if (args == "none" || args == "off") {
+    config.set_drop_notification_mode(Client::ItemDropNotificationMode::NOTHING);
+    send_text_message_printf(ch, "$C6Notifications disabled\nfor all items");
+  } else {
+    send_text_message_printf(ch, "$C6You must specify\n$C6off$C7, $C6rare$C7, $C6on$C7, or\n$C6everything$C7");
+  }
+}
+
+static void server_command_item_notifs(shared_ptr<Client> c, const std::string& args) {
+  command_item_notifs(c->channel, c->config, args);
+}
+
+static void proxy_command_item_notifs(shared_ptr<ProxyServer::LinkedSession> ses, const std::string& args) {
+  command_item_notifs(ses->client_channel, ses->config, args);
 }
 
 static void server_command_infinite_hp(shared_ptr<Client> c, const std::string&) {
@@ -1608,13 +2157,58 @@ static void server_command_dropmode(shared_ptr<Client> c, const std::string& arg
   }
 }
 
+static void proxy_command_dropmode(shared_ptr<ProxyServer::LinkedSession> ses, const std::string& args) {
+  check_cheats_allowed(ses->require_server_state(), ses);
+
+  using DropMode = ProxyServer::LinkedSession::DropMode;
+  if (args.empty()) {
+    switch (ses->drop_mode) {
+      case DropMode::DISABLED:
+        send_text_message(ses->client_channel, "Drop mode: disabled");
+        break;
+      case DropMode::PASSTHROUGH:
+        send_text_message(ses->client_channel, "Drop mode: default");
+        break;
+      case DropMode::INTERCEPT:
+        send_text_message(ses->client_channel, "Drop mode: proxy");
+        break;
+    }
+
+  } else {
+    DropMode new_mode;
+    if ((args == "none") || (args == "disabled")) {
+      new_mode = DropMode::DISABLED;
+    } else if ((args == "default") || (args == "passthrough")) {
+      new_mode = DropMode::PASSTHROUGH;
+    } else if ((args == "proxy") || (args == "intercept")) {
+      new_mode = DropMode::INTERCEPT;
+    } else {
+      send_text_message(ses->client_channel, "Invalid drop mode");
+      return;
+    }
+
+    ses->set_drop_mode(new_mode);
+    switch (ses->drop_mode) {
+      case DropMode::DISABLED:
+        send_text_message(ses->client_channel, "Item drops disabled");
+        break;
+      case DropMode::PASSTHROUGH:
+        send_text_message(ses->client_channel, "Item drops changed\nto default mode");
+        break;
+      case DropMode::INTERCEPT:
+        send_text_message(ses->client_channel, "Item drops changed\nto proxy mode");
+        break;
+    }
+  }
+}
+
 static void server_command_item(shared_ptr<Client> c, const std::string& args) {
   auto s = c->require_server_state();
   auto l = c->require_lobby();
   check_is_game(l, true);
   check_cheats_enabled(l, c);
 
-  ItemData item = s->item_name_index->parse_item_description(c->version(), args);
+  ItemData item = s->parse_item_description(c->version(), args);
   item.id = l->generate_item_id(c->lobby_client_id);
 
   if ((l->drop_mode == Lobby::DropMode::SERVER_PRIVATE) || (l->drop_mode == Lobby::DropMode::SERVER_DUPLICATE)) {
@@ -1647,8 +2241,8 @@ static void proxy_command_item(shared_ptr<ProxyServer::LinkedSession> ses, const
 
   bool set_drop = (!args.empty() && (args[0] == '!'));
 
-  ItemData item = s->item_name_index->parse_item_description(ses->version(), (set_drop ? args.substr(1) : args));
-  item.id = random_object<uint32_t>() | 0x80000000;
+  ItemData item = s->parse_item_description(ses->version(), (set_drop ? args.substr(1) : args));
+  item.id = phosg::random_object<uint32_t>() | 0x80000000;
 
   if (set_drop) {
     ses->next_drop_item = item;
@@ -1666,10 +2260,7 @@ static void proxy_command_item(shared_ptr<ProxyServer::LinkedSession> ses, const
 }
 
 static void server_command_enable_ep3_battle_debug_menu(shared_ptr<Client> c, const std::string& args) {
-  if (!c->config.check_flag(Client::Flag::DEBUG_ENABLED)) {
-    send_text_message(c, "$C6This command can only\nbe run in debug mode\n(run %sdebug first)");
-    return;
-  }
+  check_debug_enabled(c);
 
   auto l = c->require_lobby();
   check_is_game(l, true);
@@ -1717,7 +2308,7 @@ static void server_command_ep3_infinite_time(shared_ptr<Client> c, const std::st
   send_text_message(l, infinite_time_enabled ? "$C6Infinite time enabled" : "$C6Infinite time disabled");
 }
 
-static void server_command_ep3_set_def_dice_range(shared_ptr<Client> c, const std::string& args) {
+static void server_command_ep3_set_dice_range(shared_ptr<Client> c, const std::string& args) {
   auto l = c->require_lobby();
   check_is_game(l, true);
   check_is_ep3(c, true);
@@ -1734,35 +2325,117 @@ static void server_command_ep3_set_def_dice_range(shared_ptr<Client> c, const st
     send_text_message(c, "$C6Battle is already\nin progress");
     return;
   }
-
-  if (args.empty()) {
-    l->ep3_server->map_and_rules->rules.def_dice_range = 0;
-    send_text_message_printf(l, "$C6DEF dice range\nset to default");
-  } else {
-    uint8_t min_dice, max_dice;
-    auto tokens = split(args, '-');
-    if (tokens.size() == 1) {
-      min_dice = stoul(tokens[0]);
-      max_dice = min_dice;
-    } else if (tokens.size() == 2) {
-      min_dice = stoul(tokens[0]);
-      max_dice = stoul(tokens[1]);
-    } else {
-      send_text_message(c, "$C6Specify DEF dice\nrange as MIN-MAX");
-      return;
-    }
-    if (min_dice == 0 || min_dice > 9 || max_dice == 0 || max_dice > 9) {
-      send_text_message(c, "$C6DEF dice must be\nin range 1-9");
-      return;
-    }
-    if (min_dice > max_dice) {
-      uint8_t t = min_dice;
-      min_dice = max_dice;
-      max_dice = t;
-    }
-    l->ep3_server->map_and_rules->rules.def_dice_range = ((min_dice << 4) & 0xF0) | (max_dice & 0x0F);
-    send_text_message_printf(l, "$C6DEF dice range\nset to %hhu-%hhu", min_dice, max_dice);
+  if (l->tournament_match) {
+    send_text_message(c, "$C6Cannot override\ndice ranges in a\ntournament");
+    return;
   }
+
+  auto parse_dice_range = +[](const string& spec) -> uint8_t {
+    auto tokens = phosg::split(spec, '-');
+    if (tokens.size() == 1) {
+      uint8_t v = stoull(spec);
+      return (v << 4) | (v & 0x0F);
+    } else if (tokens.size() == 2) {
+      return (stoull(tokens[0]) << 4) | (stoull(tokens[1]) & 0x0F);
+    } else {
+      throw runtime_error("invalid dice spec format");
+    }
+  };
+
+  uint8_t def_dice_range = 0;
+  uint8_t atk_dice_range_2v1 = 0;
+  uint8_t def_dice_range_2v1 = 0;
+  for (const auto& spec : phosg::split(args, ' ')) {
+    auto tokens = phosg::split(spec, ':');
+    if (tokens.size() != 2) {
+      send_text_message(c, "$C6Invalid dice spec\nformat");
+      return;
+    }
+    if (tokens[0] == "d") {
+      def_dice_range = parse_dice_range(tokens[1]);
+    } else if (tokens[0] == "1") {
+      atk_dice_range_2v1 = parse_dice_range(tokens[1]);
+      def_dice_range_2v1 = atk_dice_range_2v1;
+    } else if (tokens[0] == "a1") {
+      atk_dice_range_2v1 = parse_dice_range(tokens[1]);
+    } else if (tokens[0] == "d1") {
+      def_dice_range_2v1 = parse_dice_range(tokens[1]);
+    }
+  }
+
+  l->ep3_server->def_dice_value_range_override = def_dice_range;
+  l->ep3_server->atk_dice_value_range_2v1_override = atk_dice_range_2v1;
+  l->ep3_server->def_dice_value_range_2v1_override = def_dice_range_2v1;
+
+  if (!def_dice_range && !atk_dice_range_2v1 && !def_dice_range_2v1) {
+    send_text_message_printf(l, "$C7Dice ranges reset\nto defaults");
+  } else {
+    send_text_message_printf(l, "$C7Dice ranges changed:");
+    if (def_dice_range) {
+      send_text_message_printf(l, "$C7DEF: $C6%hhu-%hhu",
+          static_cast<uint8_t>(def_dice_range >> 4), static_cast<uint8_t>(def_dice_range & 0x0F));
+    }
+    if (atk_dice_range_2v1) {
+      send_text_message_printf(l, "$C7ATK (1p in 2v1): $C6%hhu-%hhu",
+          static_cast<uint8_t>(atk_dice_range_2v1 >> 4), static_cast<uint8_t>(atk_dice_range_2v1 & 0x0F));
+    }
+    if (def_dice_range_2v1) {
+      send_text_message_printf(l, "$C7DEF (1p in 2v1): $C6%hhu-%hhu",
+          static_cast<uint8_t>(def_dice_range_2v1 >> 4), static_cast<uint8_t>(def_dice_range_2v1 & 0x0F));
+    }
+  }
+}
+
+static void server_command_ep3_replace_assist_card(shared_ptr<Client> c, const std::string& args) {
+  auto s = c->require_server_state();
+  auto l = c->require_lobby();
+  check_is_game(l, true);
+  check_is_ep3(c, true);
+  check_cheats_enabled(l, c);
+
+  if (l->episode != Episode::EP3) {
+    throw logic_error("non-Ep3 client in Ep3 game");
+  }
+  if (!l->ep3_server) {
+    send_text_message(c, "$C6Episode 3 server\nis not initialized");
+    return;
+  }
+  if (l->ep3_server->setup_phase != Episode3::SetupPhase::MAIN_BATTLE) {
+    send_text_message(c, "$C6Battle has not\nyet begun");
+    return;
+  }
+  if (args.empty()) {
+    send_text_message(c, "$C6Missing arguments");
+    return;
+  }
+
+  size_t client_id;
+  string card_name;
+  if (isdigit(args[0])) {
+    auto tokens = phosg::split(args, ' ', 1);
+    client_id = stoul(tokens.at(0), nullptr, 0) - 1;
+    card_name = tokens.at(1);
+  } else {
+    client_id = c->lobby_client_id;
+    card_name = args;
+  }
+  if (client_id >= 4) {
+    send_text_message(c, "$C6Invalid client ID");
+    return;
+  }
+
+  shared_ptr<const Episode3::CardIndex::CardEntry> ce;
+  try {
+    ce = l->ep3_server->options.card_index->definition_for_name_normalized(card_name);
+  } catch (const out_of_range&) {
+    send_text_message(c, "$C6Card not found");
+    return;
+  }
+  if (ce->def.type != Episode3::CardType::ASSIST) {
+    send_text_message(c, "$C6Card is not an\nAssist card");
+    return;
+  }
+  l->ep3_server->force_replace_assist_card(client_id, ce->def.card_id);
 }
 
 static void server_command_ep3_unset_field_character(shared_ptr<Client> c, const std::string& args) {
@@ -1826,10 +2499,7 @@ static void server_command_get_ep3_battle_stat(shared_ptr<Client> c, const std::
     send_text_message(c, "$C6Battle has not\nyet started");
     return;
   }
-  if (c->lobby_client_id >= 4) {
-    throw logic_error("client ID is too large");
-  }
-  auto ps = l->ep3_server->player_states[c->lobby_client_id];
+  auto ps = l->ep3_server->player_states.at(c->lobby_client_id);
   if (!ps) {
     send_text_message(c, "$C6Player is missing");
     return;
@@ -1845,7 +2515,7 @@ static void server_command_get_ep3_battle_stat(shared_ptr<Client> c, const std::
     const char* rank_name = ps->stats.name_for_rank(rank);
     send_text_message_printf(c, "$C7Score: %g\nRank: %hhu (%s)", score, rank, rank_name);
   } else if (args == "duration") {
-    string s = format_duration(now() - l->ep3_server->battle_start_usecs);
+    string s = phosg::format_duration(phosg::now() - l->ep3_server->battle_start_usecs);
     send_text_message_printf(c, "$C7Duration: %s", s.c_str());
   } else if (args == "fcs-destroyed") {
     send_text_message_printf(c, "$C7Team FCs destroyed:\n%" PRIu32, l->ep3_server->team_num_ally_fcs_destroyed[team_id]);
@@ -1906,6 +2576,7 @@ struct ChatCommandDefinition {
 static const unordered_map<string, ChatCommandDefinition> chat_commands({
     {"$allevent", {server_command_lobby_event_all, nullptr}},
     {"$ann", {server_command_announce, nullptr}},
+    {"$ann!", {server_command_announce_mail, nullptr}},
     {"$arrow", {server_command_arrow, proxy_command_arrow}},
     {"$auction", {server_command_auction, proxy_command_auction}},
     {"$ax", {server_command_ax, nullptr}},
@@ -1914,8 +2585,8 @@ static const unordered_map<string, ChatCommandDefinition> chat_commands({
     {"$bbchar", {server_command_bbchar, nullptr}},
     {"$cheat", {server_command_cheat, nullptr}},
     {"$debug", {server_command_debug, nullptr}},
-    {"$defrange", {server_command_ep3_set_def_dice_range, nullptr}},
-    {"$dropmode", {server_command_dropmode, nullptr}},
+    {"$dicerange", {server_command_ep3_set_dice_range, nullptr}},
+    {"$dropmode", {server_command_dropmode, proxy_command_dropmode}},
     {"$edit", {server_command_edit, nullptr}},
     {"$ep3battledebug", {server_command_enable_ep3_battle_debug_menu, nullptr}},
     {"$event", {server_command_lobby_event, proxy_command_lobby_event}},
@@ -1925,8 +2596,10 @@ static const unordered_map<string, ChatCommandDefinition> chat_commands({
     {"$inftime", {server_command_ep3_infinite_time, nullptr}},
     {"$inftp", {server_command_infinite_tp, proxy_command_infinite_tp}},
     {"$item", {server_command_item, proxy_command_item}},
+    {"$itemnotifs", {server_command_item_notifs, proxy_command_item_notifs}},
     {"$i", {server_command_item, proxy_command_item}},
     {"$kick", {server_command_kick, nullptr}},
+    {"$killcount", {server_command_show_kill_count, nullptr}},
     {"$li", {server_command_lobby_info, proxy_command_lobby_info}},
     {"$ln", {server_command_lobby_type, proxy_command_lobby_type}},
     {"$loadchar", {server_command_loadchar, nullptr}},
@@ -1943,6 +2616,9 @@ static const unordered_map<string, ChatCommandDefinition> chat_commands({
     {"$qcall", {server_command_qcall, proxy_command_qcall}},
     {"$qcheck", {server_command_qcheck, nullptr}},
     {"$qclear", {server_command_qclear, proxy_command_qclear}},
+    {"$qfread", {server_command_qfread, nullptr}},
+    {"$qgread", {server_command_qgread, nullptr}},
+    {"$qgwrite", {server_command_qgwrite, nullptr}},
     {"$qset", {server_command_qset, proxy_command_qset}},
     {"$qsync", {server_command_qsync, proxy_command_qsync}},
     {"$qsyncall", {server_command_qsyncall, proxy_command_qsyncall}},
@@ -1951,17 +2627,23 @@ static const unordered_map<string, ChatCommandDefinition> chat_commands({
     {"$save", {server_command_save, nullptr}},
     {"$savechar", {server_command_savechar, nullptr}},
     {"$saverec", {server_command_saverec, nullptr}},
+    {"$sb", {server_command_send_both, proxy_command_send_both}},
     {"$sc", {server_command_send_client, proxy_command_send_client}},
     {"$secid", {server_command_secid, proxy_command_secid}},
+    {"$setassist", {server_command_ep3_replace_assist_card, nullptr}},
     {"$si", {server_command_server_info, nullptr}},
     {"$silence", {server_command_silence, nullptr}},
     {"$song", {server_command_song, proxy_command_song}},
     {"$spec", {server_command_toggle_spectator_flag, nullptr}},
-    {"$ss", {nullptr, proxy_command_send_server}},
+    {"$ss", {server_command_send_server, proxy_command_send_server}},
     {"$stat", {server_command_get_ep3_battle_stat, nullptr}},
     {"$surrender", {server_command_surrender, nullptr}},
     {"$swa", {server_command_switch_assist, proxy_command_switch_assist}},
+    {"$swclear", {server_command_swclear, proxy_command_swclear}},
+    {"$swset", {server_command_swset, proxy_command_swset}},
+    {"$swsetall", {server_command_swsetall, proxy_command_swsetall}},
     {"$unset", {server_command_ep3_unset_field_character, nullptr}},
+    {"$variations", {server_command_variations, nullptr}},
     {"$warp", {server_command_warpme, proxy_command_warpme}},
     {"$warpme", {server_command_warpme, proxy_command_warpme}},
     {"$warpall", {server_command_warpall, proxy_command_warpall}},

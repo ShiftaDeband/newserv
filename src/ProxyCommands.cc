@@ -24,6 +24,8 @@
 #include <phosg/Time.hh>
 #ifdef HAVE_RESOURCE_FILE
 #include <resource_file/Emulators/PPC32Emulator.hh>
+#include <resource_file/Emulators/SH4Emulator.hh>
+#include <resource_file/Emulators/X86Emulator.hh>
 #endif
 
 #include "ChatCommands.hh"
@@ -75,18 +77,6 @@ static void forward_command(shared_ptr<ProxyServer::LinkedSession> ses, bool to_
   }
 }
 
-static void check_implemented_subcommand(
-    shared_ptr<ProxyServer::LinkedSession> ses, const string& data) {
-  if (data.size() < 4) {
-    ses->log.warning("Received broadcast/target command with no contents");
-  } else {
-    if (!subcommand_is_implemented(data[0])) {
-      ses->log.warning("Received subcommand %02hhX which is not implemented on the server",
-          data[0]);
-    }
-  }
-}
-
 // Command handlers. These are called to preprocess or react to specific
 // commands in either direction. The functions have abbreviated names in order
 // to make the massive table more readable. The functions' names are, in
@@ -105,8 +95,8 @@ static HandlerResult default_handler(shared_ptr<ProxyServer::LinkedSession>, uin
 static HandlerResult S_invalid(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t command, uint32_t flag, string&) {
   ses->log.error("Server sent invalid command");
   string error_str = is_v4(ses->version())
-      ? string_printf("Server sent invalid\ncommand: %04hX %08" PRIX32, command, flag)
-      : string_printf("Server sent invalid\ncommand: %02hX %02" PRIX32, command, flag);
+      ? phosg::string_printf("Server sent invalid\ncommand: %04hX %08" PRIX32, command, flag)
+      : phosg::string_printf("Server sent invalid\ncommand: %02hX %02" PRIX32, command, flag);
   ses->send_to_game_server(error_str.c_str());
   return HandlerResult::Type::SUPPRESS;
 }
@@ -120,7 +110,7 @@ static HandlerResult C_05(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
 
 static HandlerResult C_1D(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string&) {
   if (ses->client_ping_start_time) {
-    uint64_t ping_usecs = now() - ses->client_ping_start_time;
+    uint64_t ping_usecs = phosg::now() - ses->client_ping_start_time;
     ses->client_ping_start_time = 0;
     double ping_ms = static_cast<double>(ping_usecs) / 1000.0;
     send_text_message_printf(ses->client_channel, "To proxy: %gms", ping_ms);
@@ -147,13 +137,13 @@ static HandlerResult S_97(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
 }
 
 static HandlerResult C_G_9E(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string&) {
-  if (ses->config.check_flag(Client::Flag::PROXY_SUPPRESS_REMOTE_LOGIN)) {
-    le_uint64_t checksum = random_object<uint64_t>() & 0x0000FFFFFFFFFFFF;
+  if (ses->config.check_flag(Client::Flag::PROXY_SUPPRESS_REMOTE_LOGIN) && ses->login) {
+    le_uint64_t checksum = phosg::random_object<uint64_t>() & 0x0000FFFFFFFFFFFF;
     ses->server_channel.send(0x96, 0x00, &checksum, sizeof(checksum));
 
     S_UpdateClientConfig_V3_04 cmd;
     cmd.player_tag = 0x00010000;
-    cmd.guild_card_number = ses->license->serial_number;
+    cmd.guild_card_number = ses->login->account->account_id;
     cmd.client_config.clear(0xFF);
     ses->client_channel.send(0x04, 0x00, &cmd, sizeof(cmd));
 
@@ -165,7 +155,7 @@ static HandlerResult C_G_9E(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t
 }
 
 static HandlerResult S_G_9A(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string&) {
-  if (!ses->license || ses->config.check_flag(Client::Flag::PROXY_SUPPRESS_REMOTE_LOGIN)) {
+  if (ses->config.check_flag(Client::Flag::PROXY_SUPPRESS_REMOTE_LOGIN) || !ses->login || !ses->login->gc_license) {
     return HandlerResult::Type::FORWARD;
   }
 
@@ -179,11 +169,11 @@ static HandlerResult S_G_9A(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t
   }
   cmd.unused1 = 0;
   cmd.unused2 = 0;
-  cmd.sub_version = ses->sub_version;
+  cmd.sub_version = ses->effective_sub_version();
   cmd.is_extended = (ses->remote_guild_card_number < 0) ? 1 : 0;
   cmd.language = ses->language();
-  cmd.serial_number.encode(string_printf("%08" PRIX32 "", ses->license->serial_number));
-  cmd.access_key.encode(ses->license->access_key);
+  cmd.serial_number.encode(phosg::string_printf("%08" PRIX32 "", ses->login->account->account_id));
+  cmd.access_key.encode(ses->login->gc_license->access_key);
   cmd.serial_number2 = cmd.serial_number;
   cmd.access_key2 = cmd.access_key;
   if (ses->config.check_flag(Client::Flag::PROXY_BLANK_NAME_ENABLED)) {
@@ -215,8 +205,8 @@ static HandlerResult S_V123P_02_17(
   // after_message than newserv does, so don't require it
   const auto& cmd = check_size_t<S_ServerInitDefault_DC_PC_V3_02_17_91_9B>(data, 0xFFFF);
 
-  if (!ses->license) {
-    ses->log.info("No license in linked session");
+  if (!ses->login) {
+    ses->log.info("Linked session is not logged in");
 
     // We have to forward the command BEFORE setting up encryption, so the
     // client will be able to understand what we sent.
@@ -237,7 +227,7 @@ static HandlerResult S_V123P_02_17(
     return HandlerResult::Type::SUPPRESS;
   }
 
-  ses->log.info("Existing license in linked session");
+  ses->log.info("Linked session is logged in");
 
   // This isn't forwarded to the client, so don't recreate the client's crypts
   if (uses_v3_encryption(ses->version())) {
@@ -264,10 +254,13 @@ static HandlerResult S_V123P_02_17(
 
     case Version::DC_V1_11_2000_PROTOTYPE:
     case Version::DC_V1:
+      if (!ses->login->dc_license) {
+        throw runtime_error("DC license missing from login");
+      }
       if (command == 0x17) {
         C_LoginV1_DC_PC_V3_90 cmd;
-        cmd.serial_number.encode(string_printf("%08" PRIX32 "", ses->license->serial_number));
-        cmd.access_key.encode(ses->license->access_key);
+        cmd.serial_number.encode(phosg::string_printf("%08" PRIX32 "", ses->login->account->account_id));
+        cmd.access_key.encode(ses->login->dc_license->access_key);
         cmd.access_key.clear_after_bytes(8);
         ses->server_channel.send(0x90, 0x00, &cmd, sizeof(cmd));
         return HandlerResult::Type::SUPPRESS;
@@ -282,11 +275,11 @@ static HandlerResult S_V123P_02_17(
         }
         cmd.unknown_a1 = 0;
         cmd.unknown_a2 = 0;
-        cmd.sub_version = ses->sub_version;
+        cmd.sub_version = ses->effective_sub_version();
         cmd.is_extended = 0;
         cmd.language = ses->language();
-        cmd.serial_number.encode(string_printf("%08" PRIX32 "", ses->license->serial_number));
-        cmd.access_key.encode(ses->license->access_key);
+        cmd.serial_number.encode(phosg::string_printf("%08" PRIX32 "", ses->login->account->account_id));
+        cmd.access_key.encode(ses->login->dc_license->access_key);
         cmd.access_key.clear_after_bytes(8);
         cmd.hardware_id.encode(ses->hardware_id);
         cmd.name.encode(ses->character_name);
@@ -299,6 +292,18 @@ static HandlerResult S_V123P_02_17(
     case Version::PC_NTE:
     case Version::PC_V2:
     case Version::GC_NTE:
+      const string* access_key;
+      if (ses->version() == Version::DC_V2) {
+        access_key = ses->login->dc_license ? &ses->login->dc_license->access_key : nullptr;
+      } else if (ses->version() != Version::GC_NTE) {
+        access_key = ses->login->pc_license ? &ses->login->pc_license->access_key : nullptr;
+      } else {
+        access_key = ses->login->gc_license ? &ses->login->gc_license->access_key : nullptr;
+      }
+      if (!access_key) {
+        throw runtime_error("incorrect login type");
+      }
+
       if (command == 0x17) {
         C_Login_DC_PC_V3_9A cmd;
         if (ses->remote_guild_card_number < 0) {
@@ -308,9 +313,9 @@ static HandlerResult S_V123P_02_17(
           cmd.player_tag = 0x00010000;
           cmd.guild_card_number = ses->remote_guild_card_number;
         }
-        cmd.sub_version = ses->sub_version;
-        cmd.serial_number.encode(string_printf("%08" PRIX32 "", ses->license->serial_number));
-        cmd.access_key.encode(ses->license->access_key);
+        cmd.sub_version = ses->effective_sub_version();
+        cmd.serial_number.encode(phosg::string_printf("%08" PRIX32 "", ses->login->account->account_id));
+        cmd.access_key.encode(*access_key);
         if (ses->version() != Version::GC_NTE) {
           cmd.access_key.clear_after_bytes(8);
         }
@@ -318,7 +323,7 @@ static HandlerResult S_V123P_02_17(
         cmd.access_key2 = cmd.access_key;
         // TODO: We probably should set email_address, but we currently don't
         // keep that value anywhere in the session object, nor is it saved in
-        // the License object.
+        // the Account object.
         ses->server_channel.send(0x9A, 0x00, &cmd, sizeof(cmd));
         return HandlerResult::Type::SUPPRESS;
       } else {
@@ -332,11 +337,11 @@ static HandlerResult S_V123P_02_17(
         }
         cmd.unused1 = 0;
         cmd.unused2 = 0;
-        cmd.sub_version = ses->sub_version;
+        cmd.sub_version = ses->effective_sub_version();
         cmd.is_extended = 0;
         cmd.language = ses->language();
-        cmd.serial_number.encode(string_printf("%08" PRIX32 "", ses->license->serial_number));
-        cmd.access_key.encode(ses->license->access_key);
+        cmd.serial_number.encode(phosg::string_printf("%08" PRIX32 "", ses->login->account->account_id));
+        cmd.access_key.encode(*access_key);
         if (ses->version() != Version::GC_NTE) {
           cmd.access_key.clear_after_bytes(8);
         }
@@ -355,14 +360,17 @@ static HandlerResult S_V123P_02_17(
     case Version::GC_V3:
     case Version::GC_EP3_NTE:
     case Version::GC_EP3:
+      if (!ses->login->gc_license) {
+        throw runtime_error("GC license missing from login");
+      }
       if (command == 0x17) {
-        C_VerifyLicense_V3_DB cmd;
-        cmd.serial_number.encode(string_printf("%08" PRIX32 "", ses->license->serial_number));
-        cmd.access_key.encode(ses->license->access_key);
-        cmd.sub_version = ses->sub_version;
+        C_VerifyAccount_V3_DB cmd;
+        cmd.serial_number.encode(phosg::string_printf("%08" PRIX32 "", ses->login->account->account_id));
+        cmd.access_key.encode(ses->login->gc_license->access_key);
+        cmd.sub_version = ses->effective_sub_version();
         cmd.serial_number2 = cmd.serial_number;
         cmd.access_key2 = cmd.access_key;
-        cmd.password.encode(ses->license->gc_password);
+        cmd.password.encode(ses->login->gc_license->password);
         ses->server_channel.send(0xDB, 0x00, &cmd, sizeof(cmd));
         return HandlerResult::Type::SUPPRESS;
 
@@ -370,15 +378,15 @@ static HandlerResult S_V123P_02_17(
         uint32_t guild_card_number;
         if (ses->remote_guild_card_number >= 0) {
           guild_card_number = ses->remote_guild_card_number;
-          log_info("Using Guild Card number %" PRIu32 " from session", guild_card_number);
+          ses->log.info("Using Guild Card number %" PRIu32 " from session", guild_card_number);
         } else {
-          guild_card_number = random_object<uint32_t>();
-          log_info("Using Guild Card number %" PRIu32 " from random generator", guild_card_number);
+          guild_card_number = phosg::random_object<uint32_t>();
+          ses->log.info("Using Guild Card number %" PRIu32 " from random generator", guild_card_number);
         }
 
-        uint32_t fake_serial_number = random_object<uint32_t>() & 0x7FFFFFFF;
-        uint64_t fake_access_key = random_object<uint64_t>();
-        string fake_access_key_str = string_printf("00000000000%" PRIu64, fake_access_key);
+        uint32_t fake_serial_number = phosg::random_object<uint32_t>() & 0x7FFFFFFF;
+        uint64_t fake_access_key = phosg::random_object<uint64_t>();
+        string fake_access_key_str = phosg::string_printf("00000000000%" PRIu64, fake_access_key);
         if (fake_access_key_str.size() > 12) {
           fake_access_key_str = fake_access_key_str.substr(fake_access_key_str.size() - 12);
         }
@@ -388,10 +396,10 @@ static HandlerResult S_V123P_02_17(
         cmd.guild_card_number = guild_card_number;
         cmd.unused1 = 0;
         cmd.unused2 = 0;
-        cmd.sub_version = ses->sub_version;
+        cmd.sub_version = ses->effective_sub_version();
         cmd.is_extended = 0;
         cmd.language = ses->language();
-        cmd.serial_number.encode(string_printf("%08" PRIX32, fake_serial_number));
+        cmd.serial_number.encode(phosg::string_printf("%08" PRIX32, fake_serial_number));
         cmd.access_key.encode(fake_access_key_str);
         cmd.serial_number2 = cmd.serial_number;
         cmd.access_key2 = cmd.access_key;
@@ -411,6 +419,9 @@ static HandlerResult S_V123P_02_17(
       throw logic_error("GC init command not handled");
 
     case Version::XB_V3: {
+      if (!ses->login->xb_license) {
+        throw runtime_error("XB license missing from login");
+      }
       C_LoginExtended_XB_9E cmd;
       if (ses->remote_guild_card_number < 0) {
         cmd.player_tag = 0xFFFF0000;
@@ -421,11 +432,11 @@ static HandlerResult S_V123P_02_17(
       }
       cmd.unused1 = 0;
       cmd.unused2 = 0;
-      cmd.sub_version = ses->sub_version;
+      cmd.sub_version = ses->effective_sub_version();
       cmd.is_extended = (ses->remote_guild_card_number < 0) ? 1 : 0;
       cmd.language = ses->language();
-      cmd.serial_number.encode(ses->license->xb_gamertag);
-      cmd.access_key.encode(string_printf("%016" PRIX64, ses->license->xb_user_id));
+      cmd.serial_number.encode(ses->login->xb_license->gamertag);
+      cmd.access_key.encode(phosg::string_printf("%016" PRIX64, ses->login->xb_license->user_id));
       cmd.serial_number2 = cmd.serial_number;
       cmd.access_key2 = cmd.access_key;
       if (ses->config.check_flag(Client::Flag::PROXY_BLANK_NAME_ENABLED)) {
@@ -435,8 +446,8 @@ static HandlerResult S_V123P_02_17(
       }
       cmd.netloc = ses->xb_netloc;
       cmd.unknown_a1a = ses->xb_9E_unknown_a1a;
-      cmd.xb_user_id_high = (ses->license->xb_user_id >> 32) & 0xFFFFFFFF;
-      cmd.xb_user_id_low = ses->license->xb_user_id & 0xFFFFFFFF;
+      cmd.xb_user_id_high = (ses->login->xb_license->user_id >> 32) & 0xFFFFFFFF;
+      cmd.xb_user_id_low = ses->login->xb_license->user_id & 0xFFFFFFFF;
       ses->server_channel.send(0x9E, 0x01, &cmd, sizeof(C_LoginExtended_XB_9E));
       return HandlerResult::Type::SUPPRESS;
     }
@@ -508,7 +519,7 @@ static HandlerResult S_B_03(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t
 static HandlerResult S_V123_04(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
   // Suppress extremely short commands from the server instead of disconnecting.
   if (data.size() < offsetof(S_UpdateClientConfig_V3_04, client_config)) {
-    le_uint64_t checksum = random_object<uint64_t>() & 0x0000FFFFFFFFFFFF;
+    le_uint64_t checksum = phosg::random_object<uint64_t>() & 0x0000FFFFFFFFFFFF;
     ses->server_channel.send(0x96, 0x00, &checksum, sizeof(checksum));
     return HandlerResult::Type::SUPPRESS;
   }
@@ -519,8 +530,8 @@ static HandlerResult S_V123_04(shared_ptr<ProxyServer::LinkedSession> ses, uint1
       offsetof(S_UpdateClientConfig_V3_04, client_config),
       sizeof(S_UpdateClientConfig_V3_04));
 
-  // If this is a licensed session, hide the guild card number assigned by the
-  // remote server so the client doesn't see it change. If this is an unlicensed
+  // If this is a logged-in session, hide the guild card number assigned by the
+  // remote server so the client doesn't see it change. If this is a logged-out
   // session, then the client never received a guild card number from newserv
   // anyway, so we can let the client see the number from the remote server.
   bool had_guild_card_number = (ses->remote_guild_card_number >= 0);
@@ -528,13 +539,13 @@ static HandlerResult S_V123_04(shared_ptr<ProxyServer::LinkedSession> ses, uint1
     ses->remote_guild_card_number = cmd.guild_card_number;
     ses->log.info("Remote guild card number set to %" PRId64,
         ses->remote_guild_card_number);
-    string message = string_printf(
-        "The remote server\nhas assigned your\nGuild Card number:\n\tC6%" PRId64,
+    string message = phosg::string_printf(
+        "The remote server\nhas assigned your\nGuild Card number:\n$C6%" PRId64,
         ses->remote_guild_card_number);
     send_ship_info(ses->client_channel, message);
   }
-  if (ses->license) {
-    cmd.guild_card_number = ses->license->serial_number;
+  if (ses->login) {
+    cmd.guild_card_number = ses->login->account->account_id;
   }
 
   // It seems the client ignores the length of the 04 command, and always copies
@@ -556,19 +567,19 @@ static HandlerResult S_V123_04(shared_ptr<ProxyServer::LinkedSession> ses, uint1
   // the first 04 command the client has received. The client responds with a 96
   // (checksum) in that case.
   if (!had_guild_card_number) {
-    le_uint64_t checksum = random_object<uint64_t>() & 0x0000FFFFFFFFFFFF;
+    le_uint64_t checksum = phosg::random_object<uint64_t>() & 0x0000FFFFFFFFFFFF;
     ses->server_channel.send(0x96, 0x00, &checksum, sizeof(checksum));
   }
 
-  return ses->license ? HandlerResult::Type::MODIFIED : HandlerResult::Type::FORWARD;
+  return ses->login ? HandlerResult::Type::MODIFIED : HandlerResult::Type::FORWARD;
 }
 
 static HandlerResult S_V123_06(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
   bool modified = false;
-  if (ses->license) {
+  if (ses->login) {
     auto& cmd = check_size_t<SC_TextHeader_01_06_11_B0_EE>(data, 0xFFFF);
     if (cmd.guild_card_number == ses->remote_guild_card_number) {
-      cmd.guild_card_number = ses->license->serial_number;
+      cmd.guild_card_number = ses->login->account->account_id;
       modified = true;
     }
   }
@@ -590,12 +601,12 @@ static HandlerResult S_V123_06(shared_ptr<ProxyServer::LinkedSession> ses, uint1
 
 template <typename CmdT>
 static HandlerResult S_41(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
-  if (ses->license) {
+  if (ses->login) {
     auto& cmd = check_size_t<CmdT>(data);
     if ((cmd.searcher_guild_card_number == ses->remote_guild_card_number) &&
         (cmd.result_guild_card_number == ses->remote_guild_card_number) &&
         ses->server_ping_start_time) {
-      uint64_t ping_usecs = now() - ses->server_ping_start_time;
+      uint64_t ping_usecs = phosg::now() - ses->server_ping_start_time;
       ses->server_ping_start_time = 0;
       double ping_ms = static_cast<double>(ping_usecs) / 1000.0;
       send_text_message_printf(ses->client_channel, "To server: %gms", ping_ms);
@@ -604,11 +615,11 @@ static HandlerResult S_41(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
     } else {
       bool modified = false;
       if (cmd.searcher_guild_card_number == ses->remote_guild_card_number) {
-        cmd.searcher_guild_card_number = ses->license->serial_number;
+        cmd.searcher_guild_card_number = ses->login->account->account_id;
         modified = true;
       }
       if (cmd.result_guild_card_number == ses->remote_guild_card_number) {
-        cmd.result_guild_card_number = ses->license->serial_number;
+        cmd.result_guild_card_number = ses->login->account->account_id;
         modified = true;
       }
       return modified ? HandlerResult::Type::MODIFIED : HandlerResult::Type::FORWARD;
@@ -625,14 +636,14 @@ constexpr on_command_t S_B_41 = &S_41<S_GuildCardSearchResult_BB_41>;
 template <typename CmdT>
 static HandlerResult S_81(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
   bool modified = false;
-  if (ses->license) {
+  if (ses->login) {
     auto& cmd = check_size_t<CmdT>(data);
     if (cmd.from_guild_card_number == ses->remote_guild_card_number) {
-      cmd.from_guild_card_number = ses->license->serial_number;
+      cmd.from_guild_card_number = ses->login->account->account_id;
       modified = true;
     }
     if (cmd.to_guild_card_number == ses->remote_guild_card_number) {
-      cmd.to_guild_card_number = ses->license->serial_number;
+      cmd.to_guild_card_number = ses->login->account->account_id;
       modified = true;
     }
   }
@@ -645,13 +656,13 @@ constexpr on_command_t S_B_81 = &S_81<SC_SimpleMail_BB_81>;
 
 static HandlerResult S_88(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t flag, string& data) {
   bool modified = false;
-  if (ses->license) {
+  if (ses->login) {
     size_t expected_size = sizeof(S_ArrowUpdateEntry_88) * flag;
     auto* entries = &check_size_t<S_ArrowUpdateEntry_88>(
         data, expected_size, expected_size);
     for (size_t x = 0; x < flag; x++) {
       if (entries[x].guild_card_number == ses->remote_guild_card_number) {
-        entries[x].guild_card_number = ses->license->serial_number;
+        entries[x].guild_card_number = ses->login->account->account_id;
         modified = true;
       }
     }
@@ -666,15 +677,16 @@ static HandlerResult S_B1(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
   return HandlerResult::Type::SUPPRESS;
 }
 
+template <bool BE>
 static HandlerResult S_B2(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t flag, string& data) {
   const auto& cmd = check_size_t<S_ExecuteCode_B2>(data, 0xFFFF);
 
   if (cmd.code_size && ses->config.check_flag(Client::Flag::PROXY_SAVE_FILES)) {
-    uint64_t filename_timestamp = now();
+    uint64_t filename_timestamp = phosg::now();
     string code = data.substr(sizeof(S_ExecuteCode_B2));
 
     if (ses->config.check_flag(Client::Flag::ENCRYPTED_SEND_FUNCTION_CALL)) {
-      StringReader r(code);
+      phosg::StringReader r(code);
       bool is_big_endian = ::is_big_endian(ses->version());
       uint32_t decompressed_size = is_big_endian ? r.get_u32b() : r.get_u32l();
       uint32_t key = is_big_endian ? r.get_u32b() : r.get_u32l();
@@ -682,7 +694,7 @@ static HandlerResult S_B2(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
       PSOV2Encryption crypt(key);
       string decrypted_data;
       if (is_big_endian) {
-        StringWriter w;
+        phosg::StringWriter w;
         while (!r.eof()) {
           w.put_u32b(r.get_u32b() ^ crypt.next());
         }
@@ -706,46 +718,70 @@ static HandlerResult S_B2(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
       }
     }
 
-    string output_filename = string_printf("code.%" PRId64 ".bin", filename_timestamp);
-    save_file(output_filename, data);
+    string output_filename = phosg::string_printf("code.%" PRId64 ".bin", filename_timestamp);
+    phosg::save_file(output_filename, data);
     ses->log.info("Wrote code from server to file %s", output_filename.c_str());
 
 #ifdef HAVE_RESOURCE_FILE
-    if (is_gc(ses->version())) {
+    using FooterT = S_ExecuteCode_FooterT_B2<BE>;
+
+    // TODO: Support SH-4 disassembly too
+    bool is_ppc = ::is_ppc(ses->version());
+    bool is_x86 = ::is_x86(ses->version());
+    bool is_sh4 = ::is_sh4(ses->version());
+    if (is_ppc || is_x86 || is_sh4) {
       try {
-        if (code.size() < sizeof(S_ExecuteCode_Footer_GC_B2)) {
+        if (code.size() < sizeof(FooterT)) {
           throw runtime_error("code section is too small");
         }
 
-        size_t footer_offset = code.size() - sizeof(S_ExecuteCode_Footer_GC_B2);
+        size_t footer_offset = code.size() - sizeof(FooterT);
 
-        StringReader r(code.data(), code.size());
-        const auto& footer = r.pget<S_ExecuteCode_Footer_GC_B2>(footer_offset);
+        phosg::StringReader r(code.data(), code.size());
+        const auto& footer = r.pget<FooterT>(footer_offset);
 
         multimap<uint32_t, string> labels;
         r.go(footer.relocations_offset);
         uint32_t reloc_offset = 0;
         for (size_t x = 0; x < footer.num_relocations; x++) {
-          reloc_offset += (r.get_u16b() * 4);
-          labels.emplace(reloc_offset, string_printf("reloc%zu", x));
+          reloc_offset += (r.get<U16T<BE>>() * 4);
+          labels.emplace(reloc_offset, phosg::string_printf("reloc%zu", x));
         }
         labels.emplace(footer.entrypoint_addr_offset.load(), "entry_ptr");
         labels.emplace(footer_offset, "footer");
-        labels.emplace(r.pget_u32b(footer.entrypoint_addr_offset), "start");
+        labels.emplace(r.pget<U32T<BE>>(footer.entrypoint_addr_offset), "start");
 
-        string disassembly = PPC32Emulator::disassemble(
-            &r.pget<uint8_t>(0, code.size()),
-            code.size(),
-            0,
-            &labels);
+        string disassembly;
+        if (is_ppc) {
+          disassembly = ResourceDASM::PPC32Emulator::disassemble(
+              &r.pget<uint8_t>(0, code.size()),
+              code.size(),
+              0,
+              &labels);
+        } else if (is_x86) {
+          disassembly = ResourceDASM::X86Emulator::disassemble(
+              &r.pget<uint8_t>(0, code.size()),
+              code.size(),
+              0,
+              &labels);
+        } else if (is_sh4) {
+          disassembly = ResourceDASM::SH4Emulator::disassemble(
+              &r.pget<uint8_t>(0, code.size()),
+              code.size(),
+              0,
+              &labels);
+        } else {
+          // We shouldn't have entered the outer if statement if this happens
+          throw logic_error("unsupported architecture");
+        }
 
-        output_filename = string_printf("code.%" PRId64 ".txt", filename_timestamp);
+        output_filename = phosg::string_printf("code.%" PRId64 ".txt", filename_timestamp);
         {
-          auto f = fopen_unique(output_filename, "wt");
+          auto f = phosg::fopen_unique(output_filename, "wt");
           fprintf(f.get(), "// code_size = 0x%" PRIX32 "\n", cmd.code_size.load());
           fprintf(f.get(), "// checksum_addr = 0x%" PRIX32 "\n", cmd.checksum_start.load());
           fprintf(f.get(), "// checksum_size = 0x%" PRIX32 "\n", cmd.checksum_size.load());
-          fwritex(f.get(), disassembly);
+          phosg::fwritex(f.get(), disassembly);
         }
         ses->log.info("Wrote disassembly to file %s", output_filename.c_str());
 
@@ -788,8 +824,8 @@ static HandlerResult C_B3(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
 
 static HandlerResult S_B_E7(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
   if (ses->config.check_flag(Client::Flag::PROXY_SAVE_FILES)) {
-    string output_filename = string_printf("player.%" PRId64 ".bin", now());
-    save_file(output_filename, data);
+    string output_filename = phosg::string_printf("player.%" PRId64 ".bin", phosg::now());
+    phosg::save_file(output_filename, data);
     ses->log.info("Wrote player data to file %s", output_filename.c_str());
   }
   return HandlerResult::Type::FORWARD;
@@ -798,14 +834,14 @@ static HandlerResult S_B_E7(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t
 template <typename CmdT>
 static HandlerResult S_C4(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t flag, string& data) {
   bool modified = false;
-  if (ses->license) {
+  if (ses->login) {
     size_t expected_size = sizeof(CmdT) * flag;
     // Some servers (e.g. Schtserv) send extra data on the end of this command;
     // the client ignores it so we can ignore it too
     auto* entries = &check_size_t<CmdT>(data, expected_size, 0xFFFF);
     for (size_t x = 0; x < flag; x++) {
       if (entries[x].guild_card_number == ses->remote_guild_card_number) {
-        entries[x].guild_card_number = ses->license->serial_number;
+        entries[x].guild_card_number = ses->login->account->account_id;
         modified = true;
       }
     }
@@ -818,11 +854,11 @@ constexpr on_command_t S_P_C4 = &S_C4<S_ChoiceSearchResultEntry_PC_C4>;
 constexpr on_command_t S_B_C4 = &S_C4<S_ChoiceSearchResultEntry_BB_C4>;
 
 static HandlerResult S_G_E4(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
-  auto& cmd = check_size_t<S_CardBattleTableState_GC_Ep3_E4>(data);
+  auto& cmd = check_size_t<S_CardBattleTableState_Ep3_E4>(data);
   bool modified = false;
   for (size_t x = 0; x < 4; x++) {
     if (cmd.entries[x].guild_card_number == ses->remote_guild_card_number) {
-      cmd.entries[x].guild_card_number = ses->license->serial_number;
+      cmd.entries[x].guild_card_number = ses->login->account->account_id;
       modified = true;
     }
   }
@@ -840,7 +876,7 @@ static HandlerResult S_B_22(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t
   // hence the hash here instead of a direct string comparison. I'd love to hear
   // the story behind why they put that string there.
   if ((data.size() == 0x2C) &&
-      (fnv1a64(data.data(), data.size()) == 0x8AF8314316A27994)) {
+      (phosg::fnv1a64(data.data(), data.size()) == 0x8AF8314316A27994)) {
     ses->log.info("Enabling remote IP CRC patch");
     ses->enable_remote_ip_crc_patch = true;
   }
@@ -865,7 +901,7 @@ static HandlerResult S_19_P_14(shared_ptr<ProxyServer::LinkedSession> ses, uint1
   }
 
   if (ses->enable_remote_ip_crc_patch) {
-    ses->remote_ip_crc = crc32(data.data(), 4);
+    ses->remote_ip_crc = phosg::crc32(data.data(), 4);
   }
 
   // Set the destination netloc appropriately
@@ -934,20 +970,92 @@ static HandlerResult S_V3_BB_DA(shared_ptr<ProxyServer::LinkedSession> ses, uint
   }
 }
 
+static HandlerResult SC_6x60_6xA2(shared_ptr<ProxyServer::LinkedSession> ses, const string& data) {
+  if (!ses->is_in_game) {
+    return HandlerResult::Type::FORWARD;
+  }
+
+  if (ses->next_drop_item.data1d[0]) {
+    G_SpecializableItemDropRequest_6xA2 cmd = normalize_drop_request(data.data(), data.size());
+    auto s = ses->require_server_state();
+    ses->next_drop_item.id = ses->next_item_id++;
+    bool is_box = (cmd.rt_index == 0x30);
+    send_drop_item_to_channel(s, ses->server_channel, ses->next_drop_item, !is_box, cmd.floor, cmd.x, cmd.z, cmd.entity_id);
+    send_drop_item_to_channel(s, ses->client_channel, ses->next_drop_item, !is_box, cmd.floor, cmd.x, cmd.z, cmd.entity_id);
+    ses->next_drop_item.clear();
+    return HandlerResult::Type::SUPPRESS;
+  }
+
+  using DropMode = ProxyServer::LinkedSession::DropMode;
+  switch (ses->drop_mode) {
+    case DropMode::DISABLED:
+      return HandlerResult::Type::SUPPRESS;
+    case DropMode::PASSTHROUGH:
+      return HandlerResult::Type::FORWARD;
+    case DropMode::INTERCEPT:
+      break;
+    default:
+      throw logic_error("invalid drop mode");
+  }
+
+  if (!ses->item_creator) {
+    ses->log.warning("Session is in INTERCEPT drop mode, but item creator is missing");
+    return HandlerResult::Type::FORWARD;
+  }
+  if (!ses->map) {
+    ses->log.warning("Session is in INTERCEPT drop mode, but map is missing");
+    return HandlerResult::Type::FORWARD;
+  }
+
+  G_SpecializableItemDropRequest_6xA2 cmd = normalize_drop_request(data.data(), data.size());
+  auto rec = reconcile_drop_request_with_map(
+      ses->log, ses->client_channel, cmd, ses->version(), ses->lobby_episode, ses->config, ses->map, false);
+
+  ItemCreator::DropResult res;
+  if (rec.is_box) {
+    if (rec.ignore_def) {
+      ses->log.info("Creating item from box %04hX (area %02hX)", cmd.entity_id.load(), cmd.effective_area);
+      res = ses->item_creator->on_box_item_drop(cmd.effective_area);
+    } else {
+      ses->log.info("Creating item from box %04hX (area %02hX; specialized with %g %08" PRIX32 " %08" PRIX32 " %08" PRIX32 ")",
+          cmd.entity_id.load(), cmd.effective_area, cmd.param3.load(), cmd.param4.load(), cmd.param5.load(), cmd.param6.load());
+      res = ses->item_creator->on_specialized_box_item_drop(cmd.effective_area, cmd.param3, cmd.param4, cmd.param5, cmd.param6);
+    }
+  } else {
+    ses->log.info("Creating item from enemy %04hX (area %02hX)", cmd.entity_id.load(), cmd.effective_area);
+    res = ses->item_creator->on_monster_item_drop(rec.effective_rt_index, cmd.effective_area);
+  }
+
+  if (res.item.empty()) {
+    ses->log.info("No item was created");
+  } else {
+    auto s = ses->require_server_state();
+    string name = s->describe_item(ses->version(), res.item, false);
+    ses->log.info("Entity %04hX (area %02hX) created item %s", cmd.entity_id.load(), cmd.effective_area, name.c_str());
+    res.item.id = ses->next_item_id++;
+    ses->log.info("Creating item %08" PRIX32 " at %02hhX:%g,%g for all clients",
+        res.item.id.load(), cmd.floor, cmd.x.load(), cmd.z.load());
+    send_drop_item_to_channel(s, ses->client_channel, res.item, !rec.is_box, cmd.floor, cmd.x, cmd.z, cmd.entity_id);
+    send_drop_item_to_channel(s, ses->server_channel, res.item, !rec.is_box, cmd.floor, cmd.x, cmd.z, cmd.entity_id);
+    send_item_notification_if_needed(s, ses->client_channel, ses->config, res.item, res.is_from_rare_table);
+  }
+  return HandlerResult::Type::SUPPRESS;
+}
+
 static HandlerResult S_6x(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
   auto s = ses->require_server_state();
 
   if (ses->config.check_flag(Client::Flag::PROXY_SAVE_FILES)) {
     if (is_ep3(ses->version()) && (data.size() >= 0x14)) {
       if (static_cast<uint8_t>(data[0]) == 0xB6) {
-        const auto& header = check_size_t<G_MapSubsubcommand_GC_Ep3_6xB6>(data, 0xFFFF);
+        const auto& header = check_size_t<G_MapSubsubcommand_Ep3_6xB6>(data, 0xFFFF);
         if (header.subsubcommand == 0x00000041) {
-          const auto& cmd = check_size_t<G_MapData_GC_Ep3_6xB6x41>(data, 0xFFFF);
-          string filename = string_printf("map%08" PRIX32 ".%" PRIu64 ".mnmd",
-              cmd.map_number.load(), now());
+          const auto& cmd = check_size_t<G_MapData_Ep3_6xB6x41>(data, 0xFFFF);
+          string filename = phosg::string_printf("map%08" PRIX32 ".%" PRIu64 ".mnmd",
+              cmd.map_number.load(), phosg::now());
           string map_data = prs_decompress(
               data.data() + sizeof(cmd), data.size() - sizeof(cmd));
-          save_file(filename, map_data);
+          phosg::save_file(filename, map_data);
           if (map_data.size() != sizeof(Episode3::MapDefinition) && map_data.size() != sizeof(Episode3::MapDefinitionTrial)) {
             ses->log.warning("Wrote %zu bytes to %s (expected %zu or %zu bytes; the file may be invalid)",
                 map_data.size(), filename.c_str(), sizeof(Episode3::MapDefinitionTrial), sizeof(Episode3::MapDefinition));
@@ -967,25 +1075,43 @@ static HandlerResult S_6x(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
             (static_cast<uint8_t>(data[0]) == 0xB4) ||
             (static_cast<uint8_t>(data[0]) == 0xB5))) {
       const auto& header = check_size_t<G_CardBattleCommandHeader>(data, 0xFFFF);
-      if (header.mask_key) {
+      if (header.mask_key && (ses->version() != Version::GC_EP3_NTE)) {
         set_mask_for_ep3_game_command(data.data(), data.size(), 0);
         modified = true;
       }
 
       if (ses->config.check_flag(Client::Flag::PROXY_EP3_INFINITE_TIME_ENABLED) && (header.subcommand == 0xB4)) {
         if (header.subsubcommand == 0x3D) {
-          auto& cmd = check_size_t<G_SetTournamentPlayerDecks_GC_Ep3_6xB4x3D>(data);
-          if (cmd.rules.overall_time_limit || cmd.rules.phase_time_limit) {
-            cmd.rules.overall_time_limit = 0;
-            cmd.rules.phase_time_limit = 0;
-            modified = true;
+          if (ses->version() == Version::GC_EP3_NTE) {
+            auto& cmd = check_size_t<G_SetTournamentPlayerDecks_Ep3NTE_6xB4x3D>(data);
+            if (cmd.rules.overall_time_limit || cmd.rules.phase_time_limit) {
+              cmd.rules.overall_time_limit = 0;
+              cmd.rules.phase_time_limit = 0;
+              modified = true;
+            }
+          } else {
+            auto& cmd = check_size_t<G_SetTournamentPlayerDecks_Ep3_6xB4x3D>(data);
+            if (cmd.rules.overall_time_limit || cmd.rules.phase_time_limit) {
+              cmd.rules.overall_time_limit = 0;
+              cmd.rules.phase_time_limit = 0;
+              modified = true;
+            }
           }
         } else if (header.subsubcommand == 0x05) {
-          auto& cmd = check_size_t<G_UpdateMap_GC_Ep3_6xB4x05>(data);
-          if (cmd.state.rules.overall_time_limit || cmd.state.rules.phase_time_limit) {
-            cmd.state.rules.overall_time_limit = 0;
-            cmd.state.rules.phase_time_limit = 0;
-            modified = true;
+          if (ses->version() == Version::GC_EP3_NTE) {
+            auto& cmd = check_size_t<G_UpdateMap_Ep3NTE_6xB4x05>(data);
+            if (cmd.state.rules.overall_time_limit || cmd.state.rules.phase_time_limit) {
+              cmd.state.rules.overall_time_limit = 0;
+              cmd.state.rules.phase_time_limit = 0;
+              modified = true;
+            }
+          } else {
+            auto& cmd = check_size_t<G_UpdateMap_Ep3_6xB4x05>(data);
+            if (cmd.state.rules.overall_time_limit || cmd.state.rules.phase_time_limit) {
+              cmd.state.rules.overall_time_limit = 0;
+              cmd.state.rules.phase_time_limit = 0;
+              modified = true;
+            }
           }
         }
       }
@@ -995,8 +1121,7 @@ static HandlerResult S_6x(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
       const auto& cmd = check_size_t<G_AttackFinished_6x46>(data,
           offsetof(G_AttackFinished_6x46, targets),
           sizeof(G_AttackFinished_6x46));
-      size_t allowed_count = min<size_t>(cmd.header.size - 2, 11);
-      if (cmd.count > allowed_count) {
+      if (cmd.count > min<size_t>(cmd.header.size - 2, cmd.targets.size())) {
         ses->log.warning("Blocking subcommand 6x46 with invalid count");
         return HandlerResult::Type::SUPPRESS;
       }
@@ -1004,47 +1129,34 @@ static HandlerResult S_6x(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
       const auto& cmd = check_size_t<G_CastTechnique_6x47>(data,
           offsetof(G_CastTechnique_6x47, targets),
           sizeof(G_CastTechnique_6x47));
-      size_t allowed_count = min<size_t>(cmd.header.size - 2, 10);
-      if (cmd.target_count > allowed_count) {
+      if (cmd.target_count > min<size_t>(cmd.header.size - 2, cmd.targets.size())) {
         ses->log.warning("Blocking subcommand 6x47 with invalid count");
         return HandlerResult::Type::SUPPRESS;
       }
     } else if (data[0] == 0x49) {
-      const auto& cmd = check_size_t<G_SubtractPBEnergy_6x49>(data,
-          offsetof(G_SubtractPBEnergy_6x49, entries),
-          sizeof(G_SubtractPBEnergy_6x49));
-      size_t allowed_count = min<size_t>(cmd.header.size - 3, 14);
-      if (cmd.entry_count > allowed_count) {
+      const auto& cmd = check_size_t<G_ExecutePhotonBlast_6x49>(data,
+          offsetof(G_ExecutePhotonBlast_6x49, targets),
+          sizeof(G_ExecutePhotonBlast_6x49));
+      if (cmd.target_count > min<size_t>(cmd.header.size - 3, cmd.targets.size())) {
         ses->log.warning("Blocking subcommand 6x49 with invalid count");
         return HandlerResult::Type::SUPPRESS;
       }
 
-    } else if ((data[0] == 0x60) && ses->next_drop_item.data1d[0] && !is_v4(ses->version())) {
-      const auto& cmd = check_size_t<G_StandardDropItemRequest_DC_6x60>(
-          data, sizeof(G_StandardDropItemRequest_PC_V3_BB_6x60));
-      ses->next_drop_item.id = ses->next_item_id++;
-      send_drop_item_to_channel(s, ses->server_channel, ses->next_drop_item, true, cmd.floor, cmd.x, cmd.z, cmd.entity_id);
-      send_drop_item_to_channel(s, ses->client_channel, ses->next_drop_item, true, cmd.floor, cmd.x, cmd.z, cmd.entity_id);
-      ses->next_drop_item.clear();
-      return HandlerResult::Type::SUPPRESS;
+    } else if (data[0] == 0x5F) {
+      const auto& cmd = check_size_t<G_DropItem_DC_6x5F>(data, sizeof(G_DropItem_PC_V3_BB_6x5F));
+      ItemData item = cmd.item.item;
+      item.decode_for_version(ses->version());
+      send_item_notification_if_needed(ses->require_server_state(), ses->client_channel, ses->config, item, true);
 
-      // Note: This static_cast is required to make compilers not complain that
-      // the comparison is always false (which even happens in some environments
-      // if we use -0x5E... apparently char is unsigned on some systems, or
-      // std::string's char_type isn't char??)
-    } else if ((static_cast<uint8_t>(data[0]) == 0xA2) && ses->next_drop_item.data1d[0] && !is_v4(ses->version())) {
-      const auto& cmd = check_size_t<G_SpecializableItemDropRequest_6xA2>(data);
-      ses->next_drop_item.id = ses->next_item_id++;
-      send_drop_item_to_channel(s, ses->server_channel, ses->next_drop_item, false, cmd.floor, cmd.x, cmd.z, cmd.entity_id);
-      send_drop_item_to_channel(s, ses->client_channel, ses->next_drop_item, false, cmd.floor, cmd.x, cmd.z, cmd.entity_id);
-      ses->next_drop_item.clear();
-      return HandlerResult::Type::SUPPRESS;
+    } else if ((data[0] == 0x60) || (static_cast<uint8_t>(data[0]) == 0xA2)) {
+      return SC_6x60_6xA2(ses, data);
 
     } else if ((static_cast<uint8_t>(data[0]) == 0xB5) && is_ep3(ses->version()) && (data.size() > 4)) {
       if (data[4] == 0x1A) {
         return HandlerResult::Type::SUPPRESS;
       } else if (data[4] == 0x36) {
-        const auto& cmd = check_size_t<G_RecreatePlayer_GC_Ep3_6xB5x36>(data);
+        auto& cmd = check_size_t<G_RecreatePlayer_Ep3_6xB5x36>(data);
+        set_mask_for_ep3_game_command(&cmd, sizeof(cmd), 0);
         if (ses->is_in_game && (cmd.client_id >= 4)) {
           return HandlerResult::Type::SUPPRESS;
         }
@@ -1053,7 +1165,7 @@ static HandlerResult S_6x(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
     } else if ((static_cast<uint8_t>(data[0]) == 0xBD) &&
         ses->config.check_flag(Client::Flag::PROXY_EP3_UNMASK_WHISPERS) &&
         is_ep3(ses->version())) {
-      auto& cmd = check_size_t<G_WordSelectDuringBattle_GC_Ep3_6xBD>(data);
+      auto& cmd = check_size_t<G_WordSelectDuringBattle_Ep3_6xBD>(data);
       if (cmd.private_flags & (1 << ses->lobby_client_id)) {
         cmd.private_flags &= ~(1 << ses->lobby_client_id);
         modified = true;
@@ -1092,7 +1204,7 @@ static HandlerResult C_GXB_61(shared_ptr<ProxyServer::LinkedSession> ses, uint16
   } else {
     C_CharacterData_V3_61_98* pd;
     if (flag == 4) { // Episode 3
-      auto& ep3_pd = check_size_t<C_CharacterData_GC_Ep3_61_98>(data);
+      auto& ep3_pd = check_size_t<C_CharacterData_Ep3_61_98>(data);
       if (ep3_pd.ep3_config.is_encrypted) {
         decrypt_trivial_gci_data(
             &ep3_pd.ep3_config.card_counts,
@@ -1104,9 +1216,10 @@ static HandlerResult C_GXB_61(shared_ptr<ProxyServer::LinkedSession> ses, uint16
       }
       pd = reinterpret_cast<C_CharacterData_V3_61_98*>(&ep3_pd);
     } else {
-      if (is_ep3(ses->version())) {
+      if (is_ep3(ses->version()) && (ses->version() != Version::GC_EP3_NTE)) {
         ses->log.info("Version changed to GC_EP3_NTE");
         ses->set_version(Version::GC_EP3_NTE);
+        ses->config.specific_version = SPECIFIC_VERSION_GC_EP3_NTE;
       }
       pd = &check_size_t<C_CharacterData_V3_61_98>(data, 0xFFFF);
     }
@@ -1145,7 +1258,7 @@ static HandlerResult C_B_D9(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t
     add_color_inplace(decoded);
     data = tt_utf8_to_utf16(data.data(), data.size());
   } catch (const runtime_error& e) {
-    ses->log.warning("Failed to replace escape characters in D9 command: %s", e.what());
+    ses->log.warning("Failed to decode and unescape D9 command: %s", e.what());
   }
   // TODO: We should check if the info board text was actually modified and
   // return HandlerResult::FORWARD if not.
@@ -1171,10 +1284,10 @@ static HandlerResult S_44_A6(shared_ptr<ProxyServer::LinkedSession> ses, uint16_
     } else {
       basename = filename;
     }
-    output_filename = string_printf("%s.%s.%" PRIu64 "%s",
+    output_filename = phosg::string_printf("%s.%s.%" PRIu64 "%s",
         basename.c_str(),
         is_download ? "download" : "online",
-        now(),
+        phosg::now(),
         extension.c_str());
 
     for (size_t x = 0; x < output_filename.size(); x++) {
@@ -1240,10 +1353,42 @@ static HandlerResult S_13_A7(shared_ptr<ProxyServer::LinkedSession> ses, uint16_
   if (sf->remaining_bytes == 0) {
     if (ses->config.check_flag(Client::Flag::PROXY_SAVE_FILES)) {
       ses->log.info("Writing file %s => %s", sf->basename.c_str(), sf->output_filename.c_str());
-      sf->write();
+      string data = phosg::join(sf->blocks);
+      if (sf->is_download && (phosg::ends_with(sf->basename, ".bin") || phosg::ends_with(sf->basename, ".dat") || phosg::ends_with(sf->basename, ".pvr"))) {
+        data = decode_dlq_data(data);
+      }
+      phosg::save_file(sf->output_filename, data);
+      if (phosg::ends_with(sf->basename, ".bin")) {
+        try {
+          string decompressed = prs_decompress(data);
+          auto disassembly = disassemble_quest_script(decompressed.data(), decompressed.size(), ses->version(), ses->language(), false);
+          phosg::save_file(sf->output_filename + ".txt", disassembly);
+        } catch (const exception& e) {
+          ses->log.warning("Failed to disassemble quest file: %s", e.what());
+        }
+      }
     } else {
       ses->log.info("Download complete for file %s", sf->basename.c_str());
     }
+
+    if (!sf->is_download && phosg::ends_with(sf->basename, ".dat")) {
+      auto quest_dat_data = make_shared<std::string>(phosg::join(sf->blocks));
+      try {
+        ses->map = Lobby::load_maps(
+            ses->version(),
+            ses->lobby_episode,
+            ses->lobby_difficulty,
+            ses->lobby_event,
+            ses->id,
+            Map::DEFAULT_RARE_ENEMIES,
+            ses->lobby_random_seed,
+            make_shared<PSOV2Encryption>(ses->lobby_random_seed),
+            quest_dat_data);
+      } catch (const exception& e) {
+        ses->log.warning("Failed to load quest map: %s", e.what());
+      }
+    }
+
     ses->saving_files.erase(cmd.filename.decode());
   }
 
@@ -1253,7 +1398,7 @@ static HandlerResult S_13_A7(shared_ptr<ProxyServer::LinkedSession> ses, uint16_
 static HandlerResult S_G_B7(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
   if (is_ep3(ses->version())) {
     if (ses->config.check_flag(Client::Flag::PROXY_EP3_INFINITE_MESETA_ENABLED)) {
-      auto& cmd = check_size_t<S_RankUpdate_GC_Ep3_B7>(data);
+      auto& cmd = check_size_t<S_RankUpdate_Ep3_B7>(data);
       if (cmd.current_meseta != 1000000) {
         cmd.current_meseta = 1000000;
         return HandlerResult::Type::MODIFIED;
@@ -1273,15 +1418,15 @@ static HandlerResult S_G_B8(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t
       return HandlerResult::Type::FORWARD;
     }
 
-    StringReader r(data);
+    phosg::StringReader r(data);
     size_t size = r.get_u32l();
     if (r.remaining() < size) {
       ses->log.warning("Card list data size extends beyond end of command; not saving file");
       return HandlerResult::Type::FORWARD;
     }
 
-    string output_filename = string_printf("card-definitions.%" PRIu64 ".mnr", now());
-    save_file(output_filename, r.read(size));
+    string output_filename = phosg::string_printf("card-definitions.%" PRIu64 ".mnr", phosg::now());
+    phosg::save_file(output_filename, r.read(size));
     ses->log.info("Wrote %zu bytes to %s", size, output_filename.c_str());
   }
 
@@ -1295,7 +1440,7 @@ static HandlerResult S_G_B8(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t
 static HandlerResult S_G_B9(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
   if (ses->config.check_flag(Client::Flag::PROXY_SAVE_FILES)) {
     try {
-      const auto& header = check_size_t<S_UpdateMediaHeader_GC_Ep3_B9>(data, 0xFFFF);
+      const auto& header = check_size_t<S_UpdateMediaHeader_Ep3_B9>(data, 0xFFFF);
 
       if (data.size() - sizeof(header) < header.size) {
         throw runtime_error("Media data size extends beyond end of command; not saving file");
@@ -1304,7 +1449,7 @@ static HandlerResult S_G_B9(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t
       string decompressed_data = prs_decompress(
           data.data() + sizeof(header), data.size() - sizeof(header));
 
-      string output_filename = string_printf("media-update.%" PRIu64, now());
+      string output_filename = phosg::string_printf("media-update.%" PRIu64, phosg::now());
       if (header.type == 1) {
         output_filename += ".gvm";
       } else if (header.type == 2 || header.type == 3) {
@@ -1312,7 +1457,7 @@ static HandlerResult S_G_B9(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t
       } else {
         output_filename += ".bin";
       }
-      save_file(output_filename, decompressed_data);
+      phosg::save_file(output_filename, decompressed_data);
       ses->log.info("Wrote %zu bytes to %s",
           decompressed_data.size(), output_filename.c_str());
     } catch (const exception& e) {
@@ -1330,8 +1475,8 @@ static HandlerResult S_G_B9(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t
 static HandlerResult S_G_EF(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
   if (is_ep3(ses->version())) {
     if (ses->config.check_flag(Client::Flag::PROXY_EP3_INFINITE_MESETA_ENABLED)) {
-      auto& cmd = check_size_t<S_StartCardAuction_GC_Ep3_EF>(data,
-          offsetof(S_StartCardAuction_GC_Ep3_EF, unused), 0xFFFF);
+      auto& cmd = check_size_t<S_StartCardAuction_Ep3_EF>(data,
+          offsetof(S_StartCardAuction_Ep3_EF, unused), 0xFFFF);
       if (cmd.points_available != 0x7FFF) {
         cmd.points_available = 0x7FFF;
         return HandlerResult::Type::MODIFIED;
@@ -1349,7 +1494,7 @@ static HandlerResult S_B_EF(shared_ptr<ProxyServer::LinkedSession>, uint16_t, ui
 
 static HandlerResult S_G_BA(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
   if (ses->config.check_flag(Client::Flag::PROXY_EP3_INFINITE_MESETA_ENABLED)) {
-    auto& cmd = check_size_t<S_MesetaTransaction_GC_Ep3_BA>(data);
+    auto& cmd = check_size_t<S_MesetaTransaction_Ep3_BA>(data);
     if (cmd.current_meseta != 1000000) {
       cmd.current_meseta = 1000000;
       return HandlerResult::Type::MODIFIED;
@@ -1375,7 +1520,13 @@ static HandlerResult S_65_67_68_EB(shared_ptr<ProxyServer::LinkedSession> ses, u
     ses->is_in_game = false;
     ses->is_in_quest = false;
     ses->floor = 0x0F;
-    ses->difficulty = 0;
+    ses->lobby_difficulty = 0;
+    ses->lobby_section_id = 0;
+    ses->lobby_mode = GameMode::NORMAL;
+    ses->lobby_episode = Episode::EP1;
+    ses->lobby_random_seed = 0;
+    ses->item_creator.reset();
+    ses->map.reset();
 
     // This command can cause the client to no longer send D6 responses when
     // 1A/D5 large message boxes are closed. newserv keeps track of this
@@ -1393,6 +1544,7 @@ static HandlerResult S_65_67_68_EB(shared_ptr<ProxyServer::LinkedSession> ses, u
 
   size_t num_replacements = 0;
   ses->lobby_client_id = cmd.lobby_flags.client_id;
+  ses->lobby_event = cmd.lobby_flags.event;
   update_leader_id(ses, cmd.lobby_flags.leader_id);
   for (size_t x = 0; x < flag; x++) {
     auto& entry = cmd.entries[x];
@@ -1401,8 +1553,8 @@ static HandlerResult S_65_67_68_EB(shared_ptr<ProxyServer::LinkedSession> ses, u
       ses->log.warning("Ignoring invalid player index %zu at position %zu", index, x);
     } else {
       string name = escape_player_name(entry.disp.visual.name.decode(entry.inventory.language));
-      if (ses->license && (entry.lobby_data.guild_card_number == ses->remote_guild_card_number)) {
-        entry.lobby_data.guild_card_number = ses->license->serial_number;
+      if (ses->login && (entry.lobby_data.guild_card_number == ses->remote_guild_card_number)) {
+        entry.lobby_data.guild_card_number = ses->login->account->account_id;
         num_replacements++;
         modified = true;
       } else if (ses->config.check_flag(Client::Flag::PROXY_PLAYER_NOTIFICATIONS_ENABLED) &&
@@ -1442,12 +1594,56 @@ constexpr on_command_t S_X_65_67_68 = &S_65_67_68_EB<S_JoinLobby_XB_65_67_68>;
 constexpr on_command_t S_B_65_67_68 = &S_65_67_68_EB<S_JoinLobby_BB_65_67_68>;
 
 template <typename CmdT>
+Episode get_episode(const CmdT&) {
+  return Episode::EP1;
+}
+template <>
+Episode get_episode<S_JoinGame_GC_64>(const S_JoinGame_GC_64& cmd) {
+  switch (cmd.episode) {
+    case 1:
+      return Episode::EP1;
+    case 2:
+      return Episode::EP2;
+    default:
+      return Episode::NONE;
+  }
+}
+template <>
+Episode get_episode<S_JoinGame_XB_64>(const S_JoinGame_XB_64& cmd) {
+  switch (cmd.episode) {
+    case 1:
+      return Episode::EP1;
+    case 2:
+      return Episode::EP2;
+    default:
+      return Episode::NONE;
+  }
+}
+template <>
+Episode get_episode<S_JoinGame_BB_64>(const S_JoinGame_BB_64& cmd) {
+  switch (cmd.episode) {
+    case 1:
+      return Episode::EP1;
+    case 2:
+      return Episode::EP2;
+    case 3:
+      return Episode::EP4;
+    default:
+      return Episode::NONE;
+  }
+}
+template <>
+Episode get_episode<S_JoinGame_Ep3_64>(const S_JoinGame_Ep3_64&) {
+  return Episode::EP3;
+}
+
+template <typename CmdT>
 static HandlerResult S_64(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t flag, string& data) {
   CmdT* cmd;
-  S_JoinGame_GC_Ep3_64* cmd_ep3 = nullptr;
+  S_JoinGame_Ep3_64* cmd_ep3 = nullptr;
   if (ses->sub_version >= 0x40) {
-    cmd = &check_size_t<CmdT>(data, sizeof(S_JoinGame_GC_Ep3_64));
-    cmd_ep3 = &check_size_t<S_JoinGame_GC_Ep3_64>(data);
+    cmd = &check_size_t<CmdT>(data, sizeof(S_JoinGame_Ep3_64));
+    cmd_ep3 = &check_size_t<S_JoinGame_Ep3_64>(data);
   } else if (ses->version() == Version::XB_V3) {
     // Schtserv doesn't send the unknown_a1 field in this command, and we don't
     // use it here, so we allow it to be omitted.
@@ -1460,7 +1656,50 @@ static HandlerResult S_64(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
   ses->floor = 0;
   ses->is_in_game = true;
   ses->is_in_quest = false;
-  ses->difficulty = cmd->difficulty;
+  ses->lobby_event = cmd->event;
+  ses->lobby_difficulty = cmd->difficulty;
+  ses->lobby_section_id = cmd->section_id;
+  // We only need the game mode for overriding drops, and SOLO behaves the same
+  // as NORMAL in that regard, so we can conveniently ignore SOLO here
+  if (cmd->battle_mode) {
+    ses->lobby_mode = GameMode::BATTLE;
+  } else if (cmd->challenge_mode) {
+    ses->lobby_mode = GameMode::CHALLENGE;
+  } else {
+    ses->lobby_mode = GameMode::NORMAL;
+  }
+  ses->lobby_random_seed = cmd->rare_seed;
+  if (cmd_ep3) {
+    ses->lobby_episode = Episode::EP3;
+  } else {
+    ses->lobby_episode = get_episode(*cmd);
+  }
+
+  if (ses->version() == Version::GC_NTE) {
+    // GC NTE ignores the variations field entirely, so clear the array to
+    // ensure we'll load the correct maps
+    cmd->variations.clear(0);
+  }
+
+  // Recreate the item creator if needed, and load maps
+  auto s = ses->require_server_state();
+  ses->set_drop_mode(ses->drop_mode);
+  if (!is_ep3(ses->version())) {
+    ses->map = Lobby::load_maps(
+        ses->version(),
+        ses->lobby_episode,
+        ses->lobby_mode,
+        ses->lobby_difficulty,
+        ses->lobby_event,
+        ses->id,
+        s->set_data_table(ses->version(), ses->lobby_episode, ses->lobby_mode, ses->lobby_difficulty),
+        bind(&ServerState::load_map_file, s.get(), placeholders::_1, placeholders::_2),
+        Map::DEFAULT_RARE_ENEMIES,
+        ses->lobby_random_seed,
+        make_shared<PSOV2Encryption>(ses->lobby_random_seed),
+        cmd->variations,
+        &ses->log);
+  }
 
   bool modified = false;
 
@@ -1468,7 +1707,7 @@ static HandlerResult S_64(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
   update_leader_id(ses, cmd->leader_id);
   for (size_t x = 0; x < flag; x++) {
     if (cmd->lobby_data[x].guild_card_number == ses->remote_guild_card_number) {
-      cmd->lobby_data[x].guild_card_number = ses->license->serial_number;
+      cmd->lobby_data[x].guild_card_number = ses->login->account->account_id;
       modified = true;
     }
     auto& p = ses->lobby_players[x];
@@ -1508,13 +1747,20 @@ constexpr on_command_t S_X_64 = &S_64<S_JoinGame_XB_64>;
 constexpr on_command_t S_B_64 = &S_64<S_JoinGame_BB_64>;
 
 static HandlerResult S_E8(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
-  auto& cmd = check_size_t<S_JoinSpectatorTeam_GC_Ep3_E8>(data);
+  auto& cmd = check_size_t<S_JoinSpectatorTeam_Ep3_E8>(data);
 
   ses->clear_lobby_players(12);
   ses->floor = 0;
   ses->is_in_game = true;
   ses->is_in_quest = false;
-  ses->difficulty = 0;
+  ses->lobby_event = cmd.event;
+  ses->lobby_difficulty = 0;
+  ses->lobby_section_id = cmd.section_id;
+  ses->lobby_mode = GameMode::NORMAL;
+  ses->lobby_random_seed = 0;
+  ses->lobby_episode = Episode::EP3;
+  ses->item_creator.reset();
+  ses->map.reset();
 
   bool modified = false;
 
@@ -1526,11 +1772,11 @@ static HandlerResult S_E8(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
     auto& spec_entry = cmd.entries[x];
 
     if (player_entry.lobby_data.guild_card_number == ses->remote_guild_card_number) {
-      player_entry.lobby_data.guild_card_number = ses->license->serial_number;
+      player_entry.lobby_data.guild_card_number = ses->login->account->account_id;
       modified = true;
     }
     if (spec_entry.guild_card_number == ses->remote_guild_card_number) {
-      spec_entry.guild_card_number = ses->license->serial_number;
+      spec_entry.guild_card_number = ses->login->account->account_id;
       modified = true;
     }
 
@@ -1594,7 +1840,15 @@ static HandlerResult C_98(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t c
   ses->floor = 0x0F;
   ses->is_in_game = false;
   ses->is_in_quest = false;
-  ses->difficulty = 0;
+  ses->lobby_event = 0;
+  ses->lobby_difficulty = 0;
+  ses->lobby_section_id = 0;
+  ses->lobby_episode = Episode::EP1;
+  ses->lobby_mode = GameMode::NORMAL;
+  ses->lobby_random_seed = 0;
+  ses->item_creator.reset();
+  ses->map.reset();
+
   if (is_v3(ses->version()) || is_v4(ses->version())) {
     return C_GXB_61(ses, command, flag, data);
   } else {
@@ -1607,19 +1861,24 @@ static HandlerResult C_06(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
     const auto& cmd = check_size_t<SC_TextHeader_01_06_11_B0_EE>(data, 0xFFFF);
 
     string text = data.substr(sizeof(cmd));
-    strip_trailing_zeroes(text);
+    phosg::strip_trailing_zeroes(text);
 
     uint8_t private_flags = 0;
-    if (uses_utf16(ses->version())) {
-      if (text.size() & 1) {
-        text.push_back(0);
+    try {
+      if (uses_utf16(ses->version())) {
+        if (text.size() & 1) {
+          text.push_back(0);
+        }
+        text = tt_decode_marked(text, ses->language(), true);
+      } else if (!text.empty() && (text[0] != '\t') && is_ep3(ses->version())) {
+        private_flags = text[0];
+        text = tt_decode_marked(text.substr(1), ses->language(), false);
+      } else {
+        text = tt_decode_marked(text, ses->language(), false);
       }
-      text = tt_decode_marked(text, ses->language(), true);
-    } else if (!text.empty() && (text[0] != '\t') && is_ep3(ses->version())) {
-      private_flags = text[0];
-      text = tt_decode_marked(text.substr(1), ses->language(), false);
-    } else {
-      text = tt_decode_marked(text, ses->language(), false);
+    } catch (const runtime_error& e) {
+      ses->log.warning("Failed to decode and unescape chat text: %s", e.what());
+      return HandlerResult::Type::FORWARD;
     }
 
     if (text.empty()) {
@@ -1652,13 +1911,13 @@ static HandlerResult C_06(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
 
 static HandlerResult C_40(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
   bool modified = false;
-  if (ses->license) {
+  if (ses->login) {
     auto& cmd = check_size_t<C_GuildCardSearch_40>(data);
-    if (cmd.searcher_guild_card_number == ses->license->serial_number) {
+    if (cmd.searcher_guild_card_number == ses->login->account->account_id) {
       cmd.searcher_guild_card_number = ses->remote_guild_card_number;
       modified = true;
     }
-    if (cmd.target_guild_card_number == ses->license->serial_number) {
+    if (cmd.target_guild_card_number == ses->login->account->account_id) {
       cmd.target_guild_card_number = ses->remote_guild_card_number;
       modified = true;
     }
@@ -1669,11 +1928,11 @@ static HandlerResult C_40(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, 
 template <typename CmdT>
 static HandlerResult C_81(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
   auto& cmd = check_size_t<CmdT>(data);
-  if (ses->license) {
-    if (cmd.from_guild_card_number == ses->license->serial_number) {
+  if (ses->login) {
+    if (cmd.from_guild_card_number == ses->login->account->account_id) {
       cmd.from_guild_card_number = ses->remote_guild_card_number;
     }
-    if (cmd.to_guild_card_number == ses->license->serial_number) {
+    if (cmd.to_guild_card_number == ses->login->account->account_id) {
       cmd.to_guild_card_number = ses->remote_guild_card_number;
     }
   }
@@ -1695,48 +1954,13 @@ void C_6x_movement(shared_ptr<ProxyServer::LinkedSession> ses, const string& dat
 
 template <typename SendGuildCardCmdT>
 static HandlerResult C_6x(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t command, uint32_t flag, string& data) {
-  if (ses->license && !data.empty()) {
+  if (ses->login && !data.empty()) {
     // On BB, the 6x06 command is blank - the server generates the actual Guild
     // Card contents and sends it to the target client.
     if ((data[0] == 0x06) && !is_v4(ses->version())) {
       auto& cmd = check_size_t<SendGuildCardCmdT>(data);
-      if (cmd.guild_card.guild_card_number == ses->license->serial_number) {
+      if (cmd.guild_card.guild_card_number == ses->login->account->account_id) {
         cmd.guild_card.guild_card_number = ses->remote_guild_card_number;
-      }
-    }
-  }
-
-  if (!data.empty()) {
-    if (data[0] == 0x21) {
-      const auto& cmd = check_size_t<G_InterLevelWarp_6x21>(data);
-      ses->floor = cmd.floor;
-
-    } else if (data[0] == 0x0C) {
-      if (ses->config.check_flag(Client::Flag::INFINITE_HP_ENABLED)) {
-        send_remove_conditions(ses->client_channel, ses->lobby_client_id);
-        send_remove_conditions(ses->server_channel, ses->lobby_client_id);
-      }
-    } else if (data[0] == 0x2F || data[0] == 0x4B || data[0] == 0x4C) {
-      if (ses->config.check_flag(Client::Flag::INFINITE_HP_ENABLED)) {
-        send_player_stats_change(ses->client_channel,
-            ses->lobby_client_id, PlayerStatsChange::ADD_HP, 2550);
-        send_player_stats_change(ses->server_channel,
-            ses->lobby_client_id, PlayerStatsChange::ADD_HP, 2550);
-      }
-    } else if (data[0] == 0x3E) {
-      C_6x_movement<G_StopAtPosition_6x3E>(ses, data);
-    } else if (data[0] == 0x3F) {
-      C_6x_movement<G_SetPosition_6x3F>(ses, data);
-    } else if (data[0] == 0x40) {
-      C_6x_movement<G_WalkToPosition_6x40>(ses, data);
-    } else if (data[0] == 0x42) {
-      C_6x_movement<G_RunToPosition_6x42>(ses, data);
-    } else if (data[0] == 0x48) {
-      if (ses->config.check_flag(Client::Flag::INFINITE_TP_ENABLED)) {
-        send_player_stats_change(ses->client_channel,
-            ses->lobby_client_id, PlayerStatsChange::ADD_TP, 255);
-        send_player_stats_change(ses->server_channel,
-            ses->lobby_client_id, PlayerStatsChange::ADD_TP, 255);
       }
     }
   }
@@ -1751,19 +1975,62 @@ constexpr on_command_t C_B_6x = &C_6x<G_SendGuildCard_BB_6x06>;
 
 template <>
 HandlerResult C_6x<void>(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string& data) {
-  check_implemented_subcommand(ses, data);
-
-  if (!data.empty() && (data[0] == 0x05) && ses->config.check_flag(Client::Flag::SWITCH_ASSIST_ENABLED)) {
-    auto& cmd = check_size_t<G_SwitchStateChanged_6x05>(data);
-    if (cmd.flags && cmd.header.object_id != 0xFFFF) {
-      if (ses->last_switch_enabled_command.header.subcommand == 0x05) {
-        ses->log.info("Switch assist: replaying previous enable command");
-        ses->server_channel.send(0x60, 0x00, &ses->last_switch_enabled_command,
-            sizeof(ses->last_switch_enabled_command));
-        ses->client_channel.send(0x60, 0x00, &ses->last_switch_enabled_command,
-            sizeof(ses->last_switch_enabled_command));
+  if (!data.empty()) {
+    if ((data[0] == 0x05) && ses->config.check_flag(Client::Flag::SWITCH_ASSIST_ENABLED)) {
+      auto& cmd = check_size_t<G_SwitchStateChanged_6x05>(data);
+      if ((cmd.flags & 1) && (cmd.header.object_id != 0xFFFF)) {
+        ses->recent_switch_flags.add(cmd.switch_flag_num);
+        string commands = ses->recent_switch_flags.enable_commands(ses->floor);
+        if (!commands.empty()) {
+          ses->server_channel.send(0x60, 0x00, commands);
+          ses->client_channel.send(0x60, 0x00, commands);
+        }
       }
-      ses->last_switch_enabled_command = cmd;
+
+    } else if (data[0] == 0x21) {
+      const auto& cmd = check_size_t<G_InterLevelWarp_6x21>(data);
+      ses->floor = cmd.floor;
+
+    } else if (data[0] == 0x0C) {
+      if (ses->config.check_flag(Client::Flag::INFINITE_HP_ENABLED)) {
+        send_remove_conditions(ses->client_channel, ses->lobby_client_id);
+        send_remove_conditions(ses->server_channel, ses->lobby_client_id);
+      }
+
+    } else if (data[0] == 0x2F || data[0] == 0x4B || data[0] == 0x4C) {
+      if (ses->config.check_flag(Client::Flag::INFINITE_HP_ENABLED)) {
+        send_player_stats_change(ses->client_channel,
+            ses->lobby_client_id, PlayerStatsChange::ADD_HP, 2550);
+        send_player_stats_change(ses->server_channel,
+            ses->lobby_client_id, PlayerStatsChange::ADD_HP, 2550);
+      }
+
+    } else if (data[0] == 0x3E) {
+      C_6x_movement<G_StopAtPosition_6x3E>(ses, data);
+
+    } else if (data[0] == 0x3F) {
+      C_6x_movement<G_SetPosition_6x3F>(ses, data);
+
+    } else if (data[0] == 0x40) {
+      C_6x_movement<G_WalkToPosition_6x40>(ses, data);
+
+    } else if (data[0] == 0x42) {
+      C_6x_movement<G_RunToPosition_6x42>(ses, data);
+
+    } else if (data[0] == 0x48) {
+      if (ses->config.check_flag(Client::Flag::INFINITE_TP_ENABLED)) {
+        send_player_stats_change(ses->client_channel,
+            ses->lobby_client_id, PlayerStatsChange::ADD_TP, 255);
+        send_player_stats_change(ses->server_channel,
+            ses->lobby_client_id, PlayerStatsChange::ADD_TP, 255);
+      }
+
+    } else if (data[0] == 0x5F) {
+      const auto& cmd = check_size_t<G_DropItem_DC_6x5F>(data, sizeof(G_DropItem_PC_V3_BB_6x5F));
+      send_item_notification_if_needed(ses->require_server_state(), ses->client_channel, ses->config, cmd.item.item, true);
+
+    } else if (data[0] == 0x60 || static_cast<uint8_t>(data[0]) == 0xA2) {
+      return SC_6x60_6xA2(ses, data);
     }
   }
 
@@ -1771,11 +2038,11 @@ HandlerResult C_6x<void>(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, u
 }
 
 static HandlerResult C_V123_A0_A1(shared_ptr<ProxyServer::LinkedSession> ses, uint16_t, uint32_t, string&) {
-  if (!ses->license) {
+  if (!ses->login) {
     return HandlerResult::Type::FORWARD;
   }
 
-  // For licensed sessions, send them back to newserv's main menu instead of
+  // For logged-in sessions, send them back to newserv's main menu instead of
   // going to the remote server's ship/block select menu
   ses->send_to_game_server();
   ses->disconnect_action = ProxyServer::LinkedSession::DisconnectAction::CLOSE_IMMEDIATELY;
@@ -1783,7 +2050,8 @@ static HandlerResult C_V123_A0_A1(shared_ptr<ProxyServer::LinkedSession> ses, ui
 }
 
 // Indexed as [command][version][is_from_client]
-static on_command_t handlers[0x100][14][2] = {
+static_assert(NUM_VERSIONS == 14, "Don\'t forget to update the ProxyCommands handlers table");
+static on_command_t handlers[0x100][NUM_VERSIONS][2] = {
     // clang-format off
 // CMD     S_PC_PATCH     C          S_BB_PATCH        C       S_DC_NTE C          S_DC_V1_12_2000_PROTO C          S_DC_V1           C              S_DC_V2           C               S_PC_NTE       C               S_PC_V2        C               S_GC_NTE          C              S_GC_V3           C               S_GC_EP3_NTE      C               S_GC_EP3          C               S_XB_V3        C               S_BB_V4       C
 /* 00 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_invalid,        nullptr},     {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,     nullptr},      {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,    nullptr}},
@@ -1892,7 +2160,7 @@ static on_command_t handlers[0x100][14][2] = {
 /* 61 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_invalid,        nullptr},     {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,     nullptr},      {S_invalid,        nullptr},     {S_invalid,        C_GXB_61},     {S_invalid,        C_GXB_61},     {S_invalid,        C_GXB_61},     {S_invalid,     C_GXB_61},     {S_invalid,    C_GXB_61}},
 /* 62 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_6x,             C_D_6x},      {S_6x,             C_D_6x},      {S_6x,             C_D_6x},       {S_6x,          C_P_6x},       {S_6x,          C_P_6x},       {S_6x,             C_D_6x},      {S_6x,             C_G_6x},       {S_6x,             C_G_6x},       {S_6x,             C_G_6x},       {S_6x,          C_X_6x},       {S_6x,         C_B_6x}},
 /* 63 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_invalid,        nullptr},     {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,     nullptr},      {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,    nullptr}},
-/* 64 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_D_64,           nullptr},     {S_D_64,           nullptr},     {S_D_64,           nullptr},      {S_P_64,        nullptr},      {S_P_64,        nullptr},      {S_D_64,           nullptr},     {S_G_64,           nullptr},      {S_G_64,           nullptr},      {S_G_64,           nullptr},      {S_X_64,        nullptr},      {S_B_64,       nullptr}},
+/* 64 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_D_64,           nullptr},     {S_D_64,           nullptr},     {S_D_64,           nullptr},      {S_P_64,        nullptr},      {S_P_64,        nullptr},      {S_G_64,           nullptr},     {S_G_64,           nullptr},      {S_G_64,           nullptr},      {S_G_64,           nullptr},      {S_X_64,        nullptr},      {S_B_64,       nullptr}},
 /* 65 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_DG_65_67_68_EB, nullptr},     {S_DG_65_67_68_EB, nullptr},     {S_DG_65_67_68_EB, nullptr},      {S_P_65_67_68,  nullptr},      {S_P_65_67_68,  nullptr},      {S_DG_65_67_68_EB, nullptr},     {S_DG_65_67_68_EB, nullptr},      {S_DG_65_67_68_EB, nullptr},      {S_DG_65_67_68_EB, nullptr},      {S_X_65_67_68,  nullptr},      {S_B_65_67_68, nullptr}},
 /* 66 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_66_69_E9,       nullptr},     {S_66_69_E9,       nullptr},     {S_66_69_E9,       nullptr},      {S_66_69_E9,    nullptr},      {S_66_69_E9,    nullptr},      {S_66_69_E9,       nullptr},     {S_66_69_E9,       nullptr},      {S_66_69_E9,       nullptr},      {S_66_69_E9,       nullptr},      {S_66_69_E9,    nullptr},      {S_66_69_E9,   nullptr}},
 /* 67 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_DG_65_67_68_EB, nullptr},     {S_DG_65_67_68_EB, nullptr},     {S_DG_65_67_68_EB, nullptr},      {S_P_65_67_68,  nullptr},      {S_P_65_67_68,  nullptr},      {S_DG_65_67_68_EB, nullptr},     {S_DG_65_67_68_EB, nullptr},      {S_DG_65_67_68_EB, nullptr},      {S_DG_65_67_68_EB, nullptr},      {S_X_65_67_68,  nullptr},      {S_B_65_67_68, nullptr}},
@@ -1974,9 +2242,9 @@ static on_command_t handlers[0x100][14][2] = {
 /* AF */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_invalid,        nullptr},     {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,     nullptr},      {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,    nullptr}},
 // CMD     S_PC_PATCH     C          S_BB_PATCH        C       S_DC_NTE C          S_DC_V1_12_2000_PROTO C          S_DC_V1           C              S_DC_V2           C               S_PC_NTE       C               S_PC_V2        C               S_GC_NTE          C              S_GC_V3           C               S_GC_EP3_NTE      C               S_GC_EP3          C               S_XB_V3        C               S_BB_V4       C
 /* B0 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {nullptr,          nullptr},     {nullptr,          nullptr},     {nullptr,          nullptr},      {nullptr,       nullptr},      {nullptr,       nullptr},      {nullptr,          nullptr},     {nullptr,          nullptr},      {nullptr,          nullptr},      {nullptr,          nullptr},      {nullptr,       nullptr},      {nullptr,      nullptr}},
-/* B1 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_B1,             nullptr},     {S_B1,             nullptr},     {S_B1,             nullptr},      {S_B1,          nullptr},      {S_B1,          nullptr},      {S_B1,             nullptr},     {S_B1,             nullptr},      {S_B1,             nullptr},      {S_B1,             nullptr},      {S_B1,          nullptr},      {S_B1,         nullptr}},
-/* B2 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {nullptr,          nullptr},     {nullptr,          nullptr},     {nullptr,          nullptr},      {nullptr,       nullptr},      {nullptr,       nullptr},      {nullptr,          nullptr},     {S_B2,             nullptr},      {S_B2,             nullptr},      {S_B2,             nullptr},      {S_B2,          nullptr},      {S_B2,         nullptr}},
-/* B3 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_invalid,        C_B3},        {S_invalid,        C_B3},        {S_invalid,        C_B3},         {S_invalid,     C_B3},         {S_invalid,     C_B3},         {S_invalid,        C_B3},        {S_invalid,        C_B3},         {S_invalid,        C_B3},         {S_invalid,        C_B3},         {S_invalid,     C_B3},         {S_invalid,    C_B3}},
+/* B1 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {nullptr,          nullptr},     {S_B1,             nullptr},     {S_B1,             nullptr},      {S_B1,          nullptr},      {S_B1,          nullptr},      {S_B1,             nullptr},     {S_B1,             nullptr},      {S_B1,             nullptr},      {S_B1,             nullptr},      {S_B1,          nullptr},      {S_B1,         nullptr}},
+/* B2 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {nullptr,          nullptr},     {nullptr,          nullptr},     {S_B2<false>,      nullptr},      {S_B2<false>,   nullptr},      {S_B2<false>,   nullptr},      {S_B2<true>,       nullptr},     {S_B2<true>,       nullptr},      {S_B2<true>,       nullptr},      {S_B2<true>,       nullptr},      {S_B2<false>,   nullptr},      {S_B2<false>,  nullptr}},
+/* B3 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_invalid,        nullptr},     {S_invalid,        nullptr},     {S_invalid,        C_B3},         {S_invalid,     C_B3},         {S_invalid,     C_B3},         {S_invalid,        C_B3},        {S_invalid,        C_B3},         {S_invalid,        C_B3},         {S_invalid,        C_B3},         {S_invalid,     C_B3},         {S_invalid,    C_B3}},
 /* B4 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_invalid,        nullptr},     {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,     nullptr},      {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,    nullptr}},
 /* B5 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_invalid,        nullptr},     {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,     nullptr},      {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,    nullptr}},
 /* B6 */ {{S_invalid,     nullptr}, {S_invalid,     nullptr}, {nullptr, nullptr}, {S_invalid,        nullptr},     {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,     nullptr},      {S_invalid,        nullptr},     {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,        nullptr},      {S_invalid,     nullptr},      {S_invalid,    nullptr}},
