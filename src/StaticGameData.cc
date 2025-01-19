@@ -109,9 +109,13 @@ static const array<const char*, 10> section_id_to_name = {
     "Viridia", "Greennill", "Skyly", "Bluefull", "Purplenum",
     "Pinkal", "Redria", "Oran", "Yellowboze", "Whitill"};
 
+static const array<const char*, 10> section_id_to_abbreviation = {
+    "Vir", "Grn", "Sky", "Blu", "Prp", "Pnk", "Red", "Orn", "Ylw", "Wht"};
+
 const unordered_map<string, uint8_t> name_to_section_id({
     {"viridia", 0},
     {"greennill", 1},
+    {"greenill", 1},
     {"skyly", 2},
     {"bluefull", 3},
     {"purplenum", 4},
@@ -216,21 +220,75 @@ const unordered_map<string, uint8_t> name_to_lobby_type({
     {"morgue", 0xFF},
 });
 
-const vector<string> npc_id_to_name({"ninja", "rico", "sonic", "knuckles", "tails", "flowen", "elly"});
+const vector<string> npc_id_to_name({
+    "ninja",
+    "rico",
+    "sonic",
+    "knuckles",
+    "tails",
+    "flowen",
+    "elly",
+    "momoka",
+    "irene",
+    "guild",
+    "nurse",
+});
 
 const unordered_map<string, uint8_t> name_to_npc_id = {
-    {"ninja", 0}, {"rico", 1}, {"sonic", 2}, {"knuckles", 3}, {"tails", 4}, {"flowen", 5}, {"elly", 6}};
+    {"ninja", 0},
+    {"rico", 1},
+    {"sonic", 2},
+    {"knuckles", 3},
+    {"tails", 4},
+    {"flowen", 5},
+    {"elly", 6},
+    {"momoka", 7},
+    {"irene", 8},
+    {"guild", 9},
+    {"nurse", 10},
+};
+
+bool npc_valid_for_version(uint8_t npc, Version version) {
+  switch (version) {
+    case Version::DC_NTE:
+    case Version::DC_11_2000:
+    case Version::DC_V1:
+      return false;
+    case Version::DC_V2:
+    case Version::PC_NTE:
+    case Version::PC_V2:
+      return (npc < 5);
+    case Version::GC_NTE:
+    case Version::GC_V3:
+    case Version::GC_EP3_NTE:
+    case Version::GC_EP3:
+    case Version::XB_V3:
+      return (npc < 7);
+    case Version::BB_V4:
+      return (npc < 11);
+    default:
+      return false;
+  }
+}
+
+const char* abbreviation_for_section_id(uint8_t section_id) {
+  if (section_id < section_id_to_abbreviation.size()) {
+    return section_id_to_abbreviation[section_id];
+  } else {
+    return "Unknown";
+  }
+}
 
 const char* name_for_section_id(uint8_t section_id) {
   if (section_id < section_id_to_name.size()) {
     return section_id_to_name[section_id];
   } else {
-    return "<Unknown>";
+    return "Unknown";
   }
 }
 
 uint8_t section_id_for_name(const string& name) {
-  string lower_name = tolower(name);
+  string lower_name = phosg::tolower(name);
   try {
     return name_to_section_id.at(lower_name);
   } catch (const out_of_range&) {
@@ -250,7 +308,7 @@ const string& name_for_event(uint8_t event) {
   if (event < lobby_event_to_name.size()) {
     return lobby_event_to_name[event];
   } else {
-    static const string ret = "<Unknown lobby event>";
+    static const string ret = "Unknown lobby event";
     return ret;
   }
 }
@@ -275,7 +333,7 @@ const string& name_for_lobby_type(uint8_t type) {
   try {
     return lobby_type_to_name.at(type);
   } catch (const out_of_range&) {
-    static const string ret = "<Unknown lobby type>";
+    static const string ret = "Unknown lobby type";
     return ret;
   }
 }
@@ -300,25 +358,25 @@ const string& name_for_npc(uint8_t npc) {
   try {
     return npc_id_to_name.at(npc);
   } catch (const out_of_range&) {
-    static const string ret = "<Unknown NPC>";
+    static const string ret = "Unknown NPC";
     return ret;
   }
 }
 
-uint8_t npc_for_name(const string& name) {
+uint8_t npc_for_name(const string& name, Version version) {
+  uint8_t npc_id = 0xFF;
   try {
-    return name_to_npc_id.at(name);
+    npc_id = name_to_npc_id.at(name);
   } catch (const out_of_range&) {
   }
-  try {
-    uint64_t x = stoul(name);
-    if (x < npc_id_to_name.size()) {
-      return x;
+  if (npc_id == 0xFF) {
+    try {
+      npc_id = stoul(name);
+    } catch (const invalid_argument&) {
+    } catch (const out_of_range&) {
     }
-  } catch (const invalid_argument&) {
-  } catch (const out_of_range&) {
   }
-  return 0xFF;
+  return npc_valid_for_version(npc_id, version) ? npc_id : 0xFF;
 }
 
 const char* name_for_char_class(uint8_t cls) {
@@ -447,6 +505,18 @@ char abbreviation_for_difficulty(uint8_t difficulty) {
   }
 }
 
+const char* name_for_language_code(uint8_t language_code) {
+  array<const char*, 8> names = {{"Japanese",
+      "English",
+      "German",
+      "French",
+      "Spanish",
+      "Simplified Chinese",
+      "Traditional Chinese",
+      "Korean"}};
+  return (language_code < 8) ? names[language_code] : "Unknown";
+}
+
 char char_for_language_code(uint8_t language_code) {
   return (language_code < 8) ? "JEGFSBTK"[language_code] : '?';
 }
@@ -482,20 +552,6 @@ uint8_t language_code_for_char(char language_char) {
   }
 }
 
-size_t max_stack_size_for_item(uint8_t data0, uint8_t data1) {
-  if (data0 == 4) {
-    return 999999;
-  }
-  if (data0 == 3) {
-    if ((data1 < 9) && (data1 != 2)) {
-      return 10;
-    } else if (data1 == 0x10) {
-      return 99;
-    }
-  }
-  return 1;
-}
-
 const vector<string> tech_id_to_name = {
     "foie", "gifoie", "rafoie",
     "barta", "gibarta", "rabarta",
@@ -529,7 +585,7 @@ const string& name_for_technique(uint8_t tech) {
   try {
     return tech_id_to_name.at(tech);
   } catch (const out_of_range&) {
-    static const string ret = "<Unknown technique>";
+    static const string ret = "Unknown technique";
     return ret;
   }
 }
@@ -680,7 +736,7 @@ uint8_t floor_for_name(const std::string& name) {
       {"saintmillion", 0x09},
       {"purgatory", 0x0A},
   });
-  return floors.at(tolower(name));
+  return floors.at(phosg::tolower(name));
 }
 
 static const array<const char*, 0x12> ep1_floor_names = {
@@ -739,6 +795,15 @@ static const array<const char*, 0x0B> ep4_floor_names = {
     "Purgatory",
 };
 
+static const array<const char*, 0x12> ep1_floor_names_short = {
+    "P2", "F1", "F2", "C1", "C2", "C3", "M1", "M2", "R1", "R2", "R3", "Dgn", "DRL", "VO", "DF", "Lby", "B1", "B2"};
+
+static const array<const char*, 0x12> ep2_floor_names_short = {
+    "Lab", "VRTA", "VRTB", "VRSA", "VRSB", "CCA", "JN", "JE", "Mtn", "SS", "SU", "SL", "GG", "OF", "BR", "GD", "SSN", "Twr"};
+
+static const array<const char*, 0x0B> ep4_floor_names_short = {
+    "P2", "CE", "CW", "CS", "CN", "CI", "D1", "D2", "D3", "SM", "Pg"};
+
 size_t floor_limit_for_episode(Episode ep) {
   switch (ep) {
     case Episode::EP1:
@@ -762,6 +827,32 @@ const char* name_for_floor(Episode episode, uint8_t floor) {
       return ep4_floor_names.at(floor);
     default:
       throw logic_error("invalid episode for drop floor");
+  }
+}
+
+const char* short_name_for_floor(Episode episode, uint8_t floor) {
+  switch (episode) {
+    case Episode::EP1:
+      return ep1_floor_names_short.at(floor);
+    case Episode::EP2:
+      return ep2_floor_names_short.at(floor);
+    case Episode::EP4:
+      return ep4_floor_names_short.at(floor);
+    default:
+      throw logic_error("invalid episode for floor");
+  }
+}
+
+bool floor_is_boss_arena(Episode episode, uint8_t floor) {
+  switch (episode) {
+    case Episode::EP1:
+      return (floor >= 0x0B) && (floor <= 0x0E);
+    case Episode::EP2:
+      return (floor >= 0x0C) && (floor <= 0x0F);
+    case Episode::EP4:
+      return (floor == 0x09);
+    default:
+      return false;
   }
 }
 

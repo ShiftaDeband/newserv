@@ -5,6 +5,7 @@
 #include <phosg/Tools.hh>
 
 #include "StaticGameData.hh"
+#include "Types.hh"
 
 enum class EnemyType {
   UNKNOWN = -1,
@@ -20,6 +21,7 @@ enum class EnemyType {
   BOOMA,
   BOOTA,
   BULCLAW,
+  BULK,
   CANADINE,
   CANADINE_GROUP,
   CANANE,
@@ -137,11 +139,13 @@ enum class EnemyType {
 };
 
 template <>
-const char* name_for_enum<EnemyType>(EnemyType type);
+const char* phosg::name_for_enum<EnemyType>(EnemyType type);
 template <>
-EnemyType enum_for_name<EnemyType>(const char* name);
+EnemyType phosg::enum_for_name<EnemyType>(const char* name);
 
 bool enemy_type_valid_for_episode(Episode episode, EnemyType enemy_type);
 uint8_t battle_param_index_for_enemy_type(Episode episode, EnemyType enemy_type);
 uint8_t rare_table_index_for_enemy_type(EnemyType enemy_type);
 const std::vector<EnemyType>& enemy_types_for_rare_table_index(Episode episode, uint8_t rt_index);
+bool enemy_type_is_rare(EnemyType type);
+EnemyType rare_type_for_enemy_type(EnemyType base_type, Episode episode, uint8_t event, uint8_t floor);

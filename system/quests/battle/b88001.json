@@ -10,7 +10,7 @@
     "MagMode": "ALLOW",
     "ToolMode": "ALLOW",
     "TrapMode": "ALL_PLAYERS",
-    "RespawnMode": 0,
+    "RespawnMode": "ALLOW",
     "ReplaceChar": 0,
     "DropWeapon": 1,
     "IsTeams": 1,
@@ -35,17 +35,44 @@
   // "ChallengeTemplateIndex": 0,
 
   // Quests may be set to be unavailable until a preceding quest has been
-  // cleared or a team reward has been purchased. To enable this feature, set a
-  // value for AvailableIf in the quest's JSON file. This field's value should
-  // be an integral expression that tests one or more flags or team rewards, or
-  // the number of players. An example with random values is shown below. This
-  // field is ignored if the player has the DISABLE_QUEST_REQUIREMENTS flag in
-  // their license.
+  // cleared or a team reward has been purchased. To enable this behavior, set
+  // a value for AvailableIf in the quest's JSON file. (This is ignored if the
+  // player has the DISABLE_QUEST_REQUIREMENTS flag in their account.) This
+  // field's value should be an expression that tests any of the following:
+  //   F_XXXX: Quest flag specified in hex (e.g. F_014D)
+  //   CC_EpX_Y: Whether or not Challenge stage X in Episode Y is complete
+  //   T_ZZZ: Whether or not the player's BB team has reward ZZZ
+  //   V_NumPlayers: The number of players in the current game
+  //   V_Event: The holiday event in the current game
+  //   V_V1Present: Whether there are any V1 players in the current game
+  // You can also use constants, parentheses, and many common integer and
+  // boolean operators. An example expression with random values is shown here.
   // "AvailableIf": "(F_016D || T_EpicCustomQuest || (V_NumPlayers <= 2)) && !F_0173",
 
   // On BB, quests may be disabled but still visible to the player. This
   // expression controls when that should be the case. If AvailableIf evaluates
   // to false, this is ignored. This field is also ignored if the player has
-  // the DISABLE_QUEST_REQUIREMENTS flag in their license.
+  // the DISABLE_QUEST_REQUIREMENTS flag in their account.
   // "EnabledIf": "!F_0169",
+
+  // On BB, a quest's joinability flag is part of the quest file header, but
+  // other versions don't natively support joining quests in progress. This
+  // flag, if present, enables non-BB quests to be joined when already in
+  // progress. Note that this will likely not work properly unless the quest
+  // script is designed to support joining players.
+  // "Joinable": true,
+
+  // If a quest is joinable and this field is specified, then setting this
+  // register to a nonzero value via the sync_register opcode will cause the
+  // game to be locked and not allow any further joins. If the register is set
+  // to zero again, joining will be allowed again. This field is ignored for
+  // quests that do not have the Joinable option set above.
+  // "LockStatusRegister": 249,
+
+  // Normally, the $quest command requires $debug to be enabled, but if this
+  // option is set, this quest may be loaded via $quest even if $debug is off
+  // if there are no other players present in the game. When a quest is loaded
+  // via $quest, AvailableIf and EnabledIf are not checked, so it's inadvisable
+  // to use this option if either of those options are also used.
+  // "AllowStartFromChatCommand": true,
 }

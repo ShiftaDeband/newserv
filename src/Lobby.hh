@@ -26,15 +26,23 @@ struct ServerState;
 struct Lobby : public std::enable_shared_from_this<Lobby> {
   struct FloorItem {
     ItemData data;
-    float x;
-    float z;
+    VectorXZF pos;
     uint64_t drop_number;
-    uint16_t visibility_flags;
+    // At most one of the following will be non-null
+    std::shared_ptr<const MapState::ObjectState> from_obj;
+    std::shared_ptr<const MapState::EnemyState> from_ene;
+    // The low 12 bits of flags are visibility flags, specifying which clients
+    // can see the item. (In practice, only the lowest 4 of these bits are used,
+    // but the game has fields for 12 players so we do too.)
+    // The 13th bit (0x1000) specifies whether a rare item notification should
+    // be sent to all players when the item is picked up. This has no effect for
+    // non-rare items.
+    uint16_t flags;
 
     bool visible_to_client(uint8_t client_id) const;
   };
   struct FloorItemManager {
-    PrefixedLogger log;
+    phosg::PrefixedLogger log;
     uint64_t next_drop_number;
     // It's important that this is a map and not an unordered_map. See the
     // comment in send_game_item_state for more details.
@@ -46,7 +54,12 @@ struct Lobby : public std::enable_shared_from_this<Lobby> {
 
     bool exists(uint32_t item_id) const;
     std::shared_ptr<FloorItem> find(uint32_t item_id) const;
-    void add(const ItemData& item, float x, float z, uint16_t visibility_flags);
+    void add(
+        const ItemData& item,
+        const VectorXZF& pos,
+        std::shared_ptr<const MapState::ObjectState> from_obj,
+        std::shared_ptr<const MapState::EnemyState> from_ene,
+        uint16_t flags);
     void add(std::shared_ptr<FloorItem> fi);
     std::shared_ptr<FloorItem> remove(uint32_t item_id, uint8_t client_id);
     std::unordered_set<std::shared_ptr<FloorItem>> evict();
@@ -56,23 +69,27 @@ struct Lobby : public std::enable_shared_from_this<Lobby> {
     uint32_t reassign_all_item_ids(uint32_t next_item_id);
   };
   enum class Flag {
-    GAME = 0x00000001,
-    PERSISTENT = 0x00000002,
-
+    // clang-format off
+    GAME                            = 0x00000001,
+    PERSISTENT                      = 0x00000002,
+    DEBUG                           = 0x00000004,
     // Flags used only for games
-    CHEATS_ENABLED = 0x00000100,
-    QUEST_IN_PROGRESS = 0x00000200,
-    BATTLE_IN_PROGRESS = 0x00000400,
-    JOINABLE_QUEST_IN_PROGRESS = 0x00000800,
-    IS_SPECTATOR_TEAM = 0x00002000, // episode must be EP3 also
-    SPECTATORS_FORBIDDEN = 0x00004000,
-    START_BATTLE_PLAYER_IMMEDIATELY = 0x00008000,
-    CANNOT_CHANGE_CHEAT_MODE = 0x00010000,
-
+    CHEATS_ENABLED                  = 0x00000100,
+    QUEST_SELECTION_IN_PROGRESS     = 0x00000200,
+    QUEST_IN_PROGRESS               = 0x00000400,
+    BATTLE_IN_PROGRESS              = 0x00000800,
+    JOINABLE_QUEST_IN_PROGRESS      = 0x00001000,
+    IS_CLIENT_CUSTOMIZATION         = 0x00002000,
+    IS_SPECTATOR_TEAM               = 0x00004000, // .episode must be EP3 also
+    SPECTATORS_FORBIDDEN            = 0x00008000,
+    START_BATTLE_PLAYER_IMMEDIATELY = 0x00010000,
+    CANNOT_CHANGE_CHEAT_MODE        = 0x00020000,
+    USE_CREATOR_SECTION_ID          = 0x00040000,
     // Flags used only for lobbies
-    PUBLIC = 0x01000000,
-    DEFAULT = 0x02000000,
-    IS_OVERFLOW = 0x08000000,
+    PUBLIC                          = 0x01000000,
+    DEFAULT                         = 0x02000000,
+    IS_OVERFLOW                     = 0x08000000,
+    // clang-format on
   };
   enum class DropMode {
     DISABLED = 0,
@@ -82,45 +99,46 @@ struct Lobby : public std::enable_shared_from_this<Lobby> {
     SERVER_DUPLICATE = 4,
   };
 
-  std::weak_ptr<ServerState>
-      server_state;
-  PrefixedLogger log;
+  std::weak_ptr<ServerState> server_state;
+  phosg::PrefixedLogger log;
 
   uint32_t lobby_id;
 
   uint32_t min_level;
   uint32_t max_level;
 
-  // Item state
+  // Game state
   std::array<uint32_t, 12> next_item_id_for_client;
   uint32_t next_game_item_id;
   std::vector<FloorItemManager> floor_item_managers;
-
-  // Map state
-  std::shared_ptr<const Map::RareEnemyRates> rare_enemy_rates;
-  std::shared_ptr<Map> map;
-  parray<le_uint32_t, 0x20> variations;
+  std::shared_ptr<const MapState::RareEnemyRates> rare_enemy_rates;
+  std::shared_ptr<MapState> map_state; // Always null for lobbies, never null for games
+  Variations variations;
+  std::unique_ptr<QuestFlags> quest_flags_known; // If null, ALL quest flags are known
+  std::unique_ptr<QuestFlags> quest_flag_values;
+  std::unique_ptr<SwitchFlags> switch_flags;
 
   // Game config
-  Version base_version;
   // Bits in allowed_versions specify who is allowed to join this game. The
   // bits are indexed as (1 << version), where version is a value from the
   // Version enum.
   uint16_t allowed_versions;
-  uint8_t section_id;
+  uint8_t creator_section_id;
+  uint8_t override_section_id;
   Episode episode;
   GameMode mode;
   uint8_t difficulty; // 0-3
   uint16_t base_exp_multiplier;
+  float exp_share_multiplier;
   float challenge_exp_multiplier;
   std::string password;
   std::string name;
   // This seed is also sent to the client for rare enemy generation
   uint32_t random_seed;
-  std::shared_ptr<PSOLFGEncryption> random_crypt;
+  std::shared_ptr<PSOLFGEncryption> opt_rand_crypt;
   uint8_t allowed_drop_modes;
   DropMode drop_mode;
-  std::shared_ptr<ItemCreator> item_creator;
+  std::shared_ptr<ItemCreator> item_creator; // Always null for lobbies, never null for games
 
   struct ChallengeParameters {
     uint8_t stage_number = 0;
@@ -151,7 +169,7 @@ struct Lobby : public std::enable_shared_from_this<Lobby> {
   std::shared_ptr<Episode3::BattleRecord> battle_record; // Not used in watcher games
   std::shared_ptr<Episode3::BattleRecordPlayer> battle_player; // Only used in replay games
   std::shared_ptr<Episode3::Tournament::Match> tournament_match;
-  std::shared_ptr<const G_SetEXResultValues_GC_Ep3_6xB4x4B> ep3_ex_result_values;
+  std::shared_ptr<const G_SetEXResultValues_Ep3_6xB4x4B> ep3_ex_result_values;
 
   // Lobby stuff
   uint8_t event;
@@ -169,12 +187,14 @@ struct Lobby : public std::enable_shared_from_this<Lobby> {
   uint64_t idle_timeout_usecs;
   std::unique_ptr<struct event, void (*)(struct event*)> idle_timeout_event;
 
-  Lobby(std::shared_ptr<ServerState> s, uint32_t id);
+  Lobby(std::shared_ptr<ServerState> s, uint32_t id, bool is_game);
   Lobby(const Lobby&) = delete;
   Lobby(Lobby&&) = delete;
   ~Lobby();
   Lobby& operator=(const Lobby&) = delete;
   Lobby& operator=(Lobby&&) = delete;
+
+  void reset_next_item_ids();
 
   [[nodiscard]] inline bool check_flag(Flag flag) const {
     return !!(this->enabled_flags & static_cast<uint32_t>(flag));
@@ -191,14 +211,16 @@ struct Lobby : public std::enable_shared_from_this<Lobby> {
 
   std::shared_ptr<ServerState> require_server_state() const;
   std::shared_ptr<ChallengeParameters> require_challenge_params() const;
-  void set_drop_mode(DropMode new_mode);
-  void create_item_creator();
+  void create_item_creator(Version logic_version = Version::UNKNOWN);
+  uint8_t effective_section_id() const;
+  uint16_t quest_version_flags() const;
   void load_maps();
   void create_ep3_server();
 
   [[nodiscard]] inline bool is_game() const {
     return this->check_flag(Flag::GAME);
   }
+  [[nodiscard]] bool is_ep3_nte() const;
   [[nodiscard]] inline bool is_ep3() const {
     return this->episode == Episode::EP3;
   }
@@ -209,9 +231,13 @@ struct Lobby : public std::enable_shared_from_this<Lobby> {
   inline void allow_version(Version v) {
     this->allowed_versions |= (1 << static_cast<size_t>(v));
   }
+  inline void forbid_version(Version v) {
+    this->allowed_versions &= ~(1 << static_cast<size_t>(v));
+  }
 
   void reassign_leader_on_client_departure(size_t leaving_client_id);
   size_t count_clients() const;
+  bool any_v1_clients_present() const;
   bool any_client_loading() const;
 
   void add_client(std::shared_ptr<Client> c, ssize_t required_client_id = -1);
@@ -222,26 +248,44 @@ struct Lobby : public std::enable_shared_from_this<Lobby> {
       std::shared_ptr<Client> c,
       ssize_t required_client_id = -1);
 
-  std::shared_ptr<Client> find_client(
-      const std::string* identifier = nullptr,
-      uint64_t serial_number = 0);
+  std::shared_ptr<Client> find_client(const std::string* identifier = nullptr, uint64_t account_id = 0);
+
+  enum class JoinError {
+    ALLOWED = 0,
+    FULL,
+    VERSION_CONFLICT,
+    QUEST_SELECTION_IN_PROGRESS,
+    QUEST_IN_PROGRESS,
+    BATTLE_IN_PROGRESS,
+    LOADING,
+    SOLO,
+    INCORRECT_PASSWORD,
+    LEVEL_TOO_LOW,
+    LEVEL_TOO_HIGH,
+    NO_ACCESS_TO_QUEST,
+  };
+  JoinError join_error_for_client(std::shared_ptr<Client> c, const std::string* password) const;
 
   bool item_exists(uint8_t floor, uint32_t item_id) const;
   std::shared_ptr<FloorItem> find_item(uint8_t floor, uint32_t item_id) const;
-  void add_item(uint8_t floor, const ItemData& item, float x, float z, uint16_t visibility_flags);
+  void add_item(
+      uint8_t floor,
+      const ItemData& item,
+      const VectorXZF& pos,
+      std::shared_ptr<const MapState::ObjectState> from_obj,
+      std::shared_ptr<const MapState::EnemyState> from_ene,
+      uint16_t flags);
   void add_item(uint8_t floor, std::shared_ptr<FloorItem>);
   void evict_items_from_floor(uint8_t floor);
   std::shared_ptr<FloorItem> remove_item(uint8_t floor, uint32_t item_id, uint8_t requesting_client_id);
 
   uint32_t generate_item_id(uint8_t client_id);
   void on_item_id_generated_externally(uint32_t item_id);
-  void assign_inventory_and_bank_item_ids(std::shared_ptr<Client> c);
+  void assign_inventory_and_bank_item_ids(std::shared_ptr<Client> c, bool consume_ids);
 
   QuestIndex::IncludeCondition quest_include_condition() const;
 
-  static uint8_t game_event_for_lobby_event(uint8_t lobby_event);
-
-  std::unordered_map<uint32_t, std::shared_ptr<Client>> clients_by_serial_number() const;
+  std::unordered_map<uint32_t, std::shared_ptr<Client>> clients_by_account_id() const;
 
   static void dispatch_on_idle_timeout(evutil_socket_t, short, void* ctx);
 
@@ -249,6 +293,6 @@ struct Lobby : public std::enable_shared_from_this<Lobby> {
 };
 
 template <>
-Lobby::DropMode enum_for_name<Lobby::DropMode>(const char* name);
+Lobby::DropMode phosg::enum_for_name<Lobby::DropMode>(const char* name);
 template <>
-const char* name_for_enum<Lobby::DropMode>(Lobby::DropMode value);
+const char* phosg::name_for_enum<Lobby::DropMode>(Lobby::DropMode value);

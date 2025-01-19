@@ -8,6 +8,46 @@
 
 using namespace std;
 
+const vector<uint8_t> ItemData::StackLimits::DEFAULT_TOOL_LIMITS_DC_NTE(
+    {10});
+const vector<uint8_t> ItemData::StackLimits::DEFAULT_TOOL_LIMITS_V1_V2(
+    {10, 10, 1, 10, 10, 10, 10, 10, 10, 1});
+const vector<uint8_t> ItemData::StackLimits::DEFAULT_TOOL_LIMITS_V3_V4(
+    {10, 10, 1, 10, 10, 10, 10, 10, 10, 1, 1, 1, 1, 1, 1, 1, 99, 1});
+
+const ItemData::StackLimits ItemData::StackLimits::DEFAULT_STACK_LIMITS_DC_NTE(
+    Version::DC_NTE, ItemData::StackLimits::DEFAULT_TOOL_LIMITS_DC_NTE, 999999);
+const ItemData::StackLimits ItemData::StackLimits::DEFAULT_STACK_LIMITS_V1_V2(
+    Version::DC_V1, ItemData::StackLimits::DEFAULT_TOOL_LIMITS_V1_V2, 999999);
+const ItemData::StackLimits ItemData::StackLimits::DEFAULT_STACK_LIMITS_V3_V4(
+    Version::GC_V3, ItemData::StackLimits::DEFAULT_TOOL_LIMITS_V3_V4, 999999);
+
+ItemData::StackLimits::StackLimits(
+    Version version, const vector<uint8_t>& max_tool_stack_sizes_by_data1_1, uint32_t max_meseta_stack_size)
+    : version(version),
+      max_tool_stack_sizes_by_data1_1(max_tool_stack_sizes_by_data1_1),
+      max_meseta_stack_size(max_meseta_stack_size) {}
+
+ItemData::StackLimits::StackLimits(Version version, const phosg::JSON& json)
+    : version(version) {
+  this->max_tool_stack_sizes_by_data1_1.clear();
+  for (const auto& limit_json : json.at("ToolLimits").as_list()) {
+    this->max_tool_stack_sizes_by_data1_1.emplace_back(limit_json->as_int());
+  }
+  this->max_meseta_stack_size = json.at("MesetaLimit").as_int();
+}
+
+uint8_t ItemData::StackLimits::get(uint8_t data1_0, uint8_t data1_1) const {
+  if (data1_0 == 4) {
+    return this->max_meseta_stack_size;
+  }
+  if (data1_0 == 3) {
+    const auto& vec = this->max_tool_stack_sizes_by_data1_1;
+    return vec.at(min<size_t>(data1_1, vec.size() - 1));
+  }
+  return 1;
+}
+
 ItemData::ItemData() {
   this->clear();
 }
@@ -20,8 +60,8 @@ ItemData::ItemData(const ItemData& other) {
 
 ItemData::ItemData(uint64_t first, uint64_t second) {
   *reinterpret_cast<be_uint64_t*>(&this->data1[0]) = first;
-  this->data1d[2] = bswap32((second >> 32) & 0xFFFFFFFF);
-  this->data2d = bswap32(second & 0xFFFFFFFF);
+  this->data1d[2] = phosg::bswap32((second >> 32) & 0xFFFFFFFF);
+  this->data2d = phosg::bswap32(second & 0xFFFFFFFF);
 }
 
 ItemData& ItemData::operator=(const ItemData& other) {
@@ -68,23 +108,32 @@ bool ItemData::empty() const {
 }
 
 uint32_t ItemData::primary_identifier() const {
+  // Primary identifiers are like:
+  // - 00TTSS00 = weapon (T = type, S = subtype; subtype is 0 for ES weapons)
+  // - 01TTSS00 = armor/shield/unit
+  // - 02TT0000 = mag
+  // - 0302ZZLL = tech disk (Z = tech number, L = level)
+  // - 03TTSS00 = tool
+  // - 04000000 = meseta
+
   // The game treats any item starting with 04 as Meseta, and ignores the rest
   // of data1 (the value is in data2)
   if (this->data1[0] == 0x04) {
-    return 0x040000;
+    return 0x04000000;
   }
   if (this->data1[0] == 0x03 && this->data1[1] == 0x02) {
-    return 0x030200; // Tech disk (data1[2] is level, so omit it)
+    // Tech disk (tech ID is data1[4], not [2])
+    return 0x03020000 | (this->data1[4] << 8) | this->data1[2];
   } else if (this->data1[0] == 0x02) {
-    return 0x020000 | (this->data1[1] << 8); // Mag
+    return 0x02000000 | (this->data1[1] << 16); // Mag
   } else if (this->is_s_rank_weapon()) {
-    return (this->data1[0] << 16) | (this->data1[1] << 8);
+    return (this->data1[0] << 24) | (this->data1[1] << 16);
   } else {
-    return (this->data1[0] << 16) | (this->data1[1] << 8) | this->data1[2];
+    return (this->data1[0] << 24) | (this->data1[1] << 16) | (this->data1[2] << 8);
   }
 }
 
-bool ItemData::is_wrapped() const {
+bool ItemData::is_wrapped(const StackLimits& limits) const {
   switch (this->data1[0]) {
     case 0:
     case 1:
@@ -92,7 +141,7 @@ bool ItemData::is_wrapped() const {
     case 2:
       return this->data2[2] & 0x40;
     case 3:
-      return !this->is_stackable() && (this->data1[3] & 0x40);
+      return !this->is_stackable(limits) && (this->data1[3] & 0x40);
     case 4:
       return false;
     default:
@@ -100,18 +149,22 @@ bool ItemData::is_wrapped() const {
   }
 }
 
-void ItemData::wrap() {
+void ItemData::wrap(const StackLimits& limits, uint8_t present_color) {
   switch (this->data1[0]) {
     case 0:
-    case 1:
       this->data1[4] |= 0x40;
+      this->data1[5] = (this->data1[5] & 0xF0) | (present_color & 0x0F);
+      break;
+    case 1:
+      this->data1[4] = (this->data1[4] & 0xF0) | 0x40 | (present_color & 0x0F);
       break;
     case 2:
+      // Mags cannot have custom present colors
       this->data2[2] |= 0x40;
       break;
     case 3:
-      if (!this->is_stackable()) {
-        this->data1[3] |= 0x40;
+      if (!this->is_stackable(limits)) {
+        this->data1[3] = (this->data1[3] & 0xF0) | 0x40 | (present_color & 0x0F);
       }
       break;
     case 4:
@@ -121,18 +174,18 @@ void ItemData::wrap() {
   }
 }
 
-void ItemData::unwrap() {
+void ItemData::unwrap(const StackLimits& limits) {
   switch (this->data1[0]) {
     case 0:
     case 1:
-      this->data1[4] &= 0xBF;
+      this->data1[4] &= 0xB0;
       break;
     case 2:
-      this->data2[2] &= 0xBF;
+      this->data2[2] &= 0xB0;
       break;
     case 3:
-      if (!this->is_stackable()) {
-        this->data1[3] &= 0xBF;
+      if (!this->is_stackable(limits)) {
+        this->data1[3] &= 0xB0;
       }
       break;
     case 4:
@@ -142,32 +195,31 @@ void ItemData::unwrap() {
   }
 }
 
-bool ItemData::is_stackable() const {
-  return this->max_stack_size() > 1;
+bool ItemData::is_stackable(const StackLimits& limits) const {
+  return this->max_stack_size(limits) > 1;
 }
 
-size_t ItemData::stack_size() const {
-  if (max_stack_size_for_item(this->data1[0], this->data1[1]) > 1) {
+size_t ItemData::stack_size(const StackLimits& limits) const {
+  if (this->max_stack_size(limits) > 1) {
     return this->data1[5];
   }
   return 1;
 }
 
-size_t ItemData::max_stack_size() const {
-  return max_stack_size_for_item(this->data1[0], this->data1[1]);
+size_t ItemData::max_stack_size(const StackLimits& limits) const {
+  return limits.get(this->data1[0], this->data1[1]);
 }
 
-void ItemData::enforce_min_stack_size() {
-  if (this->stack_size() == 0) {
+void ItemData::enforce_min_stack_size(const StackLimits& limits) {
+  if (this->stack_size(limits) == 0) {
     this->data1[5] = 1;
   }
 }
 
 bool ItemData::is_common_consumable(uint32_t primary_identifier) {
-  if (primary_identifier == 0x030200) {
-    return false;
-  }
-  return (primary_identifier >= 0x030000) && (primary_identifier < 0x030A00);
+  return (primary_identifier >= 0x03000000) &&
+      (primary_identifier < 0x030A0000) &&
+      ((primary_identifier & 0xFFFF0000) != 0x03020000);
 }
 
 bool ItemData::is_common_consumable() const {
@@ -298,15 +350,15 @@ void ItemData::add_mag_photon_blast(uint8_t pb_num) {
     }
     if (pb_num >= 4) {
       throw runtime_error("left photon blast number is too high");
-      pb_nums |= (pb_num << 6);
     }
+    pb_nums |= (pb_num << 6);
     flags |= 4;
   }
 }
 
 void ItemData::decode_for_version(Version from_version) {
   uint8_t encoded_v2_data = this->get_encoded_v2_data();
-  bool should_decode_v2_data = (is_v1(from_version) || is_v2(from_version)) &&
+  bool should_decode_v2_data = (is_v1(from_version) || is_v2(from_version)) && (from_version != Version::GC_NTE) &&
       (encoded_v2_data != 0x00) && this->has_encoded_v2_data();
 
   switch (this->data1[0]) {
@@ -330,13 +382,9 @@ void ItemData::decode_for_version(Version from_version) {
         this->data1[1] = encoded_v2_data + 0x2B;
       }
 
-      if (is_big_endian(from_version)) {
-        // PSO GC erroneously byteswaps the data2d field, even though it's actually
-        // just four individual bytes, so we correct for that here.
-        this->data2d = bswap32(this->data2d);
-
-      } else if (is_v1(from_version) || is_v2(from_version)) {
-        // PSO PC encodes mags in a tediously annoying manner. The first four bytes are the same, but then...
+      if (is_v1(from_version) || is_v2(from_version)) {
+        // PSO PC and GC NTE encode mags in a tediously annoying manner. The
+        // first four bytes are the same, but then...
         // V2: pHHHHHHHHHHHHHHc pIIIIIIIIIIIIIIc JJJJJJJJJJJJJJJc KKKKKKKKKKKKKKKc QQQQQQQQ QQQQQQQQ YYYYYYYY pYYYYYYY
         // V3: HHHHHHHHHHHHHHHH IIIIIIIIIIIIIIII JJJJJJJJJJJJJJJJ KKKKKKKKKKKKKKKK YYYYYYYY QQQQQQQQ PPPPPPPP CCCCCCCC
         // c = color in V2 (4 bits; low bit first)
@@ -352,10 +400,18 @@ void ItemData::decode_for_version(Version from_version) {
         this->data2[0] = this->data2w[1] & 0x7FFF; // Synchro
         this->data2[2] = ((this->data2[3] >> 7) & 1) | ((this->data1w[2] >> 14) & 2) | ((this->data1w[3] >> 13) & 4); // PB flags
         this->data2[3] = (this->data1w[2] & 1) | ((this->data1w[3] & 1) << 1) | ((this->data1w[4] & 1) << 2) | ((this->data1w[5] & 1) << 3); // Color
+        // 01000080
         this->data1w[2] &= 0x7FFE;
         this->data1w[3] &= 0x7FFE;
         this->data1w[4] &= 0xFFFE;
         this->data1w[5] &= 0xFFFE;
+
+      } else if (is_big_endian(from_version)) {
+        // PSO GC (but not GC NTE, which uses the above logic) byteswaps the
+        // data2d field, since internally it's actually a uint32_t. We treat it
+        // as individual bytes instead, so we correct for the client's
+        // byteswapping here.
+        this->data2d = phosg::bswap32(this->data2d);
       }
       break;
 
@@ -386,7 +442,10 @@ void ItemData::decode_for_version(Version from_version) {
 }
 
 void ItemData::encode_for_version(Version to_version, shared_ptr<const ItemParameterTable> item_parameter_table) {
-  bool should_encode_v2_data = (is_v1(to_version) || is_v2(to_version)) && !this->has_encoded_v2_data();
+  bool should_encode_v2_data = item_parameter_table &&
+      (is_v1(to_version) || is_v2(to_version)) &&
+      (to_version != Version::GC_NTE) &&
+      !this->has_encoded_v2_data();
 
   switch (this->data1[0]) {
     case 0x00:
@@ -425,9 +484,7 @@ void ItemData::encode_for_version(Version to_version, shared_ptr<const ItemParam
       // This logic is the inverse of the corresponding logic in
       // decode_for_version; see that function for a description of what's
       // going on here.
-      if (is_big_endian(to_version)) {
-        this->data2d = bswap32(this->data2d);
-      } else if (is_v1(to_version) || is_v2(to_version)) {
+      if (is_v1(to_version) || is_v2(to_version)) {
         this->data1w[2] = (this->data1w[2] & 0x7FFE) | ((this->data2[2] << 14) & 0x8000) | (this->data2[3] & 1);
         this->data1w[3] = (this->data1w[3] & 0x7FFE) | ((this->data2[2] << 13) & 0x8000) | ((this->data2[3] >> 1) & 1);
         this->data1w[4] = (this->data1w[4] & 0xFFFE) | ((this->data2[3] >> 2) & 1);
@@ -435,6 +492,8 @@ void ItemData::encode_for_version(Version to_version, shared_ptr<const ItemParam
         // Order is important; data2w[0] must not be written before data2[0] is read
         this->data2w[1] = this->data2[0] | ((this->data2[2] << 15) & 0x8000);
         this->data2w[0] = this->data2[1];
+      } else if (is_big_endian(to_version)) {
+        this->data2d = phosg::bswap32(this->data2d);
       }
       break;
 
@@ -489,25 +548,31 @@ bool ItemData::has_encoded_v2_data() const {
       : (this->get_encoded_v2_data() != 0);
 }
 
-uint16_t ItemData::get_sealed_item_kill_count() const {
-  return ((this->data1[10] << 8) | this->data1[11]) & 0x7FFF;
+bool ItemData::has_kill_count() const {
+  return !this->is_s_rank_weapon() && (this->data1[10] & 0x80);
 }
 
-void ItemData::set_sealed_item_kill_count(uint16_t v) {
-  if (v > 0x7FFF) {
-    this->data1w[5] = 0xFFFF;
-  } else {
-    this->data1[10] = (v >> 8) | 0x80;
-    this->data1[11] = v;
+uint16_t ItemData::get_kill_count() const {
+  return this->has_kill_count() ? (((this->data1[10] << 8) | this->data1[11]) & 0x7FFF) : 0;
+}
+
+void ItemData::set_kill_count(uint16_t v) {
+  if (!this->is_s_rank_weapon()) {
+    if (v > 0x7FFF) {
+      this->data1w[5] = 0xFFFF;
+    } else {
+      this->data1[10] = (v >> 8) | 0x80;
+      this->data1[11] = v;
+    }
   }
 }
 
-uint8_t ItemData::get_tool_item_amount() const {
-  return this->is_stackable() ? this->data1[5] : 1;
+uint8_t ItemData::get_tool_item_amount(const StackLimits& limits) const {
+  return this->is_stackable(limits) ? this->data1[5] : 1;
 }
 
-void ItemData::set_tool_item_amount(uint8_t amount) {
-  if (this->is_stackable()) {
+void ItemData::set_tool_item_amount(const StackLimits& limits, uint8_t amount) {
+  if (this->is_stackable(limits)) {
     this->data1[5] = amount;
   } else if (this->data1[0] == 0x03) {
     this->data1[5] = 0x00;
@@ -628,6 +693,10 @@ bool ItemData::can_be_equipped_in_slot(EquipSlot slot) const {
   }
 }
 
+bool ItemData::can_be_encoded_in_rel_rare_table() const {
+  return !(this->data1[3] || this->data1d[1] || this->data1d[2] || this->data2d);
+}
+
 bool ItemData::compare_for_sort(const ItemData& a, const ItemData& b) {
   for (size_t z = 0; z < 12; z++) {
     if (a.data1[z] < b.data1[z]) {
@@ -647,6 +716,9 @@ bool ItemData::compare_for_sort(const ItemData& a, const ItemData& b) {
 }
 
 ItemData ItemData::from_data(const string& data) {
+  if (data.size() < 2) {
+    throw runtime_error("data is too short");
+  }
   if (data.size() > 0x10) {
     throw runtime_error("data is too long");
   }
@@ -658,14 +730,43 @@ ItemData ItemData::from_data(const string& data) {
   for (size_t z = 12; z < min<size_t>(data.size(), 16); z++) {
     ret.data2[z - 12] = data[z];
   }
+  if (ret.data1[0] > 4) {
+    throw runtime_error("invalid item class");
+  }
+  return ret;
+}
+
+ItemData ItemData::from_primary_identifier(const StackLimits& limits, uint32_t primary_identifier) {
+  ItemData ret;
+  if (primary_identifier > 0x04000000) {
+    throw runtime_error("invalid item class");
+  }
+  ret.data1[0] = (primary_identifier >> 24) & 0xFF;
+  ret.data1[1] = (primary_identifier >> 16) & 0xFF;
+  if ((primary_identifier & 0xFFFF0000) == 0x03020000) {
+    ret.data1[4] = (primary_identifier >> 8) & 0xFF;
+    ret.data1[2] = primary_identifier & 0xFF;
+  } else {
+    ret.data1[2] = (primary_identifier >> 8) & 0xFF;
+  }
+  ret.set_tool_item_amount(limits, 1);
   return ret;
 }
 
 string ItemData::hex() const {
-  return string_printf("%02hhX%02hhX%02hhX%02hhX %02hhX%02hhX%02hhX%02hhX %02hhX%02hhX%02hhX%02hhX (%08" PRIX32 ") %02hhX%02hhX%02hhX%02hhX",
-      this->data1[0], this->data1[1], this->data1[2], this->data1[3],
-      this->data1[4], this->data1[5], this->data1[6], this->data1[7],
-      this->data1[8], this->data1[9], this->data1[10], this->data1[11],
-      this->id.load(),
-      this->data2[0], this->data2[1], this->data2[2], this->data2[3]);
+  return phosg::string_printf("%08" PRIX32 " %08" PRIX32 " %08" PRIX32 " (%08" PRIX32 ") %08" PRIX32,
+      this->data1db[0].load(), this->data1db[1].load(), this->data1db[2].load(), this->id.load(), this->data2db.load());
+}
+
+string ItemData::short_hex() const {
+  auto ret = phosg::string_printf("%08" PRIX32 "%08" PRIX32 "%08" PRIX32 "%08" PRIX32,
+      this->data1db[0].load(), this->data1db[1].load(), this->data1db[2].load(), this->data2db.load());
+  size_t offset = ret.find_last_not_of('0');
+  if (offset != string::npos) {
+    offset += (offset & 1) ? 1 : 2;
+    if (offset < ret.size()) {
+      ret.resize(offset);
+    }
+  }
+  return ret;
 }

@@ -14,26 +14,41 @@
 
 class ItemNameIndex {
 public:
-  ItemNameIndex(JSON&& v2_names, JSON&& v3_names, JSON&& v4_names);
-
-  std::string describe_item(
-      Version version,
-      const ItemData& item,
-      std::shared_ptr<const ItemParameterTable> item_parameter_table = nullptr) const;
-  ItemData parse_item_description(Version version, const std::string& description) const;
-
-private:
-  ItemData parse_item_description_phase(Version version, const std::string& description, bool skip_special) const;
-
   struct ItemMetadata {
     uint32_t primary_identifier;
-    std::string v2_name;
-    std::string v3_name;
-    std::string v4_name;
+    std::string name;
   };
 
-  std::unordered_map<uint32_t, std::shared_ptr<ItemMetadata>> primary_identifier_index;
-  std::map<std::string, std::shared_ptr<ItemMetadata>> v2_name_index;
-  std::map<std::string, std::shared_ptr<ItemMetadata>> v3_name_index;
-  std::map<std::string, std::shared_ptr<ItemMetadata>> v4_name_index;
+  ItemNameIndex(
+      std::shared_ptr<const ItemParameterTable> pmt,
+      std::shared_ptr<const ItemData::StackLimits> limits,
+      const std::vector<std::string>& name_coll);
+
+  inline size_t entry_count() const {
+    return this->primary_identifier_index.size();
+  }
+
+  inline const std::unordered_map<uint32_t, std::shared_ptr<const ItemMetadata>>& all_by_primary_identifier() const {
+    return this->primary_identifier_index;
+  }
+  inline const std::map<std::string, std::shared_ptr<const ItemMetadata>>& all_by_name() const {
+    return this->name_index;
+  }
+
+  inline bool exists(const ItemData& item) const {
+    return this->primary_identifier_index.count(item.primary_identifier());
+  }
+  std::string describe_item(const ItemData& item, bool include_color_escapes = false) const;
+  ItemData parse_item_description(const std::string& description) const;
+
+  void print_table(FILE* stream) const;
+
+private:
+  ItemData parse_item_description_phase(const std::string& description, bool skip_special) const;
+
+  std::shared_ptr<const ItemParameterTable> item_parameter_table;
+  std::shared_ptr<const ItemData::StackLimits> limits;
+
+  std::unordered_map<uint32_t, std::shared_ptr<const ItemMetadata>> primary_identifier_index;
+  std::map<std::string, std::shared_ptr<const ItemMetadata>> name_index;
 };

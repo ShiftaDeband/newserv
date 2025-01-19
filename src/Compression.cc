@@ -14,7 +14,7 @@
 using namespace std;
 
 template <>
-const char* name_for_enum<CompressPhase>(CompressPhase v) {
+const char* phosg::name_for_enum<CompressPhase>(CompressPhase v) {
   switch (v) {
     case CompressPhase::INDEX:
       return "INDEX";
@@ -118,7 +118,7 @@ struct WindowIndex {
 };
 
 struct LZSSInterleavedWriter {
-  StringWriter w;
+  phosg::StringWriter w;
   size_t buf_offset;
   uint8_t next_control_bit;
   uint8_t buf[0x19];
@@ -166,7 +166,7 @@ struct LZSSInterleavedWriter {
 
 class ControlStreamReader {
 public:
-  ControlStreamReader(StringReader& r)
+  ControlStreamReader(phosg::StringReader& r)
       : r(r),
         bits(0x0000) {}
 
@@ -188,7 +188,7 @@ public:
   }
 
 private:
-  StringReader& r;
+  phosg::StringReader& r;
   uint16_t bits;
 };
 
@@ -438,6 +438,45 @@ string prs_compress_optimal(const string& data, ProgressCallback progress_fn) {
   return prs_compress_optimal(data.data(), data.size(), progress_fn);
 }
 
+string prs_compress_pessimal(const void* vdata, size_t size) {
+  const uint8_t* in_data = reinterpret_cast<const uint8_t*>(vdata);
+
+  // The worst possible encoding we can do is a literal byte when no byte with
+  // the same value is within the window, or an extended copy if there is a byte
+  // with the same value in the window.
+  WindowIndex<0x1FFF, 1> window(in_data, size);
+  LZSSInterleavedWriter w;
+  for (size_t z = 0; z < size; z++) {
+    auto match = window.get_best_match();
+    if (match.second >= 1) {
+      // Write extended copy
+      int16_t offset = match.first - window.offset;
+      w.write_control(false);
+      w.flush_if_ready();
+      w.write_control(true);
+      uint16_t a = (offset << 3);
+      w.write_data(a & 0xFF);
+      w.write_data(a >> 8);
+      w.write_data(0);
+    } else {
+      // Write literal
+      w.write_control(true);
+      w.write_data(in_data[z]);
+    }
+    w.flush_if_ready();
+    window.advance();
+  }
+
+  // Write stop command
+  w.write_control(false);
+  w.flush_if_ready();
+  w.write_control(true);
+  w.write_data(0);
+  w.write_data(0);
+
+  return std::move(w.close());
+}
+
 PRSCompressor::PRSCompressor(
     ssize_t compression_level, ProgressCallback progress_fn)
     : compression_level(compression_level),
@@ -454,7 +493,7 @@ void PRSCompressor::add(const void* data, size_t size) {
     throw logic_error("compressor is closed");
   }
 
-  StringReader r(data, size);
+  phosg::StringReader r(data, size);
   while (!r.eof()) {
     this->add_byte(r.get_u8());
   }
@@ -835,8 +874,8 @@ PRSDecompressResult prs_decompress_with_meta(
   // is encountered partway through an opcode, we throw instead, because it's
   // likely the input has been truncated or is malformed in some way.
 
-  StringWriter w;
-  StringReader r(data, size);
+  phosg::StringWriter w;
+  phosg::StringReader r(data, size);
   ControlStreamReader cr(r);
 
   while (!r.eof()) {
@@ -920,7 +959,7 @@ string prs_decompress(const string& data, size_t max_output_size, bool allow_unt
 
 size_t prs_decompress_size(const void* data, size_t size, size_t max_output_size, bool allow_unterminated) {
   size_t ret = 0;
-  StringReader r(data, size);
+  phosg::StringReader r(data, size);
   ControlStreamReader cr(r);
 
   while (!r.eof()) {
@@ -972,44 +1011,51 @@ size_t prs_decompress_size(const string& data, size_t max_output_size, bool allo
 
 void prs_disassemble(FILE* stream, const void* data, size_t size) {
   size_t output_bytes = 0;
-  StringReader r(data, size);
+  phosg::StringReader r(data, size);
   ControlStreamReader cr(r);
 
   while (!r.eof()) {
+    uint8_t buffered_bits = cr.buffered_bits();
     if (cr.read()) {
-      fprintf(stream, "[%zX] literal %02hhX\n", output_bytes, r.get_u8());
+      uint8_t literal_value = r.get_u8();
+      fprintf(stream, "[%zX] %hhu> 1    %02hhX        literal %02hhX\n",
+          output_bytes, buffered_bits, literal_value, literal_value);
       output_bytes++;
 
     } else {
-      ssize_t offset;
-      size_t count;
-      const char* copy_type;
-
+      size_t count, read_offset;
       if (cr.read()) {
-        uint16_t a = r.get_u8();
-        a |= (r.get_u8() << 8);
-        offset = (a >> 3) | (~0x1FFF);
+        uint8_t a_low = r.get_u8();
+        uint8_t a_high = r.get_u8();
+        uint16_t a = (a_high << 8) | a_low;
+        ssize_t offset = (a >> 3) | (~0x1FFF);
         if (offset == ~0x1FFF) {
           fprintf(stream, "[%zX] end\n", output_bytes);
           break;
         }
         if (a & 7) {
-          copy_type = "long";
           count = (a & 7) + 2;
+          read_offset = output_bytes + offset;
+          fprintf(stream, "[%zX] %hhu> 01   %02hhX %02hhX     long copy from %zd (offset=%zX) size=%zX\n",
+              output_bytes, buffered_bits, a_low, a_high, offset, read_offset, count);
         } else {
-          copy_type = "extended";
-          count = r.get_u8() + 1;
+          uint8_t count_u8 = r.get_u8();
+          count = count_u8 + 1;
+          read_offset = output_bytes + offset;
+          fprintf(stream, "[%zX] %hhu> 01   %02hhX %02hhX %02hhX  extended copy from %zd (offset=%zX) size=%zX\n",
+              output_bytes, buffered_bits, a_low, a_high, count_u8, offset, read_offset, count);
         }
 
       } else {
-        copy_type = "short";
-        count = cr.read() << 1;
-        count = (count | cr.read()) + 2;
-        offset = r.get_u8() | (~0xFF);
+        bool first_bit = cr.read();
+        bool second_bit = cr.read();
+        uint8_t offset_u8 = r.get_u8();
+        count = ((first_bit ? 2 : 0) | (second_bit ? 1 : 0)) + 2;
+        ssize_t offset = offset_u8 | (~0xFF);
+        read_offset = output_bytes + offset;
+        fprintf(stream, "[%zX] %hhu> 00%c%c %02hhX        short copy from %zd (offset=%zX) size=%zX\n",
+            output_bytes, buffered_bits, first_bit ? '1' : '0', second_bit ? '1' : '0', offset_u8, offset, read_offset, count);
       }
-
-      size_t read_offset = output_bytes + offset;
-      fprintf(stream, "[%zX] %s copy %zX\n", output_bytes, copy_type, count);
 
       if (read_offset >= output_bytes) {
         throw runtime_error("backreference offset beyond beginning of output");
@@ -1203,8 +1249,8 @@ string bc0_decompress(const string& data) {
 }
 
 string bc0_decompress(const void* data, size_t size) {
-  StringReader r(data, size);
-  StringWriter w;
+  phosg::StringReader r(data, size);
+  phosg::StringWriter w;
 
   // Unlike PRS, BC0 uses a memo which "rolls over" every 0x1000 bytes. The
   // boundaries of these "memo pages" are offset by -0x12 bytes for some reason,
@@ -1235,15 +1281,15 @@ string bc0_decompress(const void* data, size_t size) {
       }
     }
 
-    // Control bit 0 means to perform a backreference copy. The offset and
-    // size are stored in two bytes in the input stream, laid out as follows:
-    // a1 = 0bBBBBBBBB
-    // a2 = 0bAAAACCCC
-    // The offset is the concatenation of bits AAAABBBBBBBB, which refers to a
-    // position in the memo; the number of bytes to copy is (CCCC + 3). The
-    // decompressor copies that many bytes from that offset in the memo, and
-    // writes them to the output and to the current position in the memo.
     if ((control_stream_bits & 1) == 0) {
+      // Control bit 0 means to perform a backreference copy. The offset and
+      // size are stored in two bytes in the input stream, laid out as follows:
+      // a1 = 0bBBBBBBBB
+      // a2 = 0bAAAACCCC
+      // The offset is the concatenation of bits AAAABBBBBBBB, which refers to
+      // a position in the memo; the number of bytes to copy is (CCCC + 3). The
+      // decompressor copies that many bytes from that offset in the memo, and
+      // writes them to the output and to the current position in the memo.
       uint8_t a1 = r.get_u8();
       if (r.eof()) {
         break;
@@ -1258,9 +1304,9 @@ string bc0_decompress(const void* data, size_t size) {
         memo_offset = (memo_offset + 1) & 0x0FFF;
       }
 
+    } else {
       // Control bit 1 means to write a byte directly from the input to the
       // output. As above, the byte is also written to the memo.
-    } else {
       uint8_t v = r.get_u8();
       w.put_u8(v);
       memo[memo_offset] = v;
@@ -1276,7 +1322,7 @@ void bc0_disassemble(FILE* stream, const string& data) {
 }
 
 void bc0_disassemble(FILE* stream, const void* data, size_t size) {
-  StringReader r(data, size);
+  phosg::StringReader r(data, size);
   uint16_t control_stream_bits = 0x0000;
 
   size_t output_bytes = 0;

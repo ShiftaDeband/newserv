@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "Menu.hh"
@@ -18,7 +19,8 @@ void set_function_compiler_available(bool is_available);
 
 struct CompiledFunctionCode {
   enum class Architecture {
-    POWERPC = 0, // GC
+    UNKNOWN = 0,
+    POWERPC, // GC
     X86, // PC, XB, BB
     SH4, // Dreamcast
   };
@@ -27,6 +29,7 @@ struct CompiledFunctionCode {
   std::vector<uint16_t> relocation_deltas;
   std::unordered_map<std::string, uint32_t> label_offsets;
   uint32_t entrypoint_offset_offset;
+  std::string source_path; // Path to source file from newserv root
   std::string short_name; // Based on filename
   std::string long_name; // From .meta name directive
   std::string description; // From .meta description directive
@@ -37,14 +40,16 @@ struct CompiledFunctionCode {
 
   bool is_big_endian() const;
 
-  template <typename FooterT>
+  template <bool BE>
   std::string generate_client_command_t(
       const std::unordered_map<std::string, uint32_t>& label_writes,
-      const std::string& suffix,
+      const void* suffix_data = nullptr,
+      size_t suffix_size = 0,
       uint32_t override_relocations_offset = 0) const;
   std::string generate_client_command(
       const std::unordered_map<std::string, uint32_t>& label_writes = {},
-      const std::string& suffix = "",
+      const void* suffix_data = nullptr,
+      size_t suffix_size = 0,
       uint32_t override_relocations_offset = 0) const;
 };
 
@@ -67,7 +72,10 @@ struct FunctionCodeIndex {
   std::map<std::string, std::shared_ptr<CompiledFunctionCode>> name_and_specific_version_to_patch_function;
 
   std::shared_ptr<const Menu> patch_menu(uint32_t specific_version) const;
+  std::shared_ptr<const Menu> patch_switches_menu(uint32_t specific_version, const std::unordered_set<std::string>& auto_patches_enabled) const;
   bool patch_menu_empty(uint32_t specific_version) const;
+
+  std::shared_ptr<const CompiledFunctionCode> get_patch(const std::string& name, uint32_t specific_version) const;
 };
 
 struct DOLFileIndex {

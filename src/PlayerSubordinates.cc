@@ -22,178 +22,6 @@
 
 using namespace std;
 
-PlayerInventoryItem::PlayerInventoryItem(const ItemData& item, bool equipped)
-    : present(1),
-      unknown_a1(0),
-      extension_data1(0),
-      extension_data2(0),
-      flags(equipped ? 8 : 0),
-      data(item) {}
-
-uint32_t PlayerVisualConfig::compute_name_color_checksum(uint32_t name_color) {
-  uint8_t x = (random_object<uint32_t>() % 0xFF) + 1;
-  uint8_t y = (random_object<uint32_t>() % 0xFF) + 1;
-  // name_color          = ABCDEFGHabcdefghIJKLMNOPijklmnop
-  // name_color_checksum = ---------ijklmabcdeIJKLM-------- ^ (xxxxxxxxyyyyyyyyxxxxxxxxyyyyyyyy)
-  uint32_t xbrgx95558 = ((name_color << 15) & 0x007C0000) | ((name_color >> 6) & 0x0003E000) | ((name_color >> 3) & 0x00001F00);
-  uint32_t mask = (x << 24) | (y << 16) | (x << 8) | y;
-  return xbrgx95558 ^ mask;
-}
-
-void PlayerVisualConfig::compute_name_color_checksum() {
-  this->name_color_checksum = this->compute_name_color_checksum(this->name_color);
-}
-
-void PlayerDispDataDCPCV3::enforce_lobby_join_limits_for_client(shared_ptr<Client> c) {
-  struct ClassMaxes {
-    uint16_t costume;
-    uint16_t skin;
-    uint16_t face;
-    uint16_t head;
-    uint16_t hair;
-  };
-  static constexpr ClassMaxes v1_v2_class_maxes[14] = {
-      {0x0009, 0x0004, 0x0005, 0x0000, 0x0007},
-      {0x0009, 0x0004, 0x0005, 0x0000, 0x000A},
-      {0x0000, 0x0009, 0x0000, 0x0005, 0x0000},
-      {0x0009, 0x0004, 0x0005, 0x0000, 0x0007},
-      {0x0000, 0x0009, 0x0000, 0x0005, 0x0000},
-      {0x0000, 0x0009, 0x0000, 0x0005, 0x0000},
-      {0x0009, 0x0004, 0x0005, 0x0000, 0x000A},
-      {0x0009, 0x0004, 0x0005, 0x0000, 0x0007},
-      {0x0009, 0x0004, 0x0005, 0x0000, 0x000A},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0000},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0000},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0000},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0000},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0000},
-  };
-  static constexpr ClassMaxes v3_v4_class_maxes[19] = {
-      {0x0012, 0x0004, 0x0005, 0x0000, 0x000A},
-      {0x0012, 0x0004, 0x0005, 0x0000, 0x000A},
-      {0x0000, 0x0019, 0x0000, 0x0005, 0x0000},
-      {0x0012, 0x0004, 0x0005, 0x0000, 0x000A},
-      {0x0000, 0x0019, 0x0000, 0x0005, 0x0000},
-      {0x0000, 0x0019, 0x0000, 0x0005, 0x0000},
-      {0x0012, 0x0004, 0x0005, 0x0000, 0x000A},
-      {0x0012, 0x0004, 0x0005, 0x0000, 0x000A},
-      {0x0012, 0x0004, 0x0005, 0x0000, 0x000A},
-      {0x0000, 0x0019, 0x0000, 0x0005, 0x0000},
-      {0x0012, 0x0004, 0x0005, 0x0000, 0x000A},
-      {0x0012, 0x0004, 0x0005, 0x0000, 0x000A},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0001},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0001},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0000},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0000},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0000},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0000},
-      {0x0000, 0x0000, 0x0000, 0x0000, 0x0000}};
-
-  const ClassMaxes* maxes;
-  if (is_v1_or_v2(c->version())) {
-    // V1/V2 have fewer classes, so we'll substitute some here
-    switch (this->visual.char_class) {
-      case 0: // HUmar
-      case 1: // HUnewearl
-      case 2: // HUcast
-      case 3: // RAmar
-      case 4: // RAcast
-      case 5: // RAcaseal
-      case 6: // FOmarl
-      case 7: // FOnewm
-      case 8: // FOnewearl
-      case 12: // V3 custom 1
-      case 13: // V3 custom 2
-        break;
-      case 9: // HUcaseal
-        this->visual.char_class = 5; // HUcaseal -> RAcaseal
-        break;
-      case 10: // FOmar
-        this->visual.char_class = 0; // FOmar -> HUmar
-        break;
-      case 11: // RAmarl
-        this->visual.char_class = 1; // RAmarl -> HUnewearl
-        break;
-      case 14: // V2 custom 1 / V3 custom 3
-      case 15: // V2 custom 2 / V3 custom 4
-      case 16: // V2 custom 3 / V3 custom 5
-      case 17: // V2 custom 4 / V3 custom 6
-      case 18: // V2 custom 5 / V3 custom 7
-        this->visual.char_class -= 5;
-        break;
-      default:
-        this->visual.char_class = 0; // Invalid classes -> HUmar
-    }
-
-    this->visual.version = min<uint8_t>(this->visual.version, is_v1(c->version()) ? 0 : 2);
-    maxes = &v1_v2_class_maxes[this->visual.char_class];
-
-  } else {
-    if (this->visual.char_class >= 19) {
-      this->visual.char_class = 0; // Invalid classes -> HUmar
-    }
-    this->visual.version = min<uint8_t>(this->visual.version, 3);
-    maxes = &v3_v4_class_maxes[this->visual.char_class];
-  }
-
-  // V1/V2 has fewer costumes and android skins, so substitute them here
-  this->visual.costume = maxes->costume ? (this->visual.costume % maxes->costume) : 0;
-  this->visual.skin = maxes->skin ? (this->visual.skin % maxes->skin) : 0;
-  this->visual.face = maxes->face ? (this->visual.face % maxes->face) : 0;
-  this->visual.head = maxes->head ? (this->visual.head % maxes->head) : 0;
-  this->visual.hair = maxes->hair ? (this->visual.hair % maxes->hair) : 0;
-
-  this->visual.compute_name_color_checksum();
-  this->visual.class_flags = class_flags_for_class(this->visual.char_class);
-
-  if (this->visual.name.at(0) == '\t' && (this->visual.name.at(1) == 'J' || this->visual.name.at(1) == 'E')) {
-    this->visual.name.encode(this->visual.name.decode().substr(2));
-  }
-}
-
-void PlayerDispDataBB::enforce_lobby_join_limits_for_client(shared_ptr<Client> c) {
-  if (!is_v4(c->version())) {
-    throw logic_error("PlayerDispDataBB being sent to non-BB client");
-  }
-  this->play_time = 0;
-  if (this->name.at(0) != '\t' || (this->name.at(1) != 'E' && this->name.at(1) != 'J')) {
-    this->name.encode("\tJ" + this->name.decode());
-  }
-}
-
-PlayerDispDataBB PlayerDispDataDCPCV3::to_bb(uint8_t to_language, uint8_t from_language) const {
-  PlayerDispDataBB bb;
-  bb.stats = this->stats;
-  bb.visual = this->visual;
-  bb.visual.name.encode("         0");
-  string decoded_name = this->visual.name.decode(from_language);
-  bb.name.encode(decoded_name, to_language);
-  bb.config = this->config;
-  bb.technique_levels_v1 = this->technique_levels_v1;
-  return bb;
-}
-
-PlayerDispDataDCPCV3 PlayerDispDataBB::to_dcpcv3(uint8_t to_language, uint8_t from_language) const {
-  PlayerDispDataDCPCV3 ret;
-  ret.stats = this->stats;
-  ret.visual = this->visual;
-  string decoded_name = this->name.decode(from_language);
-  ret.visual.name.encode(decoded_name, to_language);
-  ret.config = this->config;
-  ret.technique_levels_v1 = this->technique_levels_v1;
-  return ret;
-}
-
-PlayerDispDataBBPreview PlayerDispDataBB::to_preview() const {
-  PlayerDispDataBBPreview pre;
-  pre.level = this->stats.level;
-  pre.experience = this->stats.experience;
-  pre.visual = this->visual;
-  pre.name = this->name;
-  pre.play_time = this->play_time;
-  return pre;
-}
-
 void PlayerDispDataBB::apply_dressing_room(const PlayerDispDataBBPreview& pre) {
   this->visual.name_color = pre.visual.name_color;
   this->visual.extra_model = pre.visual.extra_model;
@@ -227,6 +55,106 @@ void GuildCardBB::clear() {
   this->char_class = 0;
 }
 
+GuildCardDCNTE::operator GuildCardBB() const {
+  GuildCardBB ret;
+  ret.guild_card_number = this->guild_card_number;
+  ret.name.encode(this->name.decode(this->language), this->language);
+  ret.description.encode(this->description.decode(this->language), this->language);
+  ret.present = this->present;
+  ret.language = this->language;
+  ret.section_id = this->section_id;
+  ret.char_class = this->char_class;
+  return ret;
+}
+
+GuildCardDC::operator GuildCardBB() const {
+  GuildCardBB ret;
+  ret.guild_card_number = this->guild_card_number;
+  ret.name.encode(this->name.decode(this->language), this->language);
+  ret.description.encode(this->description.decode(this->language), this->language);
+  ret.present = this->present;
+  ret.language = this->language;
+  ret.section_id = this->section_id;
+  ret.char_class = this->char_class;
+  return ret;
+}
+
+GuildCardPC::operator GuildCardBB() const {
+  GuildCardBB ret;
+  ret.guild_card_number = this->guild_card_number;
+  ret.name.encode(this->name.decode(this->language), this->language);
+  ret.description.encode(this->description.decode(this->language), this->language);
+  ret.present = this->present;
+  ret.language = this->language;
+  ret.section_id = this->section_id;
+  ret.char_class = this->char_class;
+  return ret;
+}
+
+GuildCardXB::operator GuildCardBB() const {
+  GuildCardBB ret;
+  ret.guild_card_number = this->guild_card_number;
+  ret.name.encode(this->name.decode(this->language), this->language);
+  ret.description.encode(this->description.decode(this->language), this->language);
+  ret.present = this->present;
+  ret.language = this->language;
+  ret.section_id = this->section_id;
+  ret.char_class = this->char_class;
+  return ret;
+}
+
+GuildCardBB::operator GuildCardDCNTE() const {
+  GuildCardDCNTE ret;
+  ret.player_tag = 0x00010000;
+  ret.guild_card_number = this->guild_card_number;
+  ret.name.encode(this->name.decode(this->language), this->language);
+  ret.description.encode(this->description.decode(this->language), this->language);
+  ret.present = this->present;
+  ret.language = this->language;
+  ret.section_id = this->section_id;
+  ret.char_class = this->char_class;
+  return ret;
+}
+
+GuildCardBB::operator GuildCardDC() const {
+  GuildCardDC ret;
+  ret.player_tag = 0x00010000;
+  ret.guild_card_number = this->guild_card_number;
+  ret.name.encode(this->name.decode(this->language), this->language);
+  ret.description.encode(this->description.decode(this->language), this->language);
+  ret.present = this->present;
+  ret.language = this->language;
+  ret.section_id = this->section_id;
+  ret.char_class = this->char_class;
+  return ret;
+}
+
+GuildCardBB::operator GuildCardPC() const {
+  GuildCardPC ret;
+  ret.player_tag = 0x00010000;
+  ret.guild_card_number = this->guild_card_number;
+  ret.name.encode(this->name.decode(this->language), this->language);
+  ret.description.encode(this->description.decode(this->language), this->language);
+  ret.present = this->present;
+  ret.language = this->language;
+  ret.section_id = this->section_id;
+  ret.char_class = this->char_class;
+  return ret;
+}
+
+GuildCardBB::operator GuildCardXB() const {
+  GuildCardXB ret;
+  ret.player_tag = 0x00010000;
+  ret.guild_card_number = this->guild_card_number;
+  ret.name.encode(this->name.decode(this->language), this->language);
+  ret.description.encode(this->description.decode(this->language), this->language);
+  ret.present = this->present;
+  ret.language = this->language;
+  ret.section_id = this->section_id;
+  ret.char_class = this->char_class;
+  return ret;
+}
+
 void PlayerLobbyDataPC::clear() {
   this->player_tag = 0;
   this->guild_card_number = 0;
@@ -248,8 +176,8 @@ void XBNetworkLocation::clear() {
   this->external_ipv4_address = 0;
   this->port = 0;
   this->mac_address.clear(0);
-  this->unknown_a1 = 0;
-  this->unknown_a2 = 0;
+  this->sg_ip_address = 0;
+  this->spi = 0;
   this->account_id = 0;
   this->unknown_a3.clear(0);
 }
@@ -273,7 +201,7 @@ void PlayerLobbyDataBB::clear() {
   this->hide_help_prompt = 0;
 }
 
-PlayerRecordsBB_Challenge::PlayerRecordsBB_Challenge(const PlayerRecordsDC_Challenge& rec)
+PlayerRecordsChallengeBB::PlayerRecordsChallengeBB(const PlayerRecordsChallengeDC& rec)
     : title_color(rec.title_color),
       unknown_u0(rec.unknown_u0),
       times_ep1_online(rec.times_ep1_online),
@@ -297,7 +225,7 @@ PlayerRecordsBB_Challenge::PlayerRecordsBB_Challenge(const PlayerRecordsDC_Chall
       rank_title(rec.rank_title.decode(), 1),
       unknown_l7(0) {}
 
-PlayerRecordsBB_Challenge::PlayerRecordsBB_Challenge(const PlayerRecordsPC_Challenge& rec)
+PlayerRecordsChallengeBB::PlayerRecordsChallengeBB(const PlayerRecordsChallengePC& rec)
     : title_color(rec.title_color),
       unknown_u0(rec.unknown_u0),
       times_ep1_online(rec.times_ep1_online),
@@ -318,38 +246,11 @@ PlayerRecordsBB_Challenge::PlayerRecordsBB_Challenge(const PlayerRecordsPC_Chall
       grave_message(rec.grave_message.decode(), 1),
       unknown_m5(0),
       unknown_t6(0),
-      rank_title(rec.rank_title),
+      rank_title(rec.rank_title.decode(), 1),
       unknown_l7(0) {}
 
-PlayerRecordsBB_Challenge::PlayerRecordsBB_Challenge(const PlayerRecordsV3_Challenge<false>& rec)
-    : title_color(rec.stats.title_color),
-      unknown_u0(rec.stats.unknown_u0),
-      times_ep1_online(rec.stats.times_ep1_online),
-      times_ep2_online(rec.stats.times_ep2_online),
-      times_ep1_offline(rec.stats.times_ep1_offline),
-      grave_is_ep2(rec.stats.grave_is_ep2),
-      grave_stage_num(rec.stats.grave_stage_num),
-      grave_floor(rec.stats.grave_floor),
-      unknown_g0(rec.stats.unknown_g0),
-      grave_deaths(rec.stats.grave_deaths),
-      unknown_u4(rec.stats.unknown_u4),
-      grave_time(rec.stats.grave_time),
-      grave_defeated_by_enemy_rt_index(rec.stats.grave_defeated_by_enemy_rt_index),
-      grave_x(rec.stats.grave_x),
-      grave_y(rec.stats.grave_y),
-      grave_z(rec.stats.grave_z),
-      grave_team(rec.stats.grave_team.decode(), 1),
-      grave_message(rec.stats.grave_message.decode(), 1),
-      unknown_m5(rec.stats.unknown_m5),
-      unknown_t6(rec.stats.unknown_t6),
-      ep1_online_award_state(rec.stats.ep1_online_award_state),
-      ep2_online_award_state(rec.stats.ep2_online_award_state),
-      ep1_offline_award_state(rec.stats.ep1_offline_award_state),
-      rank_title(rec.rank_title.decode(), 1),
-      unknown_l7(rec.unknown_l7) {}
-
-PlayerRecordsBB_Challenge::operator PlayerRecordsDC_Challenge() const {
-  PlayerRecordsDC_Challenge ret;
+PlayerRecordsChallengeBB::operator PlayerRecordsChallengeDC() const {
+  PlayerRecordsChallengeDC ret;
   ret.title_color = this->title_color;
   ret.unknown_u0 = this->unknown_u0;
   ret.rank_title.encode(this->rank_title.decode());
@@ -378,11 +279,11 @@ PlayerRecordsBB_Challenge::operator PlayerRecordsDC_Challenge() const {
   return ret;
 }
 
-PlayerRecordsBB_Challenge::operator PlayerRecordsPC_Challenge() const {
-  PlayerRecordsPC_Challenge ret;
+PlayerRecordsChallengeBB::operator PlayerRecordsChallengePC() const {
+  PlayerRecordsChallengePC ret;
   ret.title_color = this->title_color;
   ret.unknown_u0 = this->unknown_u0;
-  ret.rank_title = this->rank_title;
+  ret.rank_title.encode(this->rank_title.decode());
   ret.times_ep1_online = this->times_ep1_online;
   if (this->grave_is_ep2) {
     ret.grave_stage_num = 0;
@@ -408,287 +309,23 @@ PlayerRecordsBB_Challenge::operator PlayerRecordsPC_Challenge() const {
   return ret;
 }
 
-PlayerRecordsBB_Challenge::operator PlayerRecordsV3_Challenge<false>() const {
-  PlayerRecordsV3_Challenge<false> ret;
-  ret.stats.title_color = this->title_color;
-  ret.stats.unknown_u0 = this->unknown_u0;
-  ret.stats.times_ep1_online = this->times_ep1_online;
-  ret.stats.times_ep2_online = this->times_ep2_online;
-  ret.stats.times_ep1_offline = this->times_ep1_offline;
-  ret.stats.grave_is_ep2 = this->grave_is_ep2;
-  ret.stats.grave_stage_num = this->grave_stage_num;
-  ret.stats.grave_floor = this->grave_floor;
-  ret.stats.unknown_g0 = this->unknown_g0;
-  ret.stats.grave_deaths = this->grave_deaths;
-  ret.stats.unknown_u4 = this->unknown_u4;
-  ret.stats.grave_time = this->grave_time;
-  ret.stats.grave_defeated_by_enemy_rt_index = this->grave_defeated_by_enemy_rt_index;
-  ret.stats.grave_x = this->grave_x;
-  ret.stats.grave_y = this->grave_y;
-  ret.stats.grave_z = this->grave_z;
-  ret.stats.grave_team.encode(this->grave_team.decode(), 1);
-  ret.stats.grave_message.encode(this->grave_message.decode(), 1);
-  ret.stats.unknown_m5 = this->unknown_m5;
-  ret.stats.unknown_t6 = this->unknown_t6;
-  ret.stats.ep1_online_award_state = this->ep1_online_award_state;
-  ret.stats.ep2_online_award_state = this->ep2_online_award_state;
-  ret.stats.ep1_offline_award_state = this->ep1_offline_award_state;
-  ret.rank_title.encode(this->rank_title.decode(), 1);
-  ret.unknown_l7 = this->unknown_l7;
+QuestFlagsV1& QuestFlagsV1::operator=(const QuestFlags& other) {
+  this->data[0] = other.data[0];
+  this->data[1] = other.data[1];
+  this->data[2] = other.data[2];
+  return *this;
+}
+
+QuestFlagsV1::operator QuestFlags() const {
+  QuestFlags ret;
+  ret.data[0] = this->data[0];
+  ret.data[1] = this->data[1];
+  ret.data[2] = this->data[2];
   return ret;
 }
 
-void PlayerBank::add_item(const ItemData& item) {
-  uint32_t pid = item.primary_identifier();
-
-  if (pid == MESETA_IDENTIFIER) {
-    this->meseta += item.data2d;
-    if (this->meseta > 999999) {
-      this->meseta = 999999;
-    }
-    return;
-  }
-
-  size_t combine_max = item.max_stack_size();
-  if (combine_max > 1) {
-    size_t y;
-    for (y = 0; y < this->num_items; y++) {
-      if (this->items[y].data.primary_identifier() == item.primary_identifier()) {
-        break;
-      }
-    }
-
-    if (y < this->num_items) {
-      uint8_t new_count = this->items[y].data.data1[5] + item.data1[5];
-      if (new_count > combine_max) {
-        throw runtime_error("stack size would exceed limit");
-      }
-      this->items[y].data.data1[5] = new_count;
-      this->items[y].amount = new_count;
-      return;
-    }
-  }
-
-  if (this->num_items >= 200) {
-    throw runtime_error("no free space in bank");
-  }
-  auto& last_item = this->items[this->num_items];
-  last_item.data = item;
-  last_item.amount = (item.max_stack_size() > 1) ? item.data1[5] : 1;
-  last_item.present = 1;
-  this->num_items++;
-}
-
-ItemData PlayerBank::remove_item(uint32_t item_id, uint32_t amount) {
-  size_t index = this->find_item(item_id);
-  auto& bank_item = this->items[index];
-
-  ItemData ret;
-  if (amount && (bank_item.data.stack_size() > 1) && (amount < bank_item.data.data1[5])) {
-    ret = bank_item.data;
-    ret.data1[5] = amount;
-    bank_item.data.data1[5] -= amount;
-    bank_item.amount -= amount;
-    return ret;
-  }
-
-  ret = bank_item.data;
-  this->num_items--;
-  for (size_t x = index; x < this->num_items; x++) {
-    this->items[x] = this->items[x + 1];
-  }
-  auto& last_item = this->items[this->num_items];
-  last_item.amount = 0;
-  last_item.present = 0;
-  last_item.data.clear();
-  return ret;
-}
-
-size_t PlayerInventory::find_item(uint32_t item_id) const {
-  for (size_t x = 0; x < this->num_items; x++) {
-    if (this->items[x].data.id == item_id) {
-      return x;
-    }
-  }
-  throw out_of_range("item not present");
-}
-
-size_t PlayerInventory::find_item_by_primary_identifier(uint32_t primary_identifier) const {
-  for (size_t x = 0; x < this->num_items; x++) {
-    if (this->items[x].data.primary_identifier() == primary_identifier) {
-      return x;
-    }
-  }
-  throw out_of_range("item not present");
-}
-
-size_t PlayerInventory::find_equipped_item(EquipSlot slot) const {
-  ssize_t ret = -1;
-  for (size_t y = 0; y < this->num_items; y++) {
-    const auto& i = this->items[y];
-    if (!(i.flags & 0x00000008)) {
-      continue;
-    }
-    if (!i.data.can_be_equipped_in_slot(slot)) {
-      continue;
-    }
-
-    // Units can be equipped in multiple slots, so the currently-equipped slot
-    // is stored in the item data itself.
-    if (((slot == EquipSlot::UNIT_1) && (i.data.data1[4] != 0x00)) ||
-        ((slot == EquipSlot::UNIT_2) && (i.data.data1[4] != 0x01)) ||
-        ((slot == EquipSlot::UNIT_3) && (i.data.data1[4] != 0x02)) ||
-        ((slot == EquipSlot::UNIT_4) && (i.data.data1[4] != 0x03))) {
-      continue;
-    }
-
-    if (ret < 0) {
-      ret = y;
-    } else {
-      throw runtime_error("multiple items are equipped in the same slot");
-    }
-  }
-  if (ret < 0) {
-    throw out_of_range("no item is equipped in this slot");
-  }
-  return ret;
-}
-
-bool PlayerInventory::has_equipped_item(EquipSlot slot) const {
-  try {
-    this->find_equipped_item(slot);
-    return true;
-  } catch (const out_of_range&) {
-    return false;
-  }
-}
-
-void PlayerInventory::equip_item_id(uint32_t item_id, EquipSlot slot) {
-  this->equip_item_index(this->find_item(item_id), slot);
-}
-
-void PlayerInventory::equip_item_index(size_t index, EquipSlot slot) {
-  auto& item = this->items[index];
-
-  if (slot == EquipSlot::UNKNOWN) {
-    slot = item.data.default_equip_slot();
-  }
-
-  if (!item.data.can_be_equipped_in_slot(slot)) {
-    throw runtime_error("incorrect item type for equip slot");
-  }
-  if (this->has_equipped_item(slot)) {
-    throw runtime_error("equip slot is already in use");
-  }
-
-  item.flags |= 0x00000008;
-  // Units store which slot they're equipped in within the item data itself
-  if ((item.data.data1[0] == 0x01) && (item.data.data1[1] == 0x03)) {
-    item.data.data1[4] = static_cast<uint8_t>(slot) - 9;
-  }
-}
-
-void PlayerInventory::unequip_item_id(uint32_t item_id) {
-  this->unequip_item_index(this->find_item(item_id));
-}
-
-void PlayerInventory::unequip_item_slot(EquipSlot slot) {
-  this->unequip_item_index(this->find_equipped_item(slot));
-}
-
-void PlayerInventory::unequip_item_index(size_t index) {
-  auto& item = this->items[index];
-
-  item.flags &= (~0x00000008);
-  // Units store which slot they're equipped in within the item data itself
-  if ((item.data.data1[0] == 0x01) && (item.data.data1[1] == 0x03)) {
-    item.data.data1[4] = 0x00;
-  }
-  // If the item is an armor, remove all units too
-  if ((item.data.data1[0] == 0x01) && (item.data.data1[1] == 0x01)) {
-    for (size_t z = 0; z < 30; z++) {
-      auto& unit = this->items[z];
-      if ((unit.data.data1[0] == 0x01) && (unit.data.data1[1] == 0x03)) {
-        unit.flags &= (~0x00000008);
-        unit.data.data1[4] = 0x00;
-      }
-    }
-  }
-}
-
-size_t PlayerInventory::remove_all_items_of_type(uint8_t data1_0, int16_t data1_1) {
-  size_t write_offset = 0;
-  for (size_t read_offset = 0; read_offset < this->num_items; read_offset++) {
-    bool should_delete = ((this->items[read_offset].data.data1[0] == data1_0) &&
-        ((data1_1 < 0) || (this->items[read_offset].data.data1[1] == static_cast<uint8_t>(data1_1))));
-    if (!should_delete) {
-      if (read_offset != write_offset) {
-        this->items[write_offset].present = this->items[read_offset].present;
-        this->items[write_offset].unknown_a1 = this->items[read_offset].unknown_a1;
-        this->items[write_offset].flags = this->items[read_offset].flags;
-        this->items[write_offset].data = this->items[read_offset].data;
-      }
-      write_offset++;
-    }
-  }
-  size_t ret = this->num_items - write_offset;
-  this->num_items = write_offset;
-  return ret;
-}
-
-void PlayerInventory::decode_from_client(shared_ptr<Client> c) {
-  for (size_t z = 0; z < this->items.size(); z++) {
-    this->items[z].data.decode_for_version(c->version());
-  }
-}
-
-void PlayerInventory::encode_for_client(shared_ptr<Client> c) {
-  if (c->version() == Version::DC_NTE) {
-    // DC NTE has the item count as a 32-bit value here, whereas every other
-    // version uses a single byte. To stop DC NTE from crashing by trying to
-    // construct far more than 30 TItem objects, we clear the fields DC NTE
-    // doesn't know about. Note that the 11/2000 prototype does not have this
-    // issue - its inventory format matches the rest of the versions.
-    this->hp_from_materials = 0;
-    this->tp_from_materials = 0;
-    this->language = 0;
-  } else if ((c->version() != Version::PC_NTE) && (c->version() != Version::PC_V2)) {
-    if (this->language > 4) {
-      this->language = 0;
-    }
-  } else {
-    if (this->language > 7) {
-      this->language = 0;
-    }
-  }
-
-  auto item_parameter_table = c->require_server_state()->item_parameter_table_for_version(c->version());
-  for (size_t z = 0; z < this->items.size(); z++) {
-    this->items[z].data.encode_for_version(c->version(), item_parameter_table);
-  }
-}
-
-size_t PlayerBank::find_item(uint32_t item_id) {
-  for (size_t x = 0; x < this->num_items; x++) {
-    if (this->items[x].data.id == item_id) {
-      return x;
-    }
-  }
-  throw out_of_range("item not present");
-}
-
-void PlayerBank::sort() {
-  std::sort(this->items.data(), this->items.data() + this->num_items);
-}
-
-void PlayerBank::assign_ids(uint32_t base_id) {
-  for (size_t z = 0; z < this->num_items; z++) {
-    this->items[z].data.id = base_id + z;
-  }
-}
-
-BattleRules::BattleRules(const JSON& json) {
-  static const JSON empty_list = JSON::list();
+BattleRules::BattleRules(const phosg::JSON& json) {
+  static const phosg::JSON empty_list = phosg::JSON::list();
 
   this->tech_disk_mode = json.get_enum("TechDiskMode", this->tech_disk_mode);
   this->weapon_and_armor_mode = json.get_enum("WeaponAndArmorMode", this->weapon_and_armor_mode);
@@ -696,14 +333,14 @@ BattleRules::BattleRules(const JSON& json) {
   this->tool_mode = json.get_enum("ToolMode", this->tool_mode);
   this->trap_mode = json.get_enum("TrapMode", this->trap_mode);
   this->unused_F817 = json.get_int("UnusedF817", this->unused_F817);
-  this->respawn_mode = json.get_int("RespawnMode", this->respawn_mode);
+  this->respawn_mode = json.get_enum("RespawnMode", this->respawn_mode);
   this->replace_char = json.get_int("ReplaceChar", this->replace_char);
   this->drop_weapon = json.get_int("DropWeapon", this->drop_weapon);
   this->is_teams = json.get_int("IsTeams", this->is_teams);
   this->hide_target_reticle = json.get_int("HideTargetReticle", this->hide_target_reticle);
   this->meseta_mode = json.get_enum("MesetaMode", this->meseta_mode);
   this->death_level_up = json.get_int("DeathLevelUp", this->death_level_up);
-  const JSON& trap_counts_json = json.get("TrapCounts", empty_list);
+  const phosg::JSON& trap_counts_json = json.get("TrapCounts", empty_list);
   for (size_t z = 0; z < trap_counts_json.size(); z++) {
     this->trap_counts[z] = trap_counts_json.at(z).as_int();
   }
@@ -718,8 +355,8 @@ BattleRules::BattleRules(const JSON& json) {
   this->box_drop_area = json.get_int("BoxDropArea", this->box_drop_area);
 }
 
-JSON BattleRules::json() const {
-  return JSON::dict({
+phosg::JSON BattleRules::json() const {
+  return phosg::JSON::dict({
       {"TechDiskMode", this->tech_disk_mode},
       {"WeaponAndArmorMode", this->weapon_and_armor_mode},
       {"MagMode", this->mag_mode},
@@ -733,7 +370,7 @@ JSON BattleRules::json() const {
       {"HideTargetReticle", this->hide_target_reticle},
       {"MesetaMode", this->meseta_mode},
       {"DeathLevelUp", this->death_level_up},
-      {"TrapCounts", JSON::list({this->trap_counts[0], this->trap_counts[1], this->trap_counts[2], this->trap_counts[3]})},
+      {"TrapCounts", phosg::JSON::list({this->trap_counts[0], this->trap_counts[1], this->trap_counts[2], this->trap_counts[3]})},
       {"EnableSonar", this->enable_sonar},
       {"SonarCount", this->sonar_count},
       {"ForbidScapeDolls", this->forbid_scape_dolls},
@@ -747,7 +384,7 @@ JSON BattleRules::json() const {
 }
 
 template <>
-const char* name_for_enum<BattleRules::TechDiskMode>(BattleRules::TechDiskMode v) {
+const char* phosg::name_for_enum<BattleRules::TechDiskMode>(BattleRules::TechDiskMode v) {
   switch (v) {
     case BattleRules::TechDiskMode::ALLOW:
       return "ALLOW";
@@ -760,7 +397,7 @@ const char* name_for_enum<BattleRules::TechDiskMode>(BattleRules::TechDiskMode v
   }
 }
 template <>
-BattleRules::TechDiskMode enum_for_name<BattleRules::TechDiskMode>(const char* name) {
+BattleRules::TechDiskMode phosg::enum_for_name<BattleRules::TechDiskMode>(const char* name) {
   if (!strcmp(name, "ALLOW")) {
     return BattleRules::TechDiskMode::ALLOW;
   } else if (!strcmp(name, "FORBID_ALL")) {
@@ -773,7 +410,7 @@ BattleRules::TechDiskMode enum_for_name<BattleRules::TechDiskMode>(const char* n
 }
 
 template <>
-const char* name_for_enum<BattleRules::WeaponAndArmorMode>(BattleRules::WeaponAndArmorMode v) {
+const char* phosg::name_for_enum<BattleRules::WeaponAndArmorMode>(BattleRules::WeaponAndArmorMode v) {
   switch (v) {
     case BattleRules::WeaponAndArmorMode::ALLOW:
       return "ALLOW";
@@ -788,7 +425,7 @@ const char* name_for_enum<BattleRules::WeaponAndArmorMode>(BattleRules::WeaponAn
   }
 }
 template <>
-BattleRules::WeaponAndArmorMode enum_for_name<BattleRules::WeaponAndArmorMode>(const char* name) {
+BattleRules::WeaponAndArmorMode phosg::enum_for_name<BattleRules::WeaponAndArmorMode>(const char* name) {
   if (!strcmp(name, "ALLOW")) {
     return BattleRules::WeaponAndArmorMode::ALLOW;
   } else if (!strcmp(name, "CLEAR_AND_ALLOW")) {
@@ -803,7 +440,7 @@ BattleRules::WeaponAndArmorMode enum_for_name<BattleRules::WeaponAndArmorMode>(c
 }
 
 template <>
-const char* name_for_enum<BattleRules::MagMode>(BattleRules::MagMode v) {
+const char* phosg::name_for_enum<BattleRules::MagMode>(BattleRules::MagMode v) {
   switch (v) {
     case BattleRules::MagMode::ALLOW:
       return "ALLOW";
@@ -814,7 +451,7 @@ const char* name_for_enum<BattleRules::MagMode>(BattleRules::MagMode v) {
   }
 }
 template <>
-BattleRules::MagMode enum_for_name<BattleRules::MagMode>(const char* name) {
+BattleRules::MagMode phosg::enum_for_name<BattleRules::MagMode>(const char* name) {
   if (!strcmp(name, "ALLOW")) {
     return BattleRules::MagMode::ALLOW;
   } else if (!strcmp(name, "FORBID_ALL")) {
@@ -825,7 +462,7 @@ BattleRules::MagMode enum_for_name<BattleRules::MagMode>(const char* name) {
 }
 
 template <>
-const char* name_for_enum<BattleRules::ToolMode>(BattleRules::ToolMode v) {
+const char* phosg::name_for_enum<BattleRules::ToolMode>(BattleRules::ToolMode v) {
   switch (v) {
     case BattleRules::ToolMode::ALLOW:
       return "ALLOW";
@@ -838,7 +475,7 @@ const char* name_for_enum<BattleRules::ToolMode>(BattleRules::ToolMode v) {
   }
 }
 template <>
-BattleRules::ToolMode enum_for_name<BattleRules::ToolMode>(const char* name) {
+BattleRules::ToolMode phosg::enum_for_name<BattleRules::ToolMode>(const char* name) {
   if (!strcmp(name, "ALLOW")) {
     return BattleRules::ToolMode::ALLOW;
   } else if (!strcmp(name, "CLEAR_AND_ALLOW")) {
@@ -851,7 +488,7 @@ BattleRules::ToolMode enum_for_name<BattleRules::ToolMode>(const char* name) {
 }
 
 template <>
-const char* name_for_enum<BattleRules::TrapMode>(BattleRules::TrapMode v) {
+const char* phosg::name_for_enum<BattleRules::TrapMode>(BattleRules::TrapMode v) {
   switch (v) {
     case BattleRules::TrapMode::DEFAULT:
       return "DEFAULT";
@@ -862,7 +499,7 @@ const char* name_for_enum<BattleRules::TrapMode>(BattleRules::TrapMode v) {
   }
 }
 template <>
-BattleRules::TrapMode enum_for_name<BattleRules::TrapMode>(const char* name) {
+BattleRules::TrapMode phosg::enum_for_name<BattleRules::TrapMode>(const char* name) {
   if (!strcmp(name, "DEFAULT")) {
     return BattleRules::TrapMode::DEFAULT;
   } else if (!strcmp(name, "ALL_PLAYERS")) {
@@ -873,7 +510,7 @@ BattleRules::TrapMode enum_for_name<BattleRules::TrapMode>(const char* name) {
 }
 
 template <>
-const char* name_for_enum<BattleRules::MesetaMode>(BattleRules::MesetaMode v) {
+const char* phosg::name_for_enum<BattleRules::MesetaMode>(BattleRules::MesetaMode v) {
   switch (v) {
     case BattleRules::MesetaMode::ALLOW:
       return "ALLOW";
@@ -886,7 +523,7 @@ const char* name_for_enum<BattleRules::MesetaMode>(BattleRules::MesetaMode v) {
   }
 }
 template <>
-BattleRules::MesetaMode enum_for_name<BattleRules::MesetaMode>(const char* name) {
+BattleRules::MesetaMode phosg::enum_for_name<BattleRules::MesetaMode>(const char* name) {
   if (!strcmp(name, "ALLOW")) {
     return BattleRules::MesetaMode::ALLOW;
   } else if (!strcmp(name, "FORBID_ALL")) {
@@ -898,25 +535,34 @@ BattleRules::MesetaMode enum_for_name<BattleRules::MesetaMode>(const char* name)
   }
 }
 
+template <>
+const char* phosg::name_for_enum<BattleRules::RespawnMode>(BattleRules::RespawnMode v) {
+  switch (v) {
+    case BattleRules::RespawnMode::ALLOW:
+      return "ALLOW";
+    case BattleRules::RespawnMode::FORBID:
+      return "FORBID";
+    case BattleRules::RespawnMode::LIMIT_LIVES:
+      return "LIMIT_LIVES";
+    default:
+      throw invalid_argument("invalid BattleRules::MesetaDropMode value");
+  }
+}
+template <>
+BattleRules::RespawnMode phosg::enum_for_name<BattleRules::RespawnMode>(const char* name) {
+  if (!strcmp(name, "ALLOW")) {
+    return BattleRules::RespawnMode::ALLOW;
+  } else if (!strcmp(name, "FORBID")) {
+    return BattleRules::RespawnMode::FORBID;
+  } else if (!strcmp(name, "LIMIT_LIVES")) {
+    return BattleRules::RespawnMode::LIMIT_LIVES;
+  } else {
+    throw invalid_argument("invalid BattleRules::MesetaDropMode name");
+  }
+}
+
 static PlayerInventoryItem make_template_item(bool equipped, uint64_t first_data, uint64_t second_data) {
-  PlayerInventoryItem ret(ItemData(), equipped);
-  ret.data.data1[0] = first_data >> 56;
-  ret.data.data1[1] = first_data >> 48;
-  ret.data.data1[2] = first_data >> 40;
-  ret.data.data1[3] = first_data >> 32;
-  ret.data.data1[4] = first_data >> 24;
-  ret.data.data1[5] = first_data >> 16;
-  ret.data.data1[6] = first_data >> 8;
-  ret.data.data1[7] = first_data >> 0;
-  ret.data.data1[8] = second_data >> 56;
-  ret.data.data1[9] = second_data >> 48;
-  ret.data.data1[10] = second_data >> 40;
-  ret.data.data1[11] = second_data >> 32;
-  ret.data.data2[0] = second_data >> 24;
-  ret.data.data2[1] = second_data >> 16;
-  ret.data.data2[2] = second_data >> 8;
-  ret.data.data2[3] = second_data >> 0;
-  return ret;
+  return PlayerInventoryItem(ItemData(first_data, second_data), equipped);
 }
 
 static PlayerInventoryItem v2_item(bool equipped, uint64_t first_data, uint64_t second_data) {
@@ -1053,7 +699,46 @@ const ChallengeTemplateDefinition& get_challenge_template_definition(Version ver
   }
 }
 
-SymbolChat::SymbolChat()
-    : spec(0),
-      corner_objects(0x00FF),
-      face_parts() {}
+const QuestFlagsForDifficulty bb_quest_flag_apply_mask{{
+    // clang-format off
+    /* 0000 */ 0x00, 0x3F, 0xFF, 0xE3, 0xE0, 0xFF, 0xFF, 0x00,
+    /* 0040 */ 0x03, 0xFF, 0xFF, 0xFF, 0xF0, 0x00, 0x00, 0x00,
+    /* 0080 */ 0x00, 0x00, 0x01, 0xE0, 0x00, 0x00, 0x00, 0x00,
+    /* 00C0 */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0100 */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0xFC, 0x00,
+    /* 0140 */ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    /* 0180 */ 0xFE, 0x00, 0x7F, 0xFE, 0x0F, 0xFF, 0xFF, 0x80,
+    /* 01C0 */ 0x3F, 0xFF, 0xFE, 0x00, 0x00, 0x00, 0x0F, 0xFF,
+    /* 0200 */ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC, 0x00,
+    /* 0240 */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0280 */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07,
+    /* 02C0 */ 0xF8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0300 */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0340 */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0380 */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 03C0 */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // clang-format on
+
+    // The flags in the above mask are:
+    // 000A 000B 000C 000D 000E 000F 0010 0011 0012 0013 0014 0015 0016 0017
+    // 0018 0019 001A 001E 001F 0020 0021 0022 0028 0029 002A 002B 002C 002D
+    // 002E 002F 0030 0031 0032 0033 0034 0035 0036 0037 0046 0047 0048 0049
+    // 004A 004B 004C 004D 004E 004F 0050 0051 0052 0053 0054 0055 0056 0057
+    // 0058 0059 005A 005B 005C 005D 005E 005F 0060 0061 0062 0063 0097 0098
+    // 0099 009A 012D 012E 012F 0130 0131 0132 0133 0134 0135 0140 0141 0142
+    // 0143 0144 0145 0146 0147 0148 0149 014A 014B 014C 014D 014E 014F 0150
+    // 0151 0152 0153 0154 0155 0156 0157 0158 0159 015A 015B 015C 015D 015E
+    // 015F 0160 0161 0162 0163 0164 0165 0166 0167 0168 0169 016A 016B 016C
+    // 016D 016E 016F 0170 0171 0172 0173 0174 0175 0176 0177 0178 0179 017A
+    // 017B 017C 017D 017E 017F 0180 0181 0182 0183 0184 0185 0186 0191 0192
+    // 0193 0194 0195 0196 0197 0198 0199 019A 019B 019C 019D 019E 01A4 01A5
+    // 01A6 01A7 01A8 01A9 01AA 01AB 01AC 01AD 01AE 01AF 01B0 01B1 01B2 01B3
+    // 01B4 01B5 01B6 01B7 01B8 01C2 01C3 01C4 01C5 01C6 01C7 01C8 01C9 01CA
+    // 01CB 01CC 01CD 01CE 01CF 01D0 01D1 01D2 01D3 01D4 01D5 01D6 01F4 01F5
+    // 01F6 01F7 01F8 01F9 01FA 01FB 01FC 01FD 01FE 01FF 0200 0201 0202 0203
+    // 0204 0205 0206 0207 0208 0209 020A 020B 020C 020D 020E 020F 0210 0211
+    // 0212 0213 0214 0215 0216 0217 0218 0219 021A 021B 021C 021D 021E 021F
+    // 0220 0221 0222 0223 0224 0225 0226 0227 0228 0229 022A 022B 022C 022D
+    // 022E 022F 0230 0231 0232 0233 0234 0235 02BD 02BE 02BF 02C0 02C1 02C2
+    // 02C3 02C4
+}};

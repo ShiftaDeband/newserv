@@ -20,6 +20,7 @@ enum AssistFlag : uint32_t {
   // be bits used only by the client which are not documented here.
 
   // clang-format off
+  NONE                                 = 0x0000,
   READY_TO_END_PHASE                   = 0x0001,
   DICE_WERE_EXCHANGED                  = 0x0002,
   HAS_WON_BATTLE                       = 0x0004,
@@ -46,20 +47,22 @@ public:
   std::shared_ptr<Server> server();
   std::shared_ptr<const Server> server() const;
 
+  bool is_alive() const;
+
   bool draw_cards_allowed() const;
   void apply_assist_card_effect_on_set(std::shared_ptr<PlayerState> setter_ps);
   void apply_dice_effects();
   uint16_t card_ref_for_hand_index(size_t hand_index) const;
   int16_t compute_attack_or_defense_atk_costs(const ActionState& pa) const;
   void compute_total_set_cards_cost();
+  size_t count_set_cards_for_env_stats_nte() const;
   size_t count_set_cards() const;
   size_t count_set_refs() const;
   void discard_all_assist_cards_from_hand();
   void discard_all_attack_action_cards_from_hand();
   void discard_all_item_and_creature_cards_from_hand();
   void discard_and_redraw_hand();
-  bool discard_card_or_add_to_draw_pile(
-      uint16_t card_ref, bool add_to_draw_pile);
+  bool discard_card_or_add_to_draw_pile(uint16_t card_ref, bool add_to_draw_pile);
   void discard_random_hand_card();
   bool discard_ref_from_hand(uint16_t card_ref);
   void discard_set_assist_card();
@@ -76,8 +79,7 @@ public:
       const Location& loc,
       uint8_t target_team_id) const;
   uint8_t get_atk_points() const;
-  void get_short_status_for_card_index_in_hand(
-      size_t hand_index, CardShortStatus* stat) const;
+  void get_short_status_for_card_index_in_hand(size_t hand_index, CardShortStatus* stat) const;
   std::shared_ptr<DeckState> get_deck();
   uint8_t get_def_points() const;
   uint8_t get_dice_result(size_t which) const;
@@ -96,8 +98,8 @@ public:
   bool is_mulligan_allowed() const;
   bool is_team_turn() const;
   void log_discard(uint16_t card_ref, uint16_t reason);
-  bool move_card_to_location_by_card_index(
-      size_t card_index, const Location& new_loc);
+  uint16_t pop_from_discard_log(uint16_t reason);
+  bool move_card_to_location_by_card_index(size_t card_index, const Location& new_loc);
   void move_null_hand_refs_to_end();
   void on_cards_destroyed();
   void replace_all_set_assists_with_random_assists();
@@ -115,42 +117,40 @@ public:
       uint8_t assist_target_client_id,
       bool skip_error_checks_and_atk_sub);
   void set_initial_location();
-  void set_map_occupied_bit_for_card_on_warp_tile(
-      std::shared_ptr<const Card> card);
+  void set_map_occupied_bit_for_card_on_warp_tile(std::shared_ptr<const Card> card);
   void set_map_occupied_bits_for_sc_and_creatures();
   void subtract_def_points(uint8_t cost);
-  bool subtract_or_check_atk_or_def_points_for_action(
-      const ActionState& pa, bool deduct_points);
+  bool subtract_or_check_atk_or_def_points_for_action(const ActionState& pa, bool deduct_points);
   void subtract_atk_points(uint8_t cost);
-  G_UpdateHand_GC_Ep3_6xB4x02 prepare_6xB4x02() const;
-  void update_hand_and_equip_state_and_send_6xB4x02_if_needed(
-      bool always_send = false);
+  G_UpdateHand_Ep3_6xB4x02 prepare_6xB4x02() const;
+  void update_hand_and_equip_state_and_send_6xB4x02_if_needed(bool always_send = false);
   void set_random_assist_card_from_hand_for_free();
-  G_UpdateShortStatuses_GC_Ep3_6xB4x04 prepare_6xB4x04() const;
+  G_UpdateShortStatuses_Ep3_6xB4x04 prepare_6xB4x04() const;
   void send_6xB4x04_if_needed(bool always_send = false);
   std::vector<uint16_t> get_card_refs_within_range_from_all_players(
       const parray<uint8_t, 9 * 9>& range,
       const Location& loc,
       CardType type) const;
-  void unknown_80239460();
-  void unknown_802394C4();
-  void unknown_80239528();
+  void draw_phase_before();
+  void action_phase_before();
+  void move_phase_before();
   void handle_before_turn_assist_effects();
   int16_t get_assist_turns_remaining();
   bool set_action_cards_for_action_state(const ActionState& pa);
-  void unknown_8023C174();
-  void handle_homesick_assist_effect(std::shared_ptr<Card> card);
+  void dice_phase_before();
+  void handle_homesick_assist_effect_from_bomb(std::shared_ptr<Card> card);
   void apply_main_die_assist_effects(uint8_t* die_value) const;
-  void roll_main_dice();
+  void roll_main_dice_or_apply_after_effects();
   void unknown_8023C110();
-  void compute_team_dice_boost_after_draw_phase();
+  void compute_team_dice_bonus_after_draw_phase();
+  void send_6xB4x0A_for_set_card(size_t set_index);
 
 private:
   std::weak_ptr<Server> w_server;
 
 public:
   std::shared_ptr<Card> sc_card;
-  std::shared_ptr<Card> set_cards[8];
+  bcarray<std::shared_ptr<Card>, 8> set_cards;
   uint8_t client_id;
   uint16_t num_mulligans_allowed;
   CardType sc_card_type;

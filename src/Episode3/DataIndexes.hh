@@ -13,9 +13,11 @@
 #include <string>
 #include <unordered_map>
 
+#include "../CommonFileFormats.hh"
 #include "../PlayerSubordinates.hh"
 #include "../Text.hh"
-#include "../TextArchive.hh"
+#include "../TextIndex.hh"
+#include "../Types.hh"
 
 namespace Episode3 {
 
@@ -36,6 +38,8 @@ enum BehaviorFlag : uint32_t {
   DISABLE_MASKING = 0x00000080,
   DISABLE_INTERFERENCE = 0x00000100,
   ALLOW_NON_COM_INTERFERENCE = 0x00000200,
+  IS_TRIAL_EDITION = 0x00000400,
+  LOG_COMMANDS_IF_LOBBY_MISSING = 0x00000800,
 };
 
 enum class StatSwapType : uint8_t {
@@ -57,8 +61,6 @@ enum class AttackMedium : uint8_t {
   UNKNOWN_03 = 3, // Probably Resta
   INVALID_FF = 0xFF,
 };
-
-const char* name_for_attack_medium(AttackMedium medium);
 
 enum class CriterionCode : uint8_t {
   NONE = 0x00,
@@ -98,8 +100,6 @@ enum class CriterionCode : uint8_t {
   NON_PHYSICAL_NON_TECH_NON_UNKNOWN_ATTACK_MEDIUM_NON_SC = 0x22,
 };
 
-const char* name_for_criterion_code(CriterionCode code);
-
 enum class CardRank : uint8_t {
   N1 = 0x01,
   R1 = 0x02,
@@ -137,8 +137,6 @@ enum class CardType : uint8_t {
   END_CARD_LIST = 0xFF,
 };
 
-const char* name_for_card_type(CardType type);
-
 enum class CardClass : uint16_t {
   HU_SC = 0x0000,
   RA_SC = 0x0001,
@@ -162,8 +160,7 @@ enum class CardClass : uint16_t {
   ASSIST = 0x0028,
 };
 
-const char* name_for_card_class(CardClass cc);
-bool card_class_is_tech_like(CardClass cc);
+bool card_class_is_tech_like(CardClass cc, bool is_nte);
 
 enum class TargetMode : uint8_t {
   NONE = 0x00, // Used for defense cards, mags, shields, etc.
@@ -177,6 +174,8 @@ enum class TargetMode : uint8_t {
   ALL = 0x08, // e.g. Last Judgment, Earthquake
   OWN_FCS = 0x09, // e.g. Traitor
 };
+
+const char* name_for_target_mode(TargetMode target_mode);
 
 enum class ConditionType : uint8_t {
   NONE = 0x00,
@@ -299,7 +298,7 @@ enum class ConditionType : uint8_t {
   UNKNOWN_75 = 0x75,
   REFLECT = 0x76, // Generate reverse attack
   UNKNOWN_77 = 0x77,
-  ANY = 0x78, // Not a real condition; used as a wildcard in search functions
+  ANY = 0x78, // Not a real condition; used as a wildcard in search functions. Has value 0x64 on NTE
   UNKNOWN_79 = 0x79,
   UNKNOWN_7A = 0x7A,
   UNKNOWN_7B = 0x7B,
@@ -309,7 +308,40 @@ enum class ConditionType : uint8_t {
   ANY_FF = 0xFF, // Used as a wildcard in some search functions
 };
 
-const char* name_for_condition_type(ConditionType cond_type);
+enum class EffectWhen : uint8_t {
+  NONE = 0x00,
+  CARD_SET = 0x01, // Permanent effects like RAMPAGE/PIERCE on SCs, BIG_SWING, AERIAL, etc.; many AC effects also
+  AFTER_ANY_CARD_ATTACK = 0x02, // GIVE_DAMAGE, HEAL, A_H_SWAP_PERM
+  BEFORE_ANY_CARD_ATTACK = 0x03, // AP_LOSS, COMBO_TP
+  BEFORE_DICE_PHASE_THIS_TEAM_TURN = 0x04, // Many different effects
+  CARD_DESTROYED = 0x05, // RETURN_TO_HAND, RETURN, FILIAL, GIVE_OR_TAKE_EXP
+  AFTER_SET_PHASE = 0x06, // Unused
+  BEFORE_MOVE_PHASE = 0x09, // Unused
+  UNKNOWN_0A = 0x0A, // ANTI_ABNORMALITY_2 on Tollaw (non-SC version of another when?)
+  AFTER_ATTACK_TARGET_RESOLUTION = 0x0B, // ABILITY_TRAP via First Attack action card only
+  AFTER_THIS_CARD_ATTACK = 0x0C, // Many effects
+  BEFORE_THIS_CARD_ATTACK = 0x0D, // Conditions, AP_BOOST/TP_BOOST, AP_SILENCE, MULTI_STRIKE
+  BEFORE_ACT_PHASE = 0x0E, // Before act phase (ANTI_ABNORMALITY_2, FIXED_RANGE)
+  BEFORE_DRAW_PHASE = 0x0F, // Unused
+  AFTER_CARD_MOVE = 0x13, // Unused
+  UNKNOWN_15 = 0x15, // Unused
+  AFTER_THIS_CARD_ATTACKED = 0x16, // Conditions, DEATH_COMPANION, GIVE_DAMAGE, AP_GROWTH (Nidra)
+  BEFORE_THIS_CARD_ATTACKED = 0x17, // Defense damage adjustments
+  AFTER_CREATURE_OR_HUNTER_SC_ATTACK = 0x20, // RETURN_TO_HAND, A_T_SWAP_PERM, GIVE_OR_TAKE_EXP
+  BEFORE_CREATURE_OR_HUNTER_SC_ATTACK = 0x21, // Unused
+  UNKNOWN_22 = 0x22, // MISC_AP_BONUSES (SCs only?)
+  BEFORE_MOVE_PHASE_AND_AFTER_CARD_MOVE_FINAL = 0x27, // SET_MV
+  UNKNOWN_29 = 0x29, // MIGHTY_KNUCKLE
+  UNKNOWN_2A = 0x2A, // Unused
+  UNKNOWN_2B = 0x2B, // Unused
+  UNKNOWN_33 = 0x33, // DEF_DISABLE_BY_COST
+  UNKNOWN_34 = 0x34, // Unused
+  UNKNOWN_35 = 0x35, // Unused
+  ATTACK_STAT_OVERRIDES = 0x3D, // BONUS_FROM_LEADER, COPY, ABILITY_TRAP
+  ATTACK_DAMAGE_ADJUSTMENT = 0x3E, // AP_BOOST, SLAYERS_ASSASSINS, WEAK_SPOT_INFLUENCE, GROUP
+  DEFENSE_DAMAGE_ADJUSTMENT = 0x3F, // MOSTLY_HALFGUARDS, ACTION_DISRUPTER
+  BEFORE_DICE_PHASE_ALL_TURNS_FINAL = 0x46, // Pollux Timed Pierce
+};
 
 enum class AssistEffect : uint16_t {
   NONE = 0x0000,
@@ -407,8 +439,6 @@ enum class ActionSubphase : uint8_t {
   INVALID_FF = 0xFF,
 };
 
-const char* name_for_action_subphase(ActionSubphase subphase);
-
 enum class SetupPhase : uint8_t {
   REGISTRATION = 0,
   STARTER_ROLLS = 1,
@@ -438,7 +468,6 @@ enum class Direction : uint8_t {
 Direction turn_left(Direction d);
 Direction turn_right(Direction d);
 Direction turn_around(Direction d);
-const char* name_for_direction(Direction d);
 
 struct Location {
   /* 00 */ uint8_t x;
@@ -457,7 +486,7 @@ struct Location {
 
   void clear();
   void clear_FF();
-} __attribute__((packed));
+} __packed_ws__(Location, 4);
 
 struct CardDefinition {
   struct Stat {
@@ -479,7 +508,8 @@ struct CardDefinition {
 
     void decode_code();
     std::string str() const;
-  } __attribute__((packed));
+    phosg::JSON json() const;
+  } __packed_ws__(Stat, 4);
 
   struct Effect {
     // effect_num is the 1-based index of this effect within the card definition
@@ -494,8 +524,7 @@ struct CardDefinition {
     // rules; for example, the expression "4+4//2" results in 4, not 6.
     /* 02 */ pstring<TextEncoding::ASCII, 0x0F> expr;
     // when specifies in which phase the effect should activate.
-    // TODO: There are many values that can be used here; document them.
-    /* 11 */ uint8_t when;
+    /* 11 */ EffectWhen when;
     // arg1 generally specifies how long the effect activates for.
     /* 12 */ pstring<TextEncoding::ASCII, 4> arg1;
     // arg2 generally specifies a condition for when the effect activates.
@@ -514,11 +543,12 @@ struct CardDefinition {
 
     bool is_empty() const;
     static std::string str_for_arg(const std::string& arg);
-    std::string str(const char* separator = ", ", const TextArchive* text_archive = nullptr) const;
-  } __attribute__((packed));
+    std::string str(const char* separator = ", ", const TextSet* text_archive = nullptr) const;
+    phosg::JSON json() const;
+  } __packed_ws__(Effect, 0x20);
 
   /* 0000 */ be_uint32_t card_id;
-  /* 0004 */ parray<uint8_t, 0x40> jp_name;
+  /* 0004 */ pstring<TextEncoding::SJIS, 0x40> jp_name;
 
   // The list of card definitions ends with a "sentinel" definition that isn't a
   // real card, but instead has a negative number in the type field here.
@@ -764,9 +794,9 @@ struct CardDefinition {
   // enormous comment? That's what this array stores.
   /* 009C */ parray<be_uint16_t, 2> drop_rates;
 
-  /* 00A0 */ pstring<TextEncoding::SJIS, 0x14> en_name;
+  /* 00A0 */ pstring<TextEncoding::ISO8859, 0x14> en_name;
   /* 00B4 */ pstring<TextEncoding::SJIS, 0x0B> jp_short_name;
-  /* 00BF */ pstring<TextEncoding::SJIS, 0x08> en_short_name;
+  /* 00BF */ pstring<TextEncoding::ISO8859, 0x08> en_short_name;
   // These effects modify the card's behavior in various situations. Only
   // effects for which effect_num is not zero are used.
   /* 00C7 */ parray<Effect, 3> effects;
@@ -780,27 +810,22 @@ struct CardDefinition {
   CardClass card_class() const;
 
   void decode_range();
-  std::string str(bool single_line = true, const TextArchive* text_archive = nullptr) const;
-} __attribute__((packed)); // 0x128 bytes in total
+  std::string str(bool single_line = true, const TextSet* text_archive = nullptr) const;
+  phosg::JSON json() const;
+} __packed_ws__(CardDefinition, 0x128);
 
 struct CardDefinitionsFooter {
-  // Technically the card definitions file is a REL file, so the last 0x20 bytes
-  // here should be a separate structure.
   /* 00 */ be_uint32_t num_cards1;
   /* 04 */ be_uint32_t cards_offset; // == 0
   /* 08 */ be_uint32_t num_cards2;
   /* 0C */ parray<be_uint32_t, 3> unknown_a2;
   /* 18 */ parray<be_uint16_t, 0x10> relocations;
-  /* 38 */ be_uint32_t relocations_offset;
-  /* 3C */ be_uint32_t num_relocations;
-  /* 40 */ parray<be_uint32_t, 2> unused1;
-  /* 48 */ be_uint32_t footer_offset;
-  /* 4C */ parray<be_uint32_t, 3> unused2;
+  /* 38 */ RELFileFooterBE rel_footer;
   /* 58 */
-} __attribute__((packed));
+} __packed_ws__(CardDefinitionsFooter, 0x58);
 
 struct DeckDefinition {
-  /* 00 */ pstring<TextEncoding::SJIS, 0x10> name;
+  /* 00 */ pstring<TextEncoding::MARKED, 0x10> name;
   /* 10 */ be_uint32_t client_id; // 0-3
   // List of card IDs. The card count is the number of nonzero entries here
   // before a zero entry (or 50 if no entries are nonzero). The first card ID is
@@ -817,17 +842,17 @@ struct DeckDefinition {
   /* 82 */ uint8_t second;
   /* 83 */ uint8_t unknown_a2;
   /* 84 */
-} __attribute__((packed));
+} __packed_ws__(DeckDefinition, 0x84);
 
 struct PlayerConfig {
   // The game splits this internally into two structures. The first column of
   // offsets is relative to the start of the first structure; the second column
   // is relative to the start of the second structure.
-  /* 0000:---- */ pstring<TextEncoding::SJIS, 12> rank_text; // From B7 command
+  /* 0000:---- */ pstring<TextEncoding::MARKED, 12> rank_text; // From B7 command
   /* 000C:---- */ parray<uint8_t, 0x1C> unknown_a1;
   /* 0028:---- */ parray<be_uint16_t, 20> tech_menu_shortcut_entries;
   /* 0050:---- */ parray<be_uint32_t, 10> choice_search_config;
-  // This field maps to quest_global_flags on Episodes 1 & 2
+  // This field maps to quest_counters on Episodes 1 & 2
   /* 0078:---- */ parray<be_uint32_t, 0x30> scenario_progress;
   // place_counts[0] and [1] from this field are added to the player's win and
   // loss count respectively when they're shown in the status menu. However,
@@ -835,7 +860,7 @@ struct PlayerConfig {
   // earlier version, this was the offline records structure, but they later
   // decided to just count online and offline records together in the main
   // records structure and didn't remove the codepath that reads from this.
-  /* 0138:---- */ PlayerRecords_Battle<true> unused_offline_records;
+  /* 0138:---- */ PlayerRecordsBattleBE unused_offline_records;
   /* 0150:---- */ parray<uint8_t, 4> unknown_a4;
   // The PlayerDataSegment structure begins here. In newserv, we combine this
   // structure into PlayerConfig since the two are always used together.
@@ -877,23 +902,25 @@ struct PlayerConfig {
   // card counts array is encrypted in memory most of the time, and they went
   // out of their way to ensure the game uses an area of memory that almost no
   // other game uses, which is also used by the Action Replay.)
-  /* 05A4:0450 */ parray<be_uint64_t, 0x1C2> rare_tokens;
+  /* 05A4:0450 */ parray<be_uint64_t, 450> rare_tokens;
   /* 13B4:1260 */ parray<uint8_t, 0x80> unknown_a7;
   /* 1434:12E0 */ parray<DeckDefinition, 25> decks;
   /* 2118:1FC4 */ parray<uint8_t, 0x08> unknown_a8;
-  /* 2120:1FCC */ be_uint32_t offline_clv_exp; // CLvOff = this / 100
-  /* 2124:1FD0 */ be_uint32_t online_clv_exp; // CLvOn = this / 100
+  /* 2120:1FCC */ be_uint32_t offline_clv_exp; // CLvOff = (this / 100) + 1
+  /* 2124:1FD0 */ be_uint32_t online_clv_exp; // CLvOn = (this / 100) + 1
   struct PlayerReference {
     /* 00 */ be_uint32_t guild_card_number;
-    /* 04 */ pstring<TextEncoding::SJIS, 0x18> player_name;
-  } __attribute__((packed));
-  // This array is updated when a battle is started (via a 6xB4x05 command). The
-  // client adds the opposing players' info to ths first two entries here if the
-  // opponents are human. (The existing entries are always moved back by two
-  // slots, but if one or both opponents are not humans, one or both of the
-  // newly-vacated slots is not filled in.)
+    /* 04 */ pstring<TextEncoding::MARKED, 0x18> name;
+  } __packed_ws__(PlayerReference, 0x1C);
+  // These two arrays are updated when a battle is started (via a 6xB4x05
+  // command). The client adds the opposing players' info to ths first two
+  // entries in recent_human_opponents if the opponents are human. (The
+  // existing entries are always moved back by two slots, but if one or both
+  // opponents are not humans, one or both of the newly-vacated slots is not
+  // filled in.) Both arrays have the most recent entries at the beginning.
   /* 2128:1FD4 */ parray<PlayerReference, 10> recent_human_opponents;
-  /* 2240:20EC */ parray<uint8_t, 0x28> unknown_a10;
+  /* 2240:20EC */ parray<be_uint32_t, 5> recent_battle_start_timestamps;
+  /* 2254:2100 */ parray<uint8_t, 0x14> unknown_a10;
   /* 2268:2114 */ be_uint32_t init_timestamp;
   /* 226C:2118 */ be_uint32_t last_online_battle_start_timestamp;
   // In a certain situation, unknown_t3 is set to init_timestamp plus a multiple
@@ -909,7 +936,42 @@ struct PlayerConfig {
 
   void decrypt();
   void encrypt(uint8_t basis);
-} __attribute__((packed));
+} __packed_ws__(PlayerConfig, 0x2350);
+
+struct PlayerConfigNTE {
+  /* 0000 */ pstring<TextEncoding::MARKED, 12> rank_text;
+  /* 000C */ parray<uint8_t, 0x1C> unknown_a1;
+  /* 0028 */ parray<be_uint16_t, 20> tech_menu_shortcut_entries;
+  /* 0050 */ parray<be_uint32_t, 10> choice_search_config;
+  /* 0078 */ parray<be_uint32_t, 0x10> scenario_progress; // Final has 0x30 entries here
+  /* 00B8 */ PlayerRecordsBattleBE unused_offline_records;
+  /* 00D0 */ parray<uint8_t, 4> unknown_a4;
+  /* 00D4 */ uint8_t is_encrypted;
+  /* 00D5 */ uint8_t basis;
+  /* 00D6 */ parray<uint8_t, 2> unused;
+  /* 00D8 */ parray<uint8_t, 1000> card_counts;
+  /* 04C0 */ parray<be_uint16_t, 50> card_count_checksums;
+  /* 0524 */ parray<be_uint64_t, 300> rare_tokens;
+  /* 0E84 */ parray<DeckDefinition, 25> decks;
+  /* 1B68 */ parray<uint8_t, 0x08> unknown_a8;
+  /* 1B70 */ be_uint32_t offline_clv_exp;
+  /* 1B74 */ be_uint32_t online_clv_exp;
+  /* 1B78 */ parray<PlayerConfig::PlayerReference, 10> recent_human_opponents;
+  /* 1C90 */ parray<be_uint32_t, 5> recent_battle_start_timestamps;
+  /* 1CA4 */ parray<uint8_t, 0x14> unknown_a10;
+  /* 1CB8 */ be_uint32_t init_timestamp;
+  /* 1CBC */ be_uint32_t last_online_battle_start_timestamp;
+  /* 1CC0 */ be_uint32_t unknown_t3;
+  /* 1CC4 */ parray<uint8_t, 0x94> unknown_a14;
+  /* 1D58 */
+
+  PlayerConfigNTE() = default;
+  explicit PlayerConfigNTE(const PlayerConfig& config);
+  operator PlayerConfig() const;
+
+  void decrypt();
+  void encrypt(uint8_t basis);
+} __packed_ws__(PlayerConfigNTE, 0x1D58);
 
 enum class HPType : uint8_t {
   DEFEAT_PLAYER = 0,
@@ -939,8 +1001,8 @@ struct Rules {
   /* 00 */ uint8_t overall_time_limit = 0;
   /* 01 */ uint8_t phase_time_limit = 0; // In seconds; 0 = unlimited
   /* 02 */ AllowedCards allowed_cards = AllowedCards::ALL;
-  /* 03 */ uint8_t min_dice = 1; // 0 = default (1)
-  /* 04 */ uint8_t max_dice = 6; // 0 = default (6)
+  /* 03 */ uint8_t min_dice_value = 1; // 0 = default (1)
+  /* 04 */ uint8_t max_dice_value = 6; // 0 = default (6)
   /* 05 */ uint8_t disable_deck_shuffle = 0; // 0 = shuffle on, 1 = off
   /* 06 */ uint8_t disable_deck_loop = 0; // 0 = loop on, 1 = off
   /* 07 */ uint8_t char_hp = 15;
@@ -951,8 +1013,11 @@ struct Rules {
   /* 0C */ uint8_t disable_dice_boost = 0; // 0 = dice boost on, 1 = off
   // NOTE: The following fields are unused in PSO's implementation, but newserv
   // uses them to implement extended rules.
-  /* 0D */ uint8_t def_dice_range = 0; // High 4 bits = min, low 4 = max
-  /* 0E */ parray<uint8_t, 6> unused;
+  /* 0D */ uint8_t def_dice_value_range = 0; // High 4 bits = min, low 4 = max
+  // These fields specify override dice ranges for the 1-player team in 2v1
+  /* 0E */ uint8_t atk_dice_value_range_2v1 = 0; // High 4 bits = min, low 4 = max
+  /* 0F */ uint8_t def_dice_value_range_2v1 = 0; // High 4 bits = min, low 4 = max
+  /* 10 */ parray<uint8_t, 4> unused;
   /* 14 */
 
   // Annoyingly, this structure is a different size in Episode 3 Trial Edition.
@@ -962,8 +1027,8 @@ struct Rules {
   // likely be more work than it's worth.
 
   Rules() = default;
-  explicit Rules(const JSON& json);
-  JSON json() const;
+  explicit Rules(const phosg::JSON& json);
+  phosg::JSON json() const;
   bool operator==(const Rules& other) const = default;
   bool operator!=(const Rules& other) const = default;
   void clear();
@@ -972,20 +1037,22 @@ struct Rules {
   bool check_invalid_fields() const;
   bool check_and_reset_invalid_fields();
 
-  uint8_t min_def_dice() const;
-  uint8_t max_def_dice() const;
+  std::pair<uint8_t, uint8_t> atk_dice_range(bool is_1p_2v1) const;
+  std::pair<uint8_t, uint8_t> def_dice_range(bool is_1p_2v1) const;
 
   std::string str() const;
-} __attribute__((packed));
+} __packed_ws__(Rules, 0x14);
 
 struct RulesTrial {
-  // The fields here have the same meaning as in the final version. The only
-  // difference is that Dice Boost does not exist in the trial version.
+  // Most fields here have the same meanings as in the final version.
   /* 00 */ uint8_t overall_time_limit = 0;
   /* 01 */ uint8_t phase_time_limit = 0;
   /* 02 */ AllowedCards allowed_cards = AllowedCards::ALL;
-  /* 03 */ uint8_t atk_dice_max = 1;
-  /* 04 */ uint8_t def_dice_max = 6;
+  // In NTE, the dice behave differently than in non-NTE. A zero in either of
+  // these fields means the corresponding die is random in the range [1, 6];
+  // any nonzero value means that die will always take that value.
+  /* 03 */ uint8_t atk_die_behavior = 0;
+  /* 04 */ uint8_t def_die_behavior = 0;
   /* 05 */ uint8_t disable_deck_shuffle = 0;
   /* 06 */ uint8_t disable_deck_loop = 0;
   /* 07 */ uint8_t char_hp = 15;
@@ -996,9 +1063,9 @@ struct RulesTrial {
   /* 0C */
 
   RulesTrial() = default;
-  explicit RulesTrial(const Rules&);
+  RulesTrial(const Rules&);
   operator Rules() const;
-} __attribute__((packed));
+} __packed_ws__(RulesTrial, 0x0C);
 
 struct StateFlags {
   /* 00 */ le_uint16_t turn_num;
@@ -1009,7 +1076,7 @@ struct StateFlags {
   /* 06 */ SetupPhase setup_phase;
   /* 07 */ RegistrationPhase registration_phase;
   /* 08 */ parray<le_uint32_t, 2> team_exp;
-  /* 10 */ parray<uint8_t, 2> team_dice_boost;
+  /* 10 */ parray<uint8_t, 2> team_dice_bonus;
   /* 12 */ uint8_t first_team_turn;
   /* 13 */ uint8_t tournament_flag;
   /* 14 */ parray<CardType, 4> client_sc_card_types;
@@ -1020,7 +1087,7 @@ struct StateFlags {
   bool operator!=(const StateFlags& other) const;
   void clear();
   void clear_FF();
-} __attribute__((packed));
+} __packed_ws__(StateFlags, 0x18);
 
 struct MapList {
   be_uint32_t num_maps;
@@ -1048,18 +1115,54 @@ struct MapList {
     /* 021C */ uint8_t map_category;
     /* 021D */ parray<uint8_t, 3> unused;
     /* 0220 */
-  } __attribute__((packed));
+  } __packed_ws__(Entry, 0x220);
 
   // Variable-length fields:
   // Entry entries[num_maps];
   // char strings[...EOF]; // Null-terminated strings, pointed to by offsets in Entry structs
-} __attribute__((packed));
+} __packed_ws__(MapList, 0x10);
 
 struct CompressedMapHeader { // .mnm file format
   le_uint32_t map_number;
   le_uint32_t compressed_data_size;
   // Compressed data immediately follows (which decompresses to a MapDefinition)
-} __attribute__((packed));
+} __packed_ws__(CompressedMapHeader, 8);
+
+struct OverlayState {
+  // In the tiles array, the high 4 bits of each value are the tile type, and
+  // the low 4 bits are the subtype. The types are:
+  // 10: blocked by rock (as if the corresponding map_tiles value was 00)
+  // 20: blocked by fence (as if the corresponding map_tiles value was 00)
+  // 30-34: teleporters (2 of each value may be present)
+  // 40-4F: traps on NTE
+  // 40-44: traps on non-NTE (there may be up to 8 of each type, and one of
+  //   each is chosen to be a real trap at battle start); the trap types are:
+  //   40: Dice Fever, Heavy Fog, Muscular, Immortality, Snail Pace
+  //   41: Gold Rush, Charity, Requiem
+  //   42: Powerless Rain, Trash 1, Empty Hand, Skip Draw
+  //   43: Brave Wind, Homesick, Fly
+  //   44: Dice+1, Battle Royale, Reverse Card, Giant Garden, Fix
+  // 50: blocked by metal box (appears as an improperly-z-buffered teal cube in
+  //   preview; behaves like 10 and 20 in game)
+  // Any other value here will behave like 00 (no special tile behavior).
+  parray<parray<uint8_t, 0x10>, 0x10> tiles;
+
+  // This field appears to be unused in both NTE and the final version. Perhaps
+  // it had some meaning in a pre-NTE version.
+  parray<le_uint32_t, 5> unused1;
+
+  // TODO: Figure out exactly where these colors are used
+  parray<le_uint32_t, 0x10> trap_tile_colors_nte; // Unused on non-NTE
+
+  // This specifies the assist card IDs that each trap value (40-4F) will set
+  // when triggered. This only has an effect on NTE; on non-NTE, this is unused
+  // and a fixed set of assist cards is used instead. (On newserv, the set of
+  // used assist cards can be overridden in the server configuration.)
+  parray<le_uint16_t, 0x10> trap_card_ids_nte;
+
+  OverlayState();
+  void clear();
+} __packed_ws__(OverlayState, 0x174);
 
 struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
   // If tag is not 0x00000100, the game considers the map to be corrupt in
@@ -1111,7 +1214,6 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
   // 19 = View Battle waiting room
   // 1A = TCard00_Select (debug battle setup menu)
   // 1B = nothing (softlocks at black screen)
-  // TCard00_Select is accessible on newserv with the $ep3battledebug command.
   /* 000A */ uint8_t environment_number;
 
   // This field specifies how many of the camera_zone_maps are used.
@@ -1156,7 +1258,8 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
     /* 48 */
 
     std::string str() const;
-  } __attribute__((packed));
+    phosg::JSON json() const;
+  } __packed_ws__(CameraSpec, 0x48);
 
   // This array specifies the camera zone maps. A camera zone map is a subset of
   // the main map (specified in map_tiles). Tiles that are part of each camera
@@ -1179,29 +1282,16 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
   // (it is not yet known what the major index represents).
   /* 1AB8 */ parray<parray<CameraSpec, 2>, 3> overview_specs;
 
-  // In the modification_tiles array, the values are:
-  // 10 = blocked by rock (as if the corresponding map_tiles value was 00)
-  // 20 = blocked by fence (as if the corresponding map_tiles value was 00)
-  // 30-34 = teleporters (2 of each value may be present)
-  // 40-44 = traps (one of each type is chosen at random to be a real trap at
-  //         battle start time)
-  // 50 = blocked by metal box (appears as improperly-z-buffered teal cube in
-  //      preview; behaves like 10 and 20 in game)
-  // The assist cards that each trap type can contain are:
-  //   40: Dice Fever, Heavy Fog, Muscular, Immortality, Snail Pace
-  //   41: Gold Rush, Charity, Requiem
-  //   42: Powerless Rain, Trash 1, Empty Hand, Skip Draw
-  //   43: Brave Wind, Homesick, Fly
-  //   44: Dice+1, Battle Royale, Reverse Card, Giant Garden, Fix
-  /* 1C68 */ parray<parray<uint8_t, 0x10>, 0x10> modification_tiles;
+  // This specifies the locations of blocked tiles, teleporters, and traps. See
+  // the comments in OverlayState for details.
+  /* 1C68 */ OverlayState overlay_state;
 
-  /* 1D68 */ parray<uint8_t, 0x74> unknown_a5;
   /* 1DDC */ Rules default_rules;
 
-  /* 1DF0 */ pstring<TextEncoding::SJIS, 0x14> name;
-  /* 1E04 */ pstring<TextEncoding::SJIS, 0x14> location_name;
-  /* 1E18 */ pstring<TextEncoding::SJIS, 0x3C> quest_name; // == location_name if not a quest
-  /* 1E54 */ pstring<TextEncoding::SJIS, 0x190> description;
+  /* 1DF0 */ pstring<TextEncoding::MARKED, 0x14> name;
+  /* 1E04 */ pstring<TextEncoding::MARKED, 0x14> location_name;
+  /* 1E18 */ pstring<TextEncoding::MARKED, 0x3C> quest_name; // == location_name if not a quest
+  /* 1E54 */ pstring<TextEncoding::MARKED, 0x190> description;
 
   // These fields describe where the map cursor on the preview screen should
   // scroll to
@@ -1209,10 +1299,11 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
   /* 1FE6 */ be_uint16_t map_y;
 
   struct NPCDeck {
-    /* 00 */ pstring<TextEncoding::SJIS, 0x18> name;
+    /* 00 */ pstring<TextEncoding::MARKED, 0x18> deck_name;
     /* 18 */ parray<be_uint16_t, 0x20> card_ids; // Last one appears to always be FFFF
     /* 58 */
-  } __attribute__((packed));
+    phosg::JSON json(uint8_t language) const;
+  } __packed_ws__(NPCDeck, 0x58);
   /* 1FE8 */ parray<NPCDeck, 3> npc_decks; // Unused if name[0] == 0
 
   // These are almost (but not quite) the same format as the entries in
@@ -1223,11 +1314,12 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
     /* 0000 */ parray<be_uint16_t, 2> unknown_a1;
     /* 0004 */ uint8_t is_arkz;
     /* 0005 */ parray<uint8_t, 3> unknown_a2;
-    /* 0008 */ pstring<TextEncoding::SJIS, 0x10> name;
+    /* 0008 */ pstring<TextEncoding::MARKED, 0x10> ai_name;
     // TODO: Figure out exactly how these are used and document here.
     /* 0018 */ parray<be_uint16_t, 0x7E> params;
     /* 0114 */
-  } __attribute__((packed));
+    phosg::JSON json(uint8_t language) const;
+  } __packed_ws__(AIParams, 0x114);
   /* 20F0 */ parray<AIParams, 3> npc_ai_params; // Unused if name[0] == 0
 
   /* 242C */ parray<uint8_t, 8> unknown_a7;
@@ -1257,9 +1349,9 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
   // appears after the battle if it's not blank. dispatch_message appears right
   // before the player chooses a deck if it's not blank; usually it says
   // something like "You can only dispatch <character>".
-  /* 2440 */ pstring<TextEncoding::SJIS, 0x190> before_message;
-  /* 25D0 */ pstring<TextEncoding::SJIS, 0x190> after_message;
-  /* 2760 */ pstring<TextEncoding::SJIS, 0x190> dispatch_message;
+  /* 2440 */ pstring<TextEncoding::MARKED, 0x190> before_message;
+  /* 25D0 */ pstring<TextEncoding::MARKED, 0x190> after_message;
+  /* 2760 */ pstring<TextEncoding::MARKED, 0x190> dispatch_message;
 
   struct DialogueSet {
     // Dialogue sets specify lines that COMs can say at certain points during
@@ -1277,9 +1369,10 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
     /* 0002 */ be_uint16_t percent_chance; // 0-100, or FFFF if unused
     // If the dialogue set activates, the game randomly chooses one of these
     // strings, excluding any that are empty or begin with the character '^'.
-    /* 0004 */ parray<pstring<TextEncoding::SJIS, 0x40>, 4> strings;
+    /* 0004 */ parray<pstring<TextEncoding::MARKED, 0x40>, 4> strings;
     /* 0104 */
-  } __attribute__((packed));
+    phosg::JSON json(uint8_t language) const;
+  } __packed_ws__(DialogueSet, 0x104);
 
   // There are up to 0x10 of these per valid NPC, but only the first 13 of them
   // are used, since each one must have a unique value for .when and the values
@@ -1287,7 +1380,13 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
   /* 28F0 */ parray<parray<DialogueSet, 0x10>, 3> dialogue_sets;
 
   // These card IDs are always given to the player when they win a battle on
-  // this map. Unused entries should be set to FFFF.
+  // this map. Unused entries should be set to FFFF. Cards in this array are
+  // ignored if they have any of these features (in the card definition):
+  // - type is HUNTERS_SC or ARKZ_SC
+  // - card_class is BOSS_ATTACK_ACTION or BOSS_TECH
+  // - rank is D1, D2, or D3
+  // - cannot_drop is 1 (specifically 1; other values don't prevent cards from
+  //   appearing)
   /* 59B0 */ parray<be_uint16_t, 0x10> reward_card_ids;
 
   // These fields are used when determining which cards to drop after the battle
@@ -1308,10 +1407,12 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
   /* 59DC */ uint8_t map_category;
 
   // This field determines block graphics to be used in the Cyber environment.
-  // There are 10 block types (0-9); if this value is > 9, type 0 is used.
+  // There are 10 block types (0-9); if this value is > 9, type 0 is used. This
+  // field has no effect in Ep3 NTE, even though there are 6 different block
+  // texture files on the NTE disc.
   /* 59DD */ uint8_t cyber_block_type;
 
-  /* 59DE */ parray<uint8_t, 2> unknown_a11;
+  /* 59DE */ be_uint16_t unknown_a11;
 
   // This array specifies which SC characters can't participate in the quest
   // (that is, the player is not allowed to choose decks with these SC cards).
@@ -1361,7 +1462,8 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
 
     bool operator==(const EntryState& other) const = default;
     bool operator!=(const EntryState& other) const = default;
-  } __attribute__((packed));
+    phosg::JSON json() const;
+  } __packed_ws__(EntryState, 2);
   /* 5A10 */ parray<EntryState, 4> entry_states;
   /* 5A18 */
 
@@ -1376,7 +1478,8 @@ struct MapDefinition { // .mnmd format; also the format of (decompressed) quests
   void assert_semantically_equivalent(const MapDefinition& other) const;
 
   std::string str(const CardIndex* card_index, uint8_t language) const;
-} __attribute__((packed));
+  phosg::JSON json(uint8_t language) const;
+} __packed_ws__(MapDefinition, 0x5A18);
 
 struct MapDefinitionTrial {
   // This is the format of Episode 3 Trial Edition maps. See the comments in
@@ -1393,22 +1496,21 @@ struct MapDefinitionTrial {
   /* 0118 */ parray<parray<parray<parray<uint8_t, 0x10>, 0x10>, 10>, 2> camera_zone_maps;
   /* 1518 */ parray<parray<MapDefinition::CameraSpec, 10>, 2> camera_zone_specs;
   /* 1AB8 */ parray<parray<MapDefinition::CameraSpec, 2>, 3> overview_specs;
-  /* 1C68 */ parray<parray<uint8_t, 0x10>, 0x10> modification_tiles;
-  /* 1D68 */ parray<uint8_t, 0x74> unknown_a5;
-  /* 1DD4 */ RulesTrial default_rules;
-  /* 1DE8 */ pstring<TextEncoding::SJIS, 0x14> name;
-  /* 1DFC */ pstring<TextEncoding::SJIS, 0x14> location_name;
-  /* 1E10 */ pstring<TextEncoding::SJIS, 0x3C> quest_name;
-  /* 1E4C */ pstring<TextEncoding::SJIS, 0x190> description;
+  /* 1C68 */ OverlayState overlay_state;
+  /* 1DDC */ RulesTrial default_rules;
+  /* 1DE8 */ pstring<TextEncoding::MARKED, 0x14> name;
+  /* 1DFC */ pstring<TextEncoding::MARKED, 0x14> location_name;
+  /* 1E10 */ pstring<TextEncoding::MARKED, 0x3C> quest_name;
+  /* 1E4C */ pstring<TextEncoding::MARKED, 0x190> description;
   /* 1FDC */ be_uint16_t map_x;
   /* 1FDE */ be_uint16_t map_y;
   /* 1FE0 */ parray<MapDefinition::NPCDeck, 3> npc_decks;
   /* 20E8 */ parray<MapDefinition::AIParams, 3> npc_ai_params;
   /* 2424 */ parray<uint8_t, 8> unknown_a7;
   /* 242C */ parray<be_int32_t, 3> npc_ai_params_entry_index;
-  /* 2438 */ pstring<TextEncoding::SJIS, 0x190> before_message;
-  /* 25C8 */ pstring<TextEncoding::SJIS, 0x190> after_message;
-  /* 2758 */ pstring<TextEncoding::SJIS, 0x190> dispatch_message;
+  /* 2438 */ pstring<TextEncoding::MARKED, 0x190> before_message;
+  /* 25C8 */ pstring<TextEncoding::MARKED, 0x190> after_message;
+  /* 2758 */ pstring<TextEncoding::MARKED, 0x190> dispatch_message;
   /* 28E8 */ parray<parray<MapDefinition::DialogueSet, 8>, 3> dialogue_sets;
   /* 4148 */ parray<be_uint16_t, 0x10> reward_card_ids;
   /* 4168 */ be_int32_t win_level_override;
@@ -1417,7 +1519,7 @@ struct MapDefinitionTrial {
   /* 4172 */ be_int16_t field_offset_y;
   /* 4174 */ uint8_t map_category;
   /* 4175 */ uint8_t cyber_block_type;
-  /* 4176 */ parray<uint8_t, 2> unknown_a11;
+  /* 4176 */ be_uint16_t unknown_a11;
   // TODO: This field may contain some version of unavailable_sc_cards and/or
   // entry_states from MapDefinition, but the format isn't the same
   /* 4178 */ parray<uint8_t, 0x28> unknown_t12;
@@ -1425,7 +1527,7 @@ struct MapDefinitionTrial {
 
   MapDefinitionTrial(const MapDefinition& map);
   operator MapDefinition() const;
-} __attribute__((packed));
+} __packed_ws__(MapDefinitionTrial, 0x41A0);
 
 struct COMDeckDefinition {
   size_t index;
@@ -1458,6 +1560,7 @@ public:
   std::shared_ptr<const CardEntry> definition_for_name_normalized(const std::string& name) const;
   std::set<uint32_t> all_ids() const;
   uint64_t definitions_mtime() const;
+  phosg::JSON definitions_json() const;
 
 private:
   static std::string normalize_card_name(const std::string& name);
@@ -1482,7 +1585,7 @@ public:
     VersionedMap(std::string&& compressed_data, uint8_t language);
 
     std::shared_ptr<const MapDefinitionTrial> trial() const;
-    const std::string& compressed(bool is_trial) const;
+    const std::string& compressed(bool is_nte) const;
 
   private:
     mutable std::shared_ptr<const MapDefinitionTrial> trial_map;
@@ -1538,14 +1641,37 @@ private:
 
 // TODO: Figure out how to declare these inside the Episode3 namespace.
 template <>
-Episode3::HPType enum_for_name<Episode3::HPType>(const char* name);
+Episode3::HPType phosg::enum_for_name<Episode3::HPType>(const char* name);
 template <>
-const char* name_for_enum<Episode3::HPType>(Episode3::HPType hp_type);
+const char* phosg::name_for_enum<Episode3::HPType>(Episode3::HPType hp_type);
 template <>
-Episode3::DiceExchangeMode enum_for_name<Episode3::DiceExchangeMode>(const char* name);
+Episode3::DiceExchangeMode phosg::enum_for_name<Episode3::DiceExchangeMode>(const char* name);
 template <>
-const char* name_for_enum<Episode3::DiceExchangeMode>(Episode3::DiceExchangeMode dice_exchange_mode);
+const char* phosg::name_for_enum<Episode3::DiceExchangeMode>(Episode3::DiceExchangeMode dice_exchange_mode);
 template <>
-Episode3::AllowedCards enum_for_name<Episode3::AllowedCards>(const char* name);
+Episode3::AllowedCards phosg::enum_for_name<Episode3::AllowedCards>(const char* name);
 template <>
-const char* name_for_enum<Episode3::AllowedCards>(Episode3::AllowedCards allowed_cards);
+const char* phosg::name_for_enum<Episode3::AllowedCards>(Episode3::AllowedCards allowed_cards);
+
+template <>
+const char* phosg::name_for_enum<Episode3::BattlePhase>(Episode3::BattlePhase phase);
+template <>
+const char* phosg::name_for_enum<Episode3::SetupPhase>(Episode3::SetupPhase phase);
+template <>
+const char* phosg::name_for_enum<Episode3::RegistrationPhase>(Episode3::RegistrationPhase phase);
+template <>
+const char* phosg::name_for_enum<Episode3::ActionSubphase>(Episode3::ActionSubphase phase);
+template <>
+const char* phosg::name_for_enum<Episode3::AttackMedium>(Episode3::AttackMedium medium);
+template <>
+const char* phosg::name_for_enum<Episode3::CriterionCode>(Episode3::CriterionCode code);
+template <>
+const char* phosg::name_for_enum<Episode3::CardType>(Episode3::CardType type);
+template <>
+const char* phosg::name_for_enum<Episode3::CardClass>(Episode3::CardClass cc);
+template <>
+const char* phosg::name_for_enum<Episode3::ConditionType>(Episode3::ConditionType cond_type);
+template <>
+const char* phosg::name_for_enum<Episode3::EffectWhen>(Episode3::EffectWhen when);
+template <>
+const char* phosg::name_for_enum<Episode3::Direction>(Episode3::Direction d);

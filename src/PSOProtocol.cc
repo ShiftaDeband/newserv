@@ -25,7 +25,7 @@ uint16_t PSOCommandHeader::command(Version version) const {
     case Version::PC_V2:
       return this->pc.command;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
       return this->dc.command;
@@ -52,7 +52,7 @@ void PSOCommandHeader::set_command(Version version, uint16_t command) {
       this->pc.command = command;
       break;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
       this->dc.command = command;
@@ -82,7 +82,7 @@ uint16_t PSOCommandHeader::size(Version version) const {
     case Version::PC_V2:
       return this->pc.size;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
       return this->dc.size;
@@ -109,7 +109,7 @@ void PSOCommandHeader::set_size(Version version, uint32_t size) {
       this->pc.size = size;
       break;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
       this->dc.size = size;
@@ -139,7 +139,7 @@ uint32_t PSOCommandHeader::flag(Version version) const {
     case Version::PC_V2:
       return this->pc.flag;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
       return this->dc.flag;
@@ -166,7 +166,7 @@ void PSOCommandHeader::set_flag(Version version, uint32_t flag) {
       this->pc.flag = flag;
       break;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
       this->dc.flag = flag;
@@ -190,7 +190,7 @@ void PSOCommandHeader::set_flag(Version version, uint32_t flag) {
 
 void check_size_v(size_t size, size_t min_size, size_t max_size) {
   if (size < min_size) {
-    throw std::runtime_error(string_printf(
+    throw std::runtime_error(phosg::string_printf(
         "command too small (expected at least 0x%zX bytes, received 0x%zX bytes)",
         min_size, size));
   }
@@ -198,7 +198,7 @@ void check_size_v(size_t size, size_t min_size, size_t max_size) {
     max_size = min_size;
   }
   if (size > max_size) {
-    throw std::runtime_error(string_printf(
+    throw std::runtime_error(phosg::string_printf(
         "command too large (expected at most 0x%zX bytes, received 0x%zX bytes)",
         max_size, size));
   }
@@ -210,10 +210,10 @@ std::string prepend_command_header(
     uint16_t cmd,
     uint32_t flag,
     const std::string& data) {
-  StringWriter ret;
+  phosg::StringWriter ret;
   switch (version) {
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::GC_NTE:

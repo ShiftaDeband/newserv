@@ -13,7 +13,7 @@ struct Channel {
   std::unique_ptr<struct bufferevent, void (*)(struct bufferevent*)> bev;
   struct sockaddr_storage local_addr;
   struct sockaddr_storage remote_addr;
-  bool is_virtual_connection;
+  uint64_t virtual_network_id; // 0 = normal TCP connection
 
   Version version;
   uint8_t language;
@@ -21,8 +21,8 @@ struct Channel {
   std::shared_ptr<PSOEncryption> crypt_out;
 
   std::string name;
-  TerminalFormat terminal_send_color;
-  TerminalFormat terminal_recv_color;
+  phosg::TerminalFormat terminal_send_color;
+  phosg::TerminalFormat terminal_recv_color;
 
   struct Message {
     uint16_t command;
@@ -45,19 +45,20 @@ struct Channel {
       on_error_t on_error,
       void* context_obj,
       const std::string& name,
-      TerminalFormat terminal_send_color = TerminalFormat::END,
-      TerminalFormat terminal_recv_color = TerminalFormat::END);
+      phosg::TerminalFormat terminal_send_color = phosg::TerminalFormat::END,
+      phosg::TerminalFormat terminal_recv_color = phosg::TerminalFormat::END);
   // Creates a connected channel
   Channel(
       struct bufferevent* bev,
+      uint64_t virtual_network_id,
       Version version,
       uint8_t language,
       on_command_received_t on_command_received,
       on_error_t on_error,
       void* context_obj,
       const std::string& name = "",
-      TerminalFormat terminal_send_color = TerminalFormat::END,
-      TerminalFormat terminal_recv_color = TerminalFormat::END);
+      phosg::TerminalFormat terminal_send_color = phosg::TerminalFormat::END,
+      phosg::TerminalFormat terminal_recv_color = phosg::TerminalFormat::END);
   Channel(const Channel& other) = delete;
   Channel(Channel&& other) = delete;
   Channel& operator=(const Channel& other) = delete;
@@ -70,7 +71,7 @@ struct Channel {
       void* context_obj,
       const std::string& name = "");
 
-  void set_bufferevent(struct bufferevent* bev);
+  void set_bufferevent(struct bufferevent* bev, uint64_t virtual_network_id);
 
   inline bool connected() const {
     return this->bev.get() != nullptr;

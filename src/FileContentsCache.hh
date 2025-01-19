@@ -2,6 +2,8 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 
@@ -76,7 +78,7 @@ public:
   }
   template <typename T, typename NameT>
   GetObjResult<T> get_obj(NameT name, std::function<T(const std::string&)> generate) {
-    uint64_t t = now();
+    uint64_t t = phosg::now();
     try {
       auto& f = this->name_to_file.at(name);
       if (f->data->size() != sizeof(T)) {
@@ -101,4 +103,22 @@ public:
 private:
   std::unordered_map<std::string, std::shared_ptr<File>> name_to_file;
   uint64_t ttl_usecs;
+};
+
+class ThreadSafeFileCache {
+public:
+  explicit ThreadSafeFileCache() = default;
+  ThreadSafeFileCache(const ThreadSafeFileCache&) = delete;
+  ThreadSafeFileCache(ThreadSafeFileCache&&) = delete;
+  ThreadSafeFileCache& operator=(const ThreadSafeFileCache&) = delete;
+  ThreadSafeFileCache& operator=(ThreadSafeFileCache&&) = delete;
+  ~ThreadSafeFileCache() = default;
+
+  // Warning: generate() is called while the lock is held for writing, so it
+  // will block other threads.
+  std::shared_ptr<const std::string> get(const std::string& name, std::function<std::shared_ptr<const std::string>(const std::string&)> generate);
+
+private:
+  std::shared_mutex lock;
+  std::unordered_map<std::string, std::shared_ptr<const std::string>> name_to_file;
 };

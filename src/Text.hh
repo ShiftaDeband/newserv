@@ -11,16 +11,30 @@
 #include <stdexcept>
 #include <string>
 
+#include "Types.hh"
+
+#define __packed__ __attribute__((packed))
+#define check_struct_size(StructT, Size)                                 \
+  static_assert(sizeof(StructT) >= Size, "Structure size is too small"); \
+  static_assert(sizeof(StructT) <= Size, "Structure size is too large")
+
+#define __packed_ws__(StructT, Size) \
+  __packed__;                        \
+  check_struct_size(StructT, Size)
+
 // Conversion functions
+
+std::string encode_utf8_char(uint32_t ch);
+uint32_t decode_utf8_char(const void** data, size_t* size);
 
 class TextTranscoder {
 public:
   TextTranscoder(const char* to, const char* from);
   TextTranscoder(const TextTranscoder&) = delete;
-  TextTranscoder(TextTranscoder&&);
+  TextTranscoder(TextTranscoder&&) = delete;
   TextTranscoder& operator=(const TextTranscoder&) = delete;
-  TextTranscoder& operator=(TextTranscoder&&);
-  ~TextTranscoder();
+  TextTranscoder& operator=(TextTranscoder&&) = delete;
+  virtual ~TextTranscoder();
 
   struct Result {
     size_t bytes_read;
@@ -31,16 +45,38 @@ public:
   std::string operator()(const void* src, size_t src_bytes);
   std::string operator()(const std::string& data);
 
-private:
+protected:
+  virtual std::string on_untranslatable(const void** src, size_t* size) const;
+
   static const iconv_t INVALID_IC;
   static const size_t FAILURE_RESULT;
   iconv_t ic;
 };
 
+class TextTranscoderCustomSJISToUTF8 : public TextTranscoder {
+public:
+  TextTranscoderCustomSJISToUTF8();
+  virtual ~TextTranscoderCustomSJISToUTF8() = default;
+
+protected:
+  virtual std::string on_untranslatable(const void** src, size_t* size) const;
+};
+
+class TextTranscoderUTF8ToCustomSJIS : public TextTranscoder {
+public:
+  TextTranscoderUTF8ToCustomSJIS();
+  virtual ~TextTranscoderUTF8ToCustomSJIS() = default;
+
+protected:
+  virtual std::string on_untranslatable(const void** src, size_t* size) const;
+};
+
 extern TextTranscoder tt_8859_to_utf8;
 extern TextTranscoder tt_utf8_to_8859;
-extern TextTranscoder tt_sjis_to_utf8;
-extern TextTranscoder tt_utf8_to_sjis;
+extern TextTranscoder tt_standard_sjis_to_utf8;
+extern TextTranscoder tt_utf8_to_standard_sjis;
+extern TextTranscoderCustomSJISToUTF8 tt_sega_sjis_to_utf8;
+extern TextTranscoderUTF8ToCustomSJIS tt_utf8_to_sega_sjis;
 extern TextTranscoder tt_utf16_to_utf8;
 extern TextTranscoder tt_utf8_to_utf16;
 extern TextTranscoder tt_ascii_to_utf8;
@@ -49,6 +85,10 @@ extern TextTranscoder tt_utf8_to_ascii;
 std::string tt_encode_marked_optional(const std::string& utf8, uint8_t default_language, bool is_utf16);
 std::string tt_encode_marked(const std::string& utf8, uint8_t default_language, bool is_utf16);
 std::string tt_decode_marked(const std::string& data, uint8_t default_language, bool is_utf16);
+
+char marker_for_language_code(uint8_t language_code);
+bool is_language_marker_sjis_8859(char marker);
+bool is_language_marker_utf16(char marker);
 
 // Packed array object for use in protocol structs
 
@@ -66,7 +106,7 @@ struct parray {
     this->clear_after(init_items.size());
   }
   template <typename ArgT = ItemT>
-    requires(std::is_arithmetic_v<ArgT> || is_converted_endian_sc_v<ArgT>)
+    requires(std::is_arithmetic_v<ArgT> || phosg::is_converted_endian_sc_v<ArgT>)
   parray() {
     this->clear(0);
   }
@@ -76,13 +116,21 @@ struct parray {
     this->clear(nullptr);
   }
   template <typename ArgT = ItemT>
-    requires(!std::is_arithmetic_v<ArgT> && !std::is_pointer_v<ArgT> && !is_converted_endian_sc_v<ArgT>)
+    requires(!std::is_arithmetic_v<ArgT> && !std::is_pointer_v<ArgT> && !phosg::is_converted_endian_sc_v<ArgT>)
   parray() {}
 
   parray(const parray& other) {
     this->operator=(other);
   }
-  parray(parray&& s) = delete;
+  parray(parray&& other) {
+    this->operator=(std::move(other));
+  }
+
+  template <typename FromT>
+    requires std::is_convertible_v<FromT, ItemT>
+  parray(const parray<FromT, Count>& other) {
+    this->operator=(other);
+  }
 
   template <size_t OtherCount>
   parray(const parray<ItemT, OtherCount>& s) {
@@ -168,7 +216,24 @@ struct parray {
     }
     return *this;
   }
-  parray& operator=(parray&& s) = delete;
+  parray& operator=(parray&& s) {
+    for (size_t x = 0; x < Count; x++) {
+      this->items[x] = s.items[x];
+    }
+    return *this;
+  }
+
+  template <typename FromT>
+    requires std::is_convertible_v<FromT, ItemT>
+  parray& operator=(const parray<FromT, Count>& s) {
+    for (size_t x = 0; x < Count; x++) {
+      const FromT& src_item = s.items[x];
+      ItemT& dest_item = this->items[x];
+      static_assert(!std::is_const_v<ItemT>, "ItemT is const");
+      dest_item = src_item;
+    }
+    return *this;
+  }
 
   template <size_t OtherCount>
   parray& operator=(const parray<ItemT, OtherCount>& s) {
@@ -234,7 +299,91 @@ struct parray {
     }
     return true;
   }
-} __attribute__((packed));
+} __packed__;
+
+template <typename ItemT, size_t Count>
+struct bcarray {
+  ItemT items[Count];
+
+  bcarray(ItemT v) {
+    this->clear(v);
+  }
+  bcarray(std::initializer_list<ItemT> init_items) {
+    for (size_t z = 0; z < init_items.size(); z++) {
+      this->items[z] = std::data(init_items)[z];
+    }
+    this->clear_after(init_items.size());
+  }
+  template <typename ArgT = ItemT>
+    requires(std::is_arithmetic_v<ArgT> || phosg::is_converted_endian_sc_v<ArgT>)
+  bcarray() {
+    this->clear(0);
+  }
+  template <typename ArgT = ItemT>
+    requires std::is_pointer_v<ArgT>
+  bcarray() {
+    this->clear(nullptr);
+  }
+  template <typename ArgT = ItemT>
+    requires(!std::is_arithmetic_v<ArgT> && !std::is_pointer_v<ArgT> && !phosg::is_converted_endian_sc_v<ArgT>)
+  bcarray() {}
+
+  bcarray(const bcarray& other) {
+    this->operator=(other);
+  }
+  bcarray(bcarray&& other) {
+    this->operator=(std::move(other));
+  }
+
+  constexpr static size_t size() {
+    return Count;
+  }
+
+  ItemT& operator[](size_t index) {
+    if (index >= Count) {
+      throw std::out_of_range("array index out of bounds");
+    }
+    return *&this->items[index];
+  }
+  const ItemT& operator[](size_t index) const {
+    if (index >= Count) {
+      throw std::out_of_range("array index out of bounds");
+    }
+    return *&this->items[index];
+  }
+
+  ItemT& at(size_t index) {
+    return this->operator[](index);
+  }
+  const ItemT& at(size_t index) const {
+    return this->operator[](index);
+  }
+
+  bcarray& operator=(const bcarray& s) {
+    for (size_t x = 0; x < Count; x++) {
+      this->items[x] = s.items[x];
+    }
+    return *this;
+  }
+  bcarray& operator=(bcarray&& s) {
+    for (size_t x = 0; x < Count; x++) {
+      this->items[x] = std::move(s.items[x]);
+    }
+    return *this;
+  }
+
+  bool operator==(const bcarray& s) const {
+    for (size_t x = 0; x < Count; x++) {
+      if (this->items[x] != s.items[x]) {
+        return false;
+      }
+    }
+    return true;
+  }
+  bool operator!=(const bcarray& s) const {
+    return !this->operator==(s);
+  }
+};
 
 // Packed text objects for use in protocol structs
 
@@ -245,6 +394,7 @@ enum class TextEncoding {
   ISO8859,
   ASCII,
   MARKED,
+  UTF16_ALWAYS_MARKED,
   CHALLENGE8, // MARKED but with challenge encryption on top
   CHALLENGE16, // UTF16 but with challenge encryption on top
 };
@@ -283,7 +433,7 @@ void decrypt_challenge_rank_text_t(void* vdata, size_t count) {
 template <
     TextEncoding Encoding,
     size_t Chars,
-    size_t BytesPerChar = (((Encoding == TextEncoding::UTF16) || (Encoding == TextEncoding::CHALLENGE16)) ? 2 : 1)>
+    size_t BytesPerChar = (((Encoding == TextEncoding::UTF16) || (Encoding == TextEncoding::UTF16_ALWAYS_MARKED) || (Encoding == TextEncoding::CHALLENGE16)) ? 2 : 1)>
 struct pstring {
   static constexpr size_t Bytes = Chars * BytesPerChar;
 
@@ -338,10 +488,23 @@ struct pstring {
           break;
         }
         case TextEncoding::SJIS: {
-          auto ret = tt_utf8_to_sjis(this->data, Bytes, s.data(), s.size(), true);
+          auto ret = tt_utf8_to_sega_sjis(this->data, Bytes, s.data(), s.size(), true);
           this->clear_after_bytes(ret.bytes_written);
           break;
         }
+        case TextEncoding::UTF16_ALWAYS_MARKED:
+          if (s.empty()) {
+            this->clear();
+            break;
+          } else if (s.size() <= 2 || s[0] != '\t' || s[1] == 'C') {
+            std::string to_encode = "\t";
+            to_encode += marker_for_language_code(client_language);
+            to_encode += s;
+            auto ret = tt_utf8_to_utf16(this->data, Bytes, to_encode.data(), to_encode.size(), true);
+            this->clear_after_bytes(ret.bytes_written);
+            break;
+          }
+          [[fallthrough]];
         case TextEncoding::UTF16: {
           auto ret = tt_utf8_to_utf16(this->data, Bytes, s.data(), s.size(), true);
           this->clear_after_bytes(ret.bytes_written);
@@ -360,7 +523,7 @@ struct pstring {
         case TextEncoding::MARKED: {
           if (client_language == 0) {
             try {
-              auto ret = tt_utf8_to_sjis(this->data, Bytes, s.data(), s.size(), true);
+              auto ret = tt_utf8_to_sega_sjis(this->data, Bytes, s.data(), s.size(), true);
               this->clear_after_bytes(ret.bytes_written);
             } catch (const std::runtime_error&) {
               this->data[0] = '\t';
@@ -375,7 +538,7 @@ struct pstring {
             } catch (const std::runtime_error&) {
               this->data[0] = '\t';
               this->data[1] = 'J';
-              auto ret = tt_utf8_to_sjis(this->data + 2, Bytes - 2, s.data(), s.size(), true);
+              auto ret = tt_utf8_to_sega_sjis(this->data + 2, Bytes - 2, s.data(), s.size(), true);
               this->clear_after_bytes(ret.bytes_written + 2);
             }
           }
@@ -385,7 +548,7 @@ struct pstring {
           throw std::logic_error("unknown text encoding");
       }
     } catch (const std::runtime_error& e) {
-      log_warning("Unencodable text: %s", e.what());
+      phosg::log_warning("Unencodable text: %s", e.what());
       if (BytesPerChar == 2) {
         if (Bytes >= 6) {
           this->data[0] = '<';
@@ -427,9 +590,13 @@ struct pstring {
         case TextEncoding::ISO8859:
           return tt_8859_to_utf8(this->data, this->used_chars_8());
         case TextEncoding::SJIS:
-          return tt_sjis_to_utf8(this->data, this->used_chars_8());
+          return tt_sega_sjis_to_utf8(this->data, this->used_chars_8());
         case TextEncoding::UTF16:
           return tt_utf16_to_utf8(this->data, this->used_chars_16() * 2);
+        case TextEncoding::UTF16_ALWAYS_MARKED: {
+          std::string ret = tt_utf16_to_utf8(this->data, this->used_chars_16() * 2);
+          return ((ret.size() >= 2) && (ret[0] == '\t') && (ret[1] != 'C')) ? ret.substr(2) : ret;
+        }
         case TextEncoding::UTF8:
           return std::string(reinterpret_cast<const char*>(&this->data[0]), this->used_chars_8());
         case TextEncoding::CHALLENGE16: {
@@ -443,20 +610,20 @@ struct pstring {
             if (this->data[1] == 'J') {
               client_language = 0;
               offset = 2;
-            } else {
+            } else if (this->data[1] != 'C') {
               client_language = 1;
               offset = 2;
             }
           }
           return client_language
               ? tt_8859_to_utf8(&this->data[offset], this->used_chars_8() - offset)
-              : tt_sjis_to_utf8(&this->data[offset], this->used_chars_8() - offset);
+              : tt_sega_sjis_to_utf8(&this->data[offset], this->used_chars_8() - offset);
         }
         default:
           throw std::logic_error("unknown text encoding");
       }
     } catch (const std::runtime_error& e) {
-      log_warning("Undecodable text: %s", e.what());
+      phosg::log_warning("Undecodable text: %s", e.what());
       return "<?>";
     }
   }
@@ -537,13 +704,13 @@ struct pstring {
 
   // Note: The contents of a pstring do not have to be null-terminated, so there
   // is no .c_str() function.
-} __attribute__((packed));
+} __packed__;
 
 // Helper functions
 
 void replace_char_inplace(char* a, char f, char r);
 
-void add_color(StringWriter& w, const char* src, size_t max_input_chars);
+void add_color(phosg::StringWriter& w, const char* src, size_t max_input_chars);
 std::string add_color(const std::string& s);
 
 size_t add_color_inplace(char* a, size_t max_chars);
@@ -551,7 +718,7 @@ void add_color_inplace(std::string& s);
 
 // remove_color does the opposite of add_color (it changes \t into $, for
 // example). strip_color is irreversible; it deletes color escape sequences.
-void remove_color(StringWriter& w, const char* src, size_t max_input_chars);
+void remove_color(phosg::StringWriter& w, const char* src, size_t max_input_chars);
 std::string remove_color(const std::string& s);
 
 std::string strip_color(const std::string& s);

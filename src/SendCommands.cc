@@ -2,6 +2,7 @@
 
 #include <event2/buffer.h>
 #include <inttypes.h>
+#include <stdarg.h>
 #include <string.h>
 
 #include <functional>
@@ -17,6 +18,8 @@
 #include "Compression.hh"
 #include "FileContentsCache.hh"
 #include "PSOProtocol.hh"
+#include "ProxyServer.hh"
+#include "ReceiveSubcommands.hh"
 #include "StaticGameData.hh"
 #include "Text.hh"
 
@@ -27,7 +30,7 @@ extern const char* QUEST_BARRIER_DISCONNECT_HOOK_NAME;
 inline uint8_t get_pre_v1_subcommand(Version v, uint8_t nte_subcommand, uint8_t proto_subcommand, uint8_t final_subcommand) {
   if (v == Version::DC_NTE) {
     return nte_subcommand;
-  } else if (v == Version::DC_V1_11_2000_PROTOTYPE) {
+  } else if (v == Version::DC_11_2000) {
     return proto_subcommand;
   } else {
     return final_subcommand;
@@ -61,10 +64,6 @@ const unordered_set<uint32_t> v3_crypt_initial_client_commands({
     0x00EC019E, // (02) GC login (UDP off)
     0x0150009E, // (02) GC extended login
     0x0150019E, // (02) GC extended login (UDP off)
-    0x0130009E, // (02) XB login
-    0x0130019E, // (02) XB login (UDP off)
-    0x0194009E, // (02) XB extended login
-    0x0194019E, // (02) XB extended login (UDP off)
 });
 
 const unordered_set<string> bb_crypt_initial_client_commands({
@@ -129,7 +128,7 @@ void send_command_with_header(Channel& ch, const void* data, size_t size) {
       send_command_with_header_t<PSOCommandHeaderPC>(ch, data, size);
       break;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::GC_NTE:
@@ -152,13 +151,12 @@ static const char* dc_port_map_copyright = "DreamCast Port Map. Copyright SEGA E
 static const char* dc_lobby_server_copyright = "DreamCast Lobby Server. Copyright SEGA Enterprises. 1999";
 static const char* bb_game_server_copyright = "Phantasy Star Online Blue Burst Game Server. Copyright 1999-2004 SONICTEAM.";
 static const char* bb_pm_server_copyright = "PSO NEW PM Server. Copyright 1999-2002 SONICTEAM.";
-static const char* patch_server_copyright = "Patch Server. Copyright SonicTeam, LTD. 2001";
 
-S_ServerInitWithAfterMessage_DC_PC_V3_02_17_91_9B<0xB4>
+S_ServerInitWithAfterMessageT_DC_PC_V3_02_17_91_9B<0xB4>
 prepare_server_init_contents_console(
     uint32_t server_key, uint32_t client_key, uint8_t flags) {
   bool initial_connection = (flags & SendServerInitFlag::IS_INITIAL_CONNECTION);
-  S_ServerInitWithAfterMessage_DC_PC_V3_02_17_91_9B<0xB4> cmd;
+  S_ServerInitWithAfterMessageT_DC_PC_V3_02_17_91_9B<0xB4> cmd;
   cmd.basic_cmd.copyright.encode(initial_connection ? dc_port_map_copyright : dc_lobby_server_copyright);
   cmd.basic_cmd.server_key = server_key;
   cmd.basic_cmd.client_key = client_key;
@@ -169,8 +167,8 @@ prepare_server_init_contents_console(
 void send_server_init_dc_pc_v3(shared_ptr<Client> c, uint8_t flags) {
   bool initial_connection = (flags & SendServerInitFlag::IS_INITIAL_CONNECTION);
   uint8_t command = initial_connection ? 0x17 : 0x02;
-  uint32_t server_key = random_object<uint32_t>();
-  uint32_t client_key = random_object<uint32_t>();
+  uint32_t server_key = phosg::random_object<uint32_t>();
+  uint32_t client_key = phosg::random_object<uint32_t>();
 
   auto cmd = prepare_server_init_contents_console(server_key, client_key, initial_connection);
   send_command_t(c, command, 0x00, cmd);
@@ -182,7 +180,7 @@ void send_server_init_dc_pc_v3(shared_ptr<Client> c, uint8_t flags) {
       c->channel.crypt_out = make_shared<PSOV2Encryption>(server_key);
       break;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::GC_NTE:
@@ -204,13 +202,13 @@ void send_server_init_dc_pc_v3(shared_ptr<Client> c, uint8_t flags) {
   }
 }
 
-S_ServerInitWithAfterMessage_BB_03_9B<0xB4>
+S_ServerInitWithAfterMessageT_BB_03_9B<0xB4>
 prepare_server_init_contents_bb(
     const parray<uint8_t, 0x30>& server_key,
     const parray<uint8_t, 0x30>& client_key,
     uint8_t flags) {
   bool use_secondary_message = (flags & SendServerInitFlag::USE_SECONDARY_MESSAGE);
-  S_ServerInitWithAfterMessage_BB_03_9B<0xB4> cmd;
+  S_ServerInitWithAfterMessageT_BB_03_9B<0xB4> cmd;
   cmd.basic_cmd.copyright.encode(use_secondary_message ? bb_pm_server_copyright : bb_game_server_copyright);
   cmd.basic_cmd.server_key = server_key;
   cmd.basic_cmd.client_key = client_key;
@@ -222,8 +220,8 @@ void send_server_init_bb(shared_ptr<Client> c, uint8_t flags) {
   bool use_secondary_message = (flags & SendServerInitFlag::USE_SECONDARY_MESSAGE);
   parray<uint8_t, 0x30> server_key;
   parray<uint8_t, 0x30> client_key;
-  random_data(server_key.data(), server_key.bytes());
-  random_data(client_key.data(), client_key.bytes());
+  phosg::random_data(server_key.data(), server_key.bytes());
+  phosg::random_data(client_key.data(), client_key.bytes());
   auto cmd = prepare_server_init_contents_bb(server_key, client_key, flags);
   send_command_t(c, use_secondary_message ? 0x9B : 0x03, 0x00, cmd);
 
@@ -240,24 +238,10 @@ void send_server_init_bb(shared_ptr<Client> c, uint8_t flags) {
       sizeof(cmd.basic_cmd.server_key), true);
 }
 
-void send_server_init_patch(shared_ptr<Client> c) {
-  uint32_t server_key = random_object<uint32_t>();
-  uint32_t client_key = random_object<uint32_t>();
-
-  S_ServerInit_Patch_02 cmd;
-  cmd.copyright.encode(patch_server_copyright);
-  cmd.server_key = server_key;
-  cmd.client_key = client_key;
-  send_command_t(c, 0x02, 0x00, cmd);
-
-  c->channel.crypt_out = make_shared<PSOV2Encryption>(server_key);
-  c->channel.crypt_in = make_shared<PSOV2Encryption>(client_key);
-}
-
 void send_server_init(shared_ptr<Client> c, uint8_t flags) {
   switch (c->version()) {
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::PC_NTE:
@@ -269,10 +253,6 @@ void send_server_init(shared_ptr<Client> c, uint8_t flags) {
     case Version::XB_V3:
       send_server_init_dc_pc_v3(c, flags);
       break;
-    case Version::PC_PATCH:
-    case Version::BB_PATCH:
-      send_server_init_patch(c);
-      break;
     case Version::BB_V4:
       send_server_init_bb(c, flags);
       break;
@@ -282,10 +262,10 @@ void send_server_init(shared_ptr<Client> c, uint8_t flags) {
 }
 
 void send_update_client_config(shared_ptr<Client> c, bool always_send) {
-  if (always_send || (is_v3(c->version()) && (c->config != c->synced_config))) {
+  if (always_send || (is_v3(c->version()) && (c->config.should_update_vs(c->synced_config)))) {
     switch (c->version()) {
       case Version::DC_NTE:
-      case Version::DC_V1_11_2000_PROTOTYPE:
+      case Version::DC_11_2000:
       case Version::DC_V1:
       case Version::DC_V2:
       case Version::PC_NTE:
@@ -294,7 +274,7 @@ void send_update_client_config(shared_ptr<Client> c, bool always_send) {
           c->config.set_flag(Client::Flag::HAS_GUILD_CARD_NUMBER);
           S_UpdateClientConfig_DC_PC_04 cmd;
           cmd.player_tag = 0x00010000;
-          cmd.guild_card_number = c->license->serial_number;
+          cmd.guild_card_number = c->login->account->account_id;
           send_command_t(c, 0x04, 0x00, cmd);
         }
         break;
@@ -307,7 +287,7 @@ void send_update_client_config(shared_ptr<Client> c, bool always_send) {
         c->config.set_flag(Client::Flag::HAS_GUILD_CARD_NUMBER);
         S_UpdateClientConfig_V3_04 cmd;
         cmd.player_tag = 0x00010000;
-        cmd.guild_card_number = c->license->serial_number;
+        cmd.guild_card_number = c->login->account->account_id;
         c->config.serialize_into(cmd.client_config);
         send_command_t(c, 0x04, 0x00, cmd);
         break;
@@ -322,7 +302,7 @@ void send_update_client_config(shared_ptr<Client> c, bool always_send) {
 void send_quest_buffer_overflow(shared_ptr<Client> c) {
   // PSO Episode 3 USA doesn't natively support the B2 command, but we can add
   // it back to the game with some tricky commands. For details on how this
-  // works, see system/ppc/Episode3USAQuestBufferOverflow.s.
+  // works, see system/client-functions/Episode3USAQuestBufferOverflow.ppc.s.
   auto fn = c->require_server_state()->function_code_index->name_to_function.at("Episode3USAQuestBufferOverflow");
   if (fn->code.size() > 0x400) {
     throw runtime_error("Episode 3 buffer overflow code must be a single segment");
@@ -355,9 +335,16 @@ void prepare_client_for_patches(shared_ptr<Client> c, function<void()> on_comple
     if (!c) {
       return;
     }
-    if (is_gc(c->version()) &&
-        c->config.specific_version == default_specific_version_for_version(c->version(), -1)) {
-      send_function_call(c, s->function_code_index->name_to_function.at("VersionDetect"));
+    const char* version_detect_name = nullptr;
+    if (c->version() == Version::DC_V2) {
+      version_detect_name = "VersionDetectDC";
+    } else if (is_gc(c->version())) {
+      version_detect_name = "VersionDetectGC";
+    } else if (c->version() == Version::XB_V3) {
+      version_detect_name = "VersionDetectXB";
+    }
+    if (version_detect_name && specific_version_is_indeterminate(c->config.specific_version)) {
+      send_function_call(c, s->function_code_index->name_to_function.at(version_detect_name));
       c->function_call_response_queue.emplace_back([wc = weak_ptr<Client>(c), on_complete](uint32_t specific_version, uint32_t) -> void {
         auto c = wc.lock();
         if (!c) {
@@ -373,7 +360,8 @@ void prepare_client_for_patches(shared_ptr<Client> c, function<void()> on_comple
   };
 
   if (!c->config.check_flag(Client::Flag::SEND_FUNCTION_CALL_NO_CACHE_PATCH)) {
-    send_function_call(c, s->function_code_index->name_to_function.at("CacheClearFix-Phase1"), {}, "", 0x80000000, 8, 0x7F2734EC);
+    auto fn = s->function_code_index->name_to_function.at("CacheClearFix-Phase1");
+    send_function_call(c, fn, {}, nullptr, 0, 0x80000000, 8, 0x7F2734EC);
     c->function_call_response_queue.emplace_back([s, wc = weak_ptr<Client>(c), send_version_detect](uint32_t, uint32_t header_checksum) -> void {
       auto c = wc.lock();
       if (!c) {
@@ -402,53 +390,25 @@ void prepare_client_for_patches(shared_ptr<Client> c, function<void()> on_comple
   }
 }
 
-void send_function_call(
-    shared_ptr<Client> c,
-    shared_ptr<CompiledFunctionCode> code,
+string prepare_send_function_call_data(
+    shared_ptr<const CompiledFunctionCode> code,
     const unordered_map<string, uint32_t>& label_writes,
-    const string& suffix,
+    const void* suffix_data,
+    size_t suffix_size,
     uint32_t checksum_addr,
     uint32_t checksum_size,
-    uint32_t override_relocations_offset) {
-  return send_function_call(
-      c->channel,
-      c->config,
-      code,
-      label_writes,
-      suffix,
-      checksum_addr,
-      checksum_size,
-      override_relocations_offset);
-}
-
-void send_function_call(
-    Channel& ch,
-    const Client::Config& client_config,
-    shared_ptr<CompiledFunctionCode> code,
-    const unordered_map<string, uint32_t>& label_writes,
-    const string& suffix,
-    uint32_t checksum_addr,
-    uint32_t checksum_size,
-    uint32_t override_relocations_offset) {
-  if (client_config.check_flag(Client::Flag::NO_SEND_FUNCTION_CALL)) {
-    throw logic_error("client does not support function calls");
-  }
-  if (code.get() && client_config.check_flag(Client::Flag::SEND_FUNCTION_CALL_CHECKSUM_ONLY)) {
-    throw logic_error("client only supports checksums in send_function_call");
-  }
-
+    uint32_t override_relocations_offset,
+    bool use_encrypted_format) {
   string data;
-  uint32_t index = 0;
   if (code.get()) {
-    data = code->generate_client_command(label_writes, suffix, override_relocations_offset);
-    index = code->index;
+    data = code->generate_client_command(label_writes, suffix_data, suffix_size, override_relocations_offset);
 
-    if (client_config.check_flag(Client::Flag::ENCRYPTED_SEND_FUNCTION_CALL)) {
-      uint32_t key = random_object<uint32_t>();
+    if (use_encrypted_format) {
+      uint32_t key = phosg::random_object<uint32_t>();
 
       // This format was probably never used on any little-endian system, but we
       // implement the way it would probably work there if it was used.
-      StringWriter w;
+      phosg::StringWriter w;
       if (code->is_big_endian()) {
         w.put_u32b(data.size());
         w.put_u32b(key);
@@ -473,17 +433,115 @@ void send_function_call(
     }
   }
 
-  S_ExecuteCode_B2 header = {data.size(), checksum_addr, checksum_size};
-
-  StringWriter w;
-  w.put(header);
+  phosg::StringWriter w;
+  w.put(S_ExecuteCode_B2{data.size(), checksum_addr, checksum_size});
   w.write(data);
+  return std::move(w.str());
+}
 
-  ch.send(0xB2, index, w.str());
+void send_function_call(
+    shared_ptr<Client> c,
+    shared_ptr<const CompiledFunctionCode> code,
+    const unordered_map<string, uint32_t>& label_writes,
+    const void* suffix_data,
+    size_t suffix_size,
+    uint32_t checksum_addr,
+    uint32_t checksum_size,
+    uint32_t override_relocations_offset) {
+  return send_function_call(
+      c->channel,
+      c->config,
+      code,
+      label_writes,
+      suffix_data,
+      suffix_size,
+      checksum_addr,
+      checksum_size,
+      override_relocations_offset);
+}
+
+void send_function_call(
+    Channel& ch,
+    const Client::Config& client_config,
+    shared_ptr<const CompiledFunctionCode> code,
+    const unordered_map<string, uint32_t>& label_writes,
+    const void* suffix_data,
+    size_t suffix_size,
+    uint32_t checksum_addr,
+    uint32_t checksum_size,
+    uint32_t override_relocations_offset) {
+  if (!client_config.check_flag(Client::Flag::HAS_SEND_FUNCTION_CALL)) {
+    throw logic_error("client does not support function calls");
+  }
+  if (code.get() && client_config.check_flag(Client::Flag::SEND_FUNCTION_CALL_CHECKSUM_ONLY)) {
+    throw logic_error("client only supports checksums in send_function_call");
+  }
+
+  string data = prepare_send_function_call_data(
+      code, label_writes, suffix_data, suffix_size, checksum_addr, checksum_size, override_relocations_offset,
+      client_config.check_flag(Client::Flag::ENCRYPTED_SEND_FUNCTION_CALL));
+
+  ch.send(0xB2, code ? code->index : 0x00, data);
+}
+
+bool send_protected_command(std::shared_ptr<Client> c, const void* data, size_t size, bool echo_to_lobby) {
+  switch (c->version()) {
+    case Version::DC_NTE:
+    case Version::DC_11_2000:
+    case Version::DC_V1:
+    case Version::DC_V2:
+    case Version::PC_NTE:
+    case Version::PC_V2:
+    case Version::GC_NTE:
+      if (echo_to_lobby) {
+        send_command(c->require_lobby(), 0x60, 0x00, data, size);
+      } else {
+        send_command(c, 0x60, 0x00, data, size);
+      }
+      return true;
+
+    case Version::GC_V3:
+    case Version::XB_V3:
+    case Version::GC_EP3_NTE:
+    case Version::GC_EP3:
+    case Version::BB_V4: {
+      auto s = c->require_server_state();
+      if (!s->enable_v3_v4_protected_subcommands ||
+          !c->config.check_flag(Client::Flag::HAS_SEND_FUNCTION_CALL) ||
+          c->config.check_flag(Client::Flag::SEND_FUNCTION_CALL_CHECKSUM_ONLY)) {
+        return false;
+      }
+
+      prepare_client_for_patches(c, [wc = weak_ptr<Client>(c), data = string(reinterpret_cast<const char*>(data), size), echo_to_lobby]() {
+        auto c = wc.lock();
+        if (!c) {
+          return;
+        }
+        try {
+          auto s = c->require_server_state();
+          auto fn = s->function_code_index->get_patch("CallProtectedHandler", c->config.specific_version);
+          send_function_call(c, fn, {{"size", data.size()}}, data.data(), data.size());
+          c->function_call_response_queue.emplace_back(empty_function_call_response_handler);
+          if (echo_to_lobby) {
+            auto l = c->lobby.lock();
+            if (l) {
+              send_command_excluding_client(l, c, 0x60, 0x00, data.data(), data.size());
+            }
+          }
+        } catch (const exception& e) {
+          c->log.warning("Failed to send protected command: %s", e.what());
+        }
+      });
+      return true;
+    }
+
+    default:
+      return false;
+  }
 }
 
 void send_reconnect(shared_ptr<Client> c, uint32_t address, uint16_t port) {
-  S_Reconnect_19 cmd = {{address, port, 0}};
+  S_Reconnect_19 cmd = {address, port, 0};
   send_command_t(c, is_patch(c->version()) ? 0x14 : 0x19, 0x00, cmd);
 }
 
@@ -500,26 +558,66 @@ void send_pc_console_split_reconnect(shared_ptr<Client> c, uint32_t address,
   send_command_t(c, 0x19, 0x00, cmd);
 }
 
+static void scramble_bb_security_data(parray<uint8_t, 0x28>& data, uint8_t which, bool reverse) {
+  static const uint8_t forward_orders[8][5] = {
+      {2, 0, 1, 4, 3},
+      {3, 4, 0, 1, 2},
+      {2, 3, 4, 0, 1},
+      {2, 3, 0, 1, 4},
+      {0, 2, 3, 4, 1},
+      {1, 4, 2, 3, 0},
+      {2, 0, 1, 4, 3},
+      {1, 0, 3, 4, 2},
+  };
+  static const uint8_t reverse_orders[8][5] = {
+      {1, 2, 0, 4, 3},
+      {2, 3, 4, 0, 1},
+      {3, 4, 0, 1, 2},
+      {2, 3, 0, 1, 4},
+      {0, 4, 1, 2, 3},
+      {4, 0, 2, 3, 1},
+      {1, 2, 0, 4, 3},
+      {1, 0, 4, 2, 3},
+  };
+  const auto& order = reverse ? reverse_orders[which & 7] : forward_orders[which & 7];
+  parray<uint8_t, 0x28> scrambled_data;
+  for (size_t z = 0; z < 5; z++) {
+    for (size_t x = 0; x < 8; x++) {
+      scrambled_data[(z * 8) + x] = data[(order[z] * 8) + x];
+    }
+  }
+  data = scrambled_data;
+}
+
 void send_client_init_bb(shared_ptr<Client> c, uint32_t error_code) {
   auto team = c->team();
   S_ClientInit_BB_00E6 cmd;
   cmd.error_code = error_code;
   cmd.player_tag = 0x00010000;
-  cmd.guild_card_number = c->license->serial_number;
-  cmd.team_id = team ? team->team_id : 0;
+  cmd.guild_card_number = c->login->account->account_id;
+  cmd.security_token = team ? team->team_id : 0;
   c->config.serialize_into(cmd.client_config);
   cmd.can_create_team = 1;
   cmd.episode_4_unlocked = 1;
+
+  // If security_token is zero, the game scrambles the client config data based
+  // on the first character in the username. We undo the scramble here, so when
+  // the client scrambles the data upon receipt, it will be correct when it next
+  // is sent back to the server.
+  if (cmd.security_token == 0 && c->login && c->login->bb_license) {
+    scramble_bb_security_data(cmd.client_config, c->login->bb_license->username.at(0), true);
+  }
+
   send_command_t(c, 0x00E6, 0x00000000, cmd);
 }
 
 void send_system_file_bb(shared_ptr<Client> c) {
   auto team = c->team();
 
-  PSOBBFullSystemFile cmd;
-  cmd.base = *c->system_file();
+  S_SyncSystemFile_BB_E2 cmd;
+  cmd.system_file = *c->system_file();
   if (team) {
-    cmd.team_membership = team->membership_for_member(c->license->serial_number);
+    cmd.team_membership = team->membership_for_member(c->login->account->account_id);
   }
   send_command_t(c, 0x00E2, 0x00000000, cmd);
 }
@@ -571,22 +669,15 @@ static const vector<string> stream_file_entries = {
     "BattleParamEntry_ep4_on.dat",
     "PlyLevelTbl.prs",
 };
-static FileContentsCache bb_stream_files_cache(3600000000ULL);
 
 void send_stream_file_index_bb(shared_ptr<Client> c) {
-
-  struct S_StreamFileIndexEntry_BB_01EB {
-    le_uint32_t size;
-    le_uint32_t checksum; // crc32 of file data
-    le_uint32_t offset; // offset in stream (== sum of all previous files' sizes)
-    pstring<TextEncoding::ASCII, 0x40> filename;
-  };
+  auto s = c->require_server_state();
 
   vector<S_StreamFileIndexEntry_BB_01EB> entries;
   size_t offset = 0;
   for (const string& filename : stream_file_entries) {
     string key = "system/blueburst/" + filename;
-    auto cache_res = bb_stream_files_cache.get_or_load(key);
+    auto cache_res = s->bb_stream_files_cache->get_or_load(key);
     auto& e = entries.emplace_back();
     e.size = cache_res.file->data->size();
     // Computing the checksum can be slow, so we cache it along with the file
@@ -594,12 +685,12 @@ void send_stream_file_index_bb(shared_ptr<Client> c) {
     // so we always recompute the checksum in that case.
     if (cache_res.generate_called) {
       e.checksum = crc32(cache_res.file->data->data(), e.size);
-      bb_stream_files_cache.replace_obj<uint32_t>(key + ".crc32", e.checksum);
+      s->bb_stream_files_cache->replace_obj<uint32_t>(key + ".crc32", e.checksum);
     } else {
       auto compute_checksum = [&](const string&) -> uint32_t {
         return crc32(cache_res.file->data->data(), e.size);
       };
-      e.checksum = bb_stream_files_cache.get_obj<uint32_t>(key + ".crc32", compute_checksum).obj;
+      e.checksum = s->bb_stream_files_cache->get_obj<uint32_t>(key + ".crc32", compute_checksum).obj;
     }
     e.offset = offset;
     e.filename.encode(filename);
@@ -609,17 +700,19 @@ void send_stream_file_index_bb(shared_ptr<Client> c) {
 }
 
 void send_stream_file_chunk_bb(shared_ptr<Client> c, uint32_t chunk_index) {
-  auto cache_result = bb_stream_files_cache.get(
-      "<BB stream file>", +[](const string&) -> string {
+  auto s = c->require_server_state();
+
+  auto cache_result = s->bb_stream_files_cache->get(
+      "<BB stream file>", [&](const string&) -> string {
         size_t bytes = 0;
         for (const auto& name : stream_file_entries) {
-          bytes += bb_stream_files_cache.get_or_load("system/blueburst/" + name).file->data->size();
+          bytes += s->bb_stream_files_cache->get_or_load("system/blueburst/" + name).file->data->size();
         }
 
         string ret;
         ret.reserve(bytes);
         for (const auto& name : stream_file_entries) {
-          ret += *bb_stream_files_cache.get_or_load("system/blueburst/" + name).file->data;
+          ret += *s->bb_stream_files_cache->get_or_load("system/blueburst/" + name).file->data;
         }
         return ret;
       });
@@ -651,44 +744,16 @@ void send_complete_player_bb(shared_ptr<Client> c) {
   if (c->config.check_flag(Client::Flag::FORCE_ENGLISH_LANGUAGE_BB)) {
     p->inventory.language = 1;
     p->guild_card.language = 1;
-    sys->base.language = 1;
+    sys->language = 1;
   }
 
   SC_SyncSaveFiles_BB_E7 cmd;
   cmd.char_file = *p;
-  cmd.system_file.base = *sys;
+  cmd.system_file = *sys;
   if (team) {
-    cmd.system_file.team_membership = team->membership_for_member(c->license->serial_number);
+    cmd.team_membership = team->membership_for_member(c->login->account->account_id);
   }
-  cmd.char_file.disp.play_time = 0;
   send_command_t(c, 0x00E7, 0x00000000, cmd);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// patch functions
-
-void send_enter_directory_patch(shared_ptr<Client> c, const string& dir) {
-  S_EnterDirectory_Patch_09 cmd = {{dir, 1}};
-  send_command_t(c, 0x09, 0x00, cmd);
-}
-
-void send_patch_file(shared_ptr<Client> c, shared_ptr<PatchFileIndex::File> f) {
-  S_OpenFile_Patch_06 open_cmd = {0, f->size, {f->name, 1}};
-  send_command_t(c, 0x06, 0x00, open_cmd);
-
-  for (size_t x = 0; x < f->chunk_crcs.size(); x++) {
-    auto data = f->load_data();
-    size_t chunk_size = min<uint32_t>(f->size - (x * 0x4000), 0x4000);
-
-    vector<pair<const void*, size_t>> blocks;
-    S_WriteFileHeader_Patch_07 cmd_header = {x, f->chunk_crcs[x], chunk_size};
-    blocks.emplace_back(&cmd_header, sizeof(cmd_header));
-    blocks.emplace_back(data->data() + (x * 0x4000), chunk_size);
-    send_command(c, 0x07, 0x00, blocks);
-  }
-
-  S_CloseCurrentFile_Patch_08 close_cmd = {0};
-  send_command_t(c, 0x08, 0x00, close_cmd);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -702,8 +767,9 @@ enum class ColorMode {
 
 static void send_text(
     Channel& ch,
-    StringWriter& w,
+    phosg::StringWriter& w,
     uint16_t command,
+    uint32_t flag,
     const string& text,
     ColorMode color_mode) {
   bool is_w = uses_utf16(ch.version);
@@ -711,16 +777,21 @@ static void send_text(
     color_mode = ColorMode::STRIP;
   }
 
-  switch (color_mode) {
-    case ColorMode::NONE:
-      w.write(tt_encode_marked_optional(text, ch.language, is_w));
-      break;
-    case ColorMode::ADD:
-      w.write(tt_encode_marked_optional(add_color(text), ch.language, is_w));
-      break;
-    case ColorMode::STRIP:
-      w.write(tt_encode_marked_optional(strip_color(text), ch.language, is_w));
-      break;
+  try {
+    switch (color_mode) {
+      case ColorMode::NONE:
+        w.write(tt_encode_marked_optional(text, ch.language, is_w));
+        break;
+      case ColorMode::ADD:
+        w.write(tt_encode_marked_optional(add_color(text), ch.language, is_w));
+        break;
+      case ColorMode::STRIP:
+        w.write(tt_encode_marked_optional(strip_color(text), ch.language, is_w));
+        break;
+    }
+  } catch (const runtime_error& e) {
+    phosg::log_warning("Failed to encode message for %02hX command: %s", command, e.what());
+    return;
   }
 
   if (is_w) {
@@ -732,18 +803,18 @@ static void send_text(
   while (w.str().size() & 3) {
     w.put_u8(0);
   }
-  ch.send(command, 0x00, w.str());
+  ch.send(command, flag, w.str());
 }
 
-static void send_text(Channel& ch, uint16_t command, const string& text, ColorMode color_mode) {
-  StringWriter w;
-  send_text(ch, w, command, text, color_mode);
+static void send_text(Channel& ch, uint16_t command, uint32_t flag, const string& text, ColorMode color_mode) {
+  phosg::StringWriter w;
+  send_text(ch, w, command, flag, text, color_mode);
 }
 
 static void send_header_text(Channel& ch, uint16_t command, uint32_t guild_card_number, const string& text, ColorMode color_mode) {
-  StringWriter w;
+  phosg::StringWriter w;
   w.put(SC_TextHeader_01_06_11_B0_EE({0, guild_card_number}));
-  send_text(ch, w, command, text, color_mode);
+  send_text(ch, w, command, 0x00, text, color_mode);
 }
 
 void send_message_box(shared_ptr<Client> c, const string& text) {
@@ -754,7 +825,7 @@ void send_message_box(shared_ptr<Client> c, const string& text) {
       command = 0x13;
       break;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::PC_NTE:
@@ -772,13 +843,19 @@ void send_message_box(shared_ptr<Client> c, const string& text) {
     default:
       throw logic_error("invalid game version");
   }
-  send_text(c->channel, command, text, ColorMode::ADD);
+  send_text(c->channel, command, 0x00, text, ColorMode::ADD);
 }
 
 void send_ep3_timed_message_box(Channel& ch, uint32_t frames, const string& message) {
-  string encoded = tt_encode_marked(add_color(message), ch.language, false);
-  StringWriter w;
-  w.put<S_TimedMessageBoxHeader_GC_Ep3_EA>({frames});
+  string encoded;
+  try {
+    encoded = tt_encode_marked(add_color(message), ch.language, false);
+  } catch (const runtime_error& e) {
+    phosg::log_warning("Failed to encode message for EA command: %s", e.what());
+    return;
+  }
+  phosg::StringWriter w;
+  w.put<S_TimedMessageBoxHeader_Ep3_EA>({frames});
   w.write(encoded);
   w.put_u8(0);
   while (w.size() & 3) {
@@ -788,11 +865,11 @@ void send_ep3_timed_message_box(Channel& ch, uint32_t frames, const string& mess
 }
 
 void send_lobby_name(shared_ptr<Client> c, const string& text) {
-  send_text(c->channel, 0x8A, text, ColorMode::NONE);
+  send_text(c->channel, 0x8A, 0x00, text, ColorMode::NONE);
 }
 
-void send_quest_info(shared_ptr<Client> c, const string& text, bool is_download_quest) {
-  send_text(c->channel, is_download_quest ? 0xA5 : 0xA3, text, ColorMode::ADD);
+void send_quest_info(shared_ptr<Client> c, const string& text, uint8_t description_flag, bool is_download_quest) {
+  send_text(c->channel, is_download_quest ? 0xA5 : 0xA3, description_flag, text, ColorMode::ADD);
 }
 
 void send_lobby_message_box(shared_ptr<Client> c, const string& text, bool left_side_on_bb) {
@@ -809,13 +886,13 @@ void send_ship_info(Channel& ch, const string& text) {
 }
 
 void send_text_message(Channel& ch, const string& text) {
-  if ((ch.version != Version::DC_NTE) && (ch.version != Version::DC_V1_11_2000_PROTOTYPE)) {
+  if ((ch.version != Version::DC_NTE) && (ch.version != Version::DC_11_2000)) {
     send_header_text(ch, 0xB0, 0, text, ColorMode::ADD);
   }
 }
 
 void send_text_message(shared_ptr<Client> c, const string& text) {
-  if ((c->version() != Version::DC_NTE) && (c->version() != Version::DC_V1_11_2000_PROTOTYPE)) {
+  if ((c->version() != Version::DC_NTE) && (c->version() != Version::DC_11_2000)) {
     send_header_text(c->channel, 0xB0, 0, text, ColorMode::ADD);
   }
 }
@@ -829,23 +906,56 @@ void send_text_message(shared_ptr<Lobby> l, const string& text) {
 }
 
 void send_text_message(shared_ptr<ServerState> s, const string& text) {
-  // TODO: We should have a collection of all clients (even those not in any
-  // lobby) and use that instead here
-  for (auto& l : s->all_lobbies()) {
-    send_text_message(l, text);
+  for (auto& it : s->channel_to_client) {
+    if (it.second->login && !is_patch(it.second->version())) {
+      send_text_message(it.second, text);
+    }
   }
 }
 
 __attribute__((format(printf, 2, 3))) void send_ep3_text_message_printf(shared_ptr<ServerState> s, const char* format, ...) {
   va_list va;
   va_start(va, format);
-  string buf = string_vprintf(format, va);
+  string buf = phosg::string_vprintf(format, va);
   va_end(va);
   for (auto& it : s->id_to_lobby) {
     for (auto& c : it.second->clients) {
       if (c && is_ep3(c->version())) {
         send_text_message(c, buf);
       }
+    }
+  }
+}
+
+void send_scrolling_message_bb(shared_ptr<Client> c, const string& text) {
+  if (c->version() != Version::BB_V4) {
+    throw logic_error("cannot send scrolling message to non-BB player");
+  }
+  send_header_text(c->channel, 0x00EE, 0, text, ColorMode::ADD);
+}
+
+void send_text_or_scrolling_message(shared_ptr<Client> c, const string& text, const string& scrolling) {
+  if (is_v4(c->version())) {
+    send_scrolling_message_bb(c, scrolling);
+  } else {
+    send_text_message(c, text);
+  }
+}
+
+void send_text_or_scrolling_message(
+    std::shared_ptr<Lobby> l, std::shared_ptr<Client> exclude_c, const std::string& text, const std::string& scrolling) {
+  for (const auto& lc : l->clients) {
+    if (!lc || (lc == exclude_c)) {
+      continue;
+    }
+    send_text_or_scrolling_message(lc, text, scrolling);
+  }
+}
+
+void send_text_or_scrolling_message(shared_ptr<ServerState> s, const std::string& text, const std::string& scrolling) {
+  for (const auto& it : s->channel_to_client) {
+    if (it.second->login && !is_patch(it.second->version())) {
+      send_text_or_scrolling_message(it.second, text, scrolling);
     }
   }
 }
@@ -860,11 +970,11 @@ string prepare_chat_data(
   string data;
 
   if (version == Version::BB_V4) {
-    data.append("\tJ");
+    data.append(language ? "\tE" : "\tJ");
   }
   data.append(from_name);
   if (version == Version::DC_NTE) {
-    data.append(string_printf(">%X", from_client_id));
+    data.append(phosg::string_printf(">%X", from_client_id));
   } else {
     data.append(1, '\t');
   }
@@ -877,7 +987,7 @@ string prepare_chat_data(
     data.append(text);
     return tt_utf8_to_utf16(data);
   } else if (version == Version::DC_NTE) {
-    data.append(tt_utf8_to_sjis(text));
+    data.append(tt_utf8_to_sega_sjis(text));
     return data;
   } else {
     data.append(tt_encode_marked(text, language, false));
@@ -900,7 +1010,7 @@ void send_chat_message_from_client(Channel& ch, const string& text, char private
 }
 
 void send_prepared_chat_message(shared_ptr<Client> c, uint32_t from_guild_card_number, const string& prepared_data) {
-  StringWriter w;
+  phosg::StringWriter w;
   w.put(SC_TextHeader_01_06_11_B0_EE{0, from_guild_card_number});
   w.write(prepared_data);
   w.put_u8(0);
@@ -921,7 +1031,12 @@ void send_prepared_chat_message(shared_ptr<Lobby> l, uint32_t from_guild_card_nu
   }
 }
 
-void send_chat_message(shared_ptr<Client> c, uint32_t from_guild_card_number, const string& from_name, const string& text, char private_flags) {
+void send_chat_message(
+    shared_ptr<Client> c,
+    uint32_t from_guild_card_number,
+    const string& from_name,
+    const string& text,
+    char private_flags) {
   string prepared_data = prepare_chat_data(
       c->version(),
       c->language(),
@@ -935,21 +1050,21 @@ void send_chat_message(shared_ptr<Client> c, uint32_t from_guild_card_number, co
 template <typename CmdT>
 void send_simple_mail_t(shared_ptr<Client> c, uint32_t from_guild_card_number, const string& from_name, const string& text) {
   CmdT cmd;
-  cmd.player_tag = 0x00010000;
+  cmd.player_tag = from_guild_card_number ? 0x00010000 : 0;
   cmd.from_guild_card_number = from_guild_card_number;
   cmd.from_name.encode(from_name, c->language());
-  cmd.to_guild_card_number = c->license->serial_number;
+  cmd.to_guild_card_number = c->login->account->account_id;
   cmd.text.encode(text, c->language());
   send_command_t(c, 0x81, 0x00, cmd);
 }
 
 void send_simple_mail_bb(shared_ptr<Client> c, uint32_t from_guild_card_number, const string& from_name, const string& text) {
   SC_SimpleMail_BB_81 cmd;
-  cmd.player_tag = 0x00010000;
+  cmd.player_tag = from_guild_card_number ? 0x00010000 : 0;
   cmd.from_guild_card_number = from_guild_card_number;
   cmd.from_name.encode(from_name, c->language());
-  cmd.to_guild_card_number = c->license->serial_number;
-  cmd.received_date.encode(format_time(now()), c->language());
+  cmd.to_guild_card_number = c->login->account->account_id;
+  cmd.received_date.encode(phosg::format_time(phosg::now()), c->language());
   cmd.text.encode(text, c->language());
   send_command_t(c, 0x81, 0x00, cmd);
 }
@@ -957,7 +1072,7 @@ void send_simple_mail_bb(shared_ptr<Client> c, uint32_t from_guild_card_number, 
 void send_simple_mail(shared_ptr<Client> c, uint32_t from_guild_card_number, const string& from_name, const string& text) {
   switch (c->version()) {
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::GC_NTE:
@@ -979,12 +1094,20 @@ void send_simple_mail(shared_ptr<Client> c, uint32_t from_guild_card_number, con
   }
 }
 
+void send_simple_mail(shared_ptr<ServerState> s, uint32_t from_guild_card_number, const string& from_name, const string& text) {
+  for (const auto& it : s->channel_to_client) {
+    if (it.second->login && !is_patch(it.second->version())) {
+      send_simple_mail(it.second, from_guild_card_number, from_name, text);
+    }
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // info board
 
 template <TextEncoding NameEncoding, TextEncoding MessageEncoding>
 void send_info_board_t(shared_ptr<Client> c) {
-  vector<S_InfoBoardEntry_D8<NameEncoding, MessageEncoding>> entries;
+  vector<S_InfoBoardEntryT_D8<NameEncoding, MessageEncoding>> entries;
   auto l = c->require_lobby();
   for (const auto& other_c : l->clients) {
     if (!other_c.get()) {
@@ -1001,10 +1124,8 @@ void send_info_board_t(shared_ptr<Client> c) {
 void send_info_board(shared_ptr<Client> c) {
   if (uses_utf16(c->version())) {
     send_info_board_t<TextEncoding::UTF16, TextEncoding::UTF16>(c);
-  } else if (c->language()) {
-    send_info_board_t<TextEncoding::ASCII, TextEncoding::ISO8859>(c);
   } else {
-    send_info_board_t<TextEncoding::ASCII, TextEncoding::SJIS>(c);
+    send_info_board_t<TextEncoding::ASCII, TextEncoding::MARKED>(c);
   }
 }
 
@@ -1055,10 +1176,10 @@ void send_card_search_result_t(
   auto s = c->require_server_state();
   string port_name = lobby_port_name_for_version(c->version());
 
-  S_GuildCardSearchResult<CommandHeaderT, Encoding> cmd;
+  S_GuildCardSearchResultT<CommandHeaderT, Encoding> cmd;
   cmd.player_tag = 0x00010000;
-  cmd.searcher_guild_card_number = c->license->serial_number;
-  cmd.result_guild_card_number = result->license->serial_number;
+  cmd.searcher_guild_card_number = c->login->account->account_id;
+  cmd.result_guild_card_number = result->login->account->account_id;
   cmd.reconnect_command_header.size = sizeof(cmd.reconnect_command_header) + sizeof(cmd.reconnect_command);
   cmd.reconnect_command_header.command = 0x19;
   cmd.reconnect_command_header.flag = 0x00;
@@ -1068,11 +1189,11 @@ void send_card_search_result_t(
 
   string location_string;
   if (result_lobby->is_game()) {
-    location_string = string_printf("%s,BLOCK01,%s", result_lobby->name.c_str(), s->name.c_str());
+    location_string = phosg::string_printf("%s,,BLOCK01,%s", result_lobby->name.c_str(), s->name.c_str());
   } else if (result_lobby->is_ep3()) {
-    location_string = string_printf("BLOCK01-C%02" PRIu32 ",BLOCK01,%s", result_lobby->lobby_id - 15, s->name.c_str());
+    location_string = phosg::string_printf("BLOCK01-C%02" PRIu32 ",,BLOCK01,%s", result_lobby->lobby_id - 15, s->name.c_str());
   } else {
-    location_string = string_printf("BLOCK01-%02" PRIu32 ",BLOCK01,%s", result_lobby->lobby_id, s->name.c_str());
+    location_string = phosg::string_printf("BLOCK01-%02" PRIu32 ",,BLOCK01,%s", result_lobby->lobby_id, s->name.c_str());
   }
   cmd.location_string.encode(location_string, c->language());
   cmd.extension.lobby_refs[0].menu_id = MenuID::LOBBY;
@@ -1089,7 +1210,7 @@ void send_card_search_result(
     shared_ptr<Lobby> result_lobby) {
   switch (c->version()) {
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::GC_NTE:
@@ -1197,10 +1318,12 @@ void send_guild_card(
     uint8_t char_class) {
   switch (ch.version) {
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+      send_guild_card_dc_pc_gc_t<G_SendGuildCard_DCNTE_6x06>(
+          ch, guild_card_number, name, description, language, section_id, char_class);
+      break;
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
-      // TODO: Is this the right format and subcommand for NTE and the prototype?
       send_guild_card_dc_pc_gc_t<G_SendGuildCard_DC_6x06>(
           ch, guild_card_number, name, description, language, section_id, char_class);
       break;
@@ -1229,20 +1352,20 @@ void send_guild_card(
 }
 
 void send_guild_card(shared_ptr<Client> c, shared_ptr<Client> source) {
-  if (!source->license) {
-    throw runtime_error("source player does not have a license");
+  if (!source->login) {
+    throw runtime_error("source player does not have an account");
   }
 
   auto source_p = source->character(true, false);
   auto source_team = source->team();
 
-  uint64_t xb_user_id = source->license->xb_user_id
-      ? source->license->xb_user_id
-      : (0xAE00000000000000ULL | source->license->serial_number);
+  uint64_t xb_user_id = (source->login->xb_license && source->login->xb_license->user_id)
+      ? source->login->xb_license->user_id
+      : (0xAE00000000000000ULL | source->login->account->account_id);
 
   send_guild_card(
       c->channel,
-      source->license->serial_number,
+      source->login->account->account_id,
       xb_user_id,
       source_p->disp.name.decode(source->language()),
       source_team ? source_team->name : "",
@@ -1262,15 +1385,15 @@ void send_menu_t(shared_ptr<Client> c, shared_ptr<const Menu> menu, bool is_info
     auto& e = entries.emplace_back();
     e.menu_id = menu->menu_id;
     e.item_id = 0xFFFFFFFF;
-    e.flags = 0x0004;
-    e.text.encode(menu->name, c->language());
+    e.difficulty_tag = 0x04;
+    e.name.encode(menu->name, c->language());
   }
 
   for (const auto& item : menu->items) {
     bool is_visible = true;
     switch (c->version()) {
       case Version::DC_NTE:
-      case Version::DC_V1_11_2000_PROTOTYPE:
+      case Version::DC_11_2000:
         is_visible &= !(item.flags & MenuItem::Flag::INVISIBLE_ON_DC_PROTOS);
         [[fallthrough]];
       case Version::DC_V1:
@@ -1304,7 +1427,7 @@ void send_menu_t(shared_ptr<Client> c, shared_ptr<const Menu> menu, bool is_info
       is_visible &= !c->config.check_flag(Client::Flag::NO_D6);
     }
     if (item.flags & MenuItem::Flag::REQUIRES_SEND_FUNCTION_CALL) {
-      is_visible &= !c->config.check_flag(Client::Flag::NO_SEND_FUNCTION_CALL);
+      is_visible &= c->config.check_flag(Client::Flag::HAS_SEND_FUNCTION_CALL);
     }
     if (item.flags & MenuItem::Flag::REQUIRES_SAVE_DISABLED) {
       is_visible &= !c->config.check_flag(Client::Flag::SAVE_ENABLED);
@@ -1317,8 +1440,9 @@ void send_menu_t(shared_ptr<Client> c, shared_ptr<const Menu> menu, bool is_info
       auto& e = entries.emplace_back();
       e.menu_id = menu->menu_id;
       e.item_id = item.item_id;
-      e.flags = (c->version() == Version::BB_V4) ? 0x0004 : 0x0F04;
-      e.text.encode(item.name, c->language());
+      e.name.encode(item.name, c->language());
+      e.difficulty_tag = 0x04;
+      e.num_players = (c->version() == Version::BB_V4) ? 0x00 : 0x0F;
     }
   }
 
@@ -1328,9 +1452,9 @@ void send_menu_t(shared_ptr<Client> c, shared_ptr<const Menu> menu, bool is_info
 
 void send_menu(shared_ptr<Client> c, shared_ptr<const Menu> menu, bool is_info_menu) {
   if (uses_utf16(c->version())) {
-    send_menu_t<S_MenuEntry_PC_BB_07_1F>(c, menu, is_info_menu);
+    send_menu_t<S_MenuItem_PC_BB_08>(c, menu, is_info_menu);
   } else {
-    send_menu_t<S_MenuEntry_DC_V3_07_1F>(c, menu, is_info_menu);
+    send_menu_t<S_MenuItem_DC_V3_08_Ep3_E6>(c, menu, is_info_menu);
   }
 }
 
@@ -1341,11 +1465,11 @@ void send_game_menu_t(
     bool show_tournaments_only) {
   auto s = c->require_server_state();
 
-  vector<S_GameMenuEntry<Encoding>> entries;
+  vector<S_MenuItemT<Encoding>> entries;
   {
     auto& e = entries.emplace_back();
     e.menu_id = MenuID::GAME;
-    e.game_id = 0x00000000;
+    e.item_id = 0x00000000;
     e.difficulty_tag = 0x00;
     e.num_players = 0x00;
     e.name.encode(s->name, c->language());
@@ -1354,9 +1478,11 @@ void send_game_menu_t(
   }
 
   set<shared_ptr<const Lobby>, bool (*)(const shared_ptr<const Lobby>&, const shared_ptr<const Lobby>&)> games(Lobby::compare_shared);
+  bool client_has_debug = c->config.check_flag(Client::Flag::DEBUG_ENABLED);
   for (shared_ptr<Lobby> l : s->all_lobbies()) {
     if (l->is_game() &&
-        l->version_is_allowed(c->version()) &&
+        (client_has_debug || l->version_is_allowed(c->version())) &&
+        (client_has_debug || (l->check_flag(Lobby::Flag::IS_CLIENT_CUSTOMIZATION) == c->config.check_flag(Client::Flag::IS_CLIENT_CUSTOMIZATION))) &&
         (l->check_flag(Lobby::Flag::IS_SPECTATOR_TEAM) == is_spectator_team_list) &&
         (!show_tournaments_only || l->tournament_match)) {
       games.emplace(l);
@@ -1387,8 +1513,8 @@ void send_game_menu_t(
 
     auto& e = entries.emplace_back();
     e.menu_id = MenuID::GAME;
-    e.game_id = l->lobby_id;
-    e.difficulty_tag = (l->is_ep3() ? 0x0A : (l->difficulty + 0x22));
+    e.item_id = l->lobby_id;
+    e.difficulty_tag = (is_ep3(c->version()) ? 0x0A : (l->difficulty + 0x22));
     e.num_players = l->count_clients();
     if (is_dc(c->version())) {
       e.episode = l->version_is_allowed(Version::DC_V1) ? 1 : 0;
@@ -1412,12 +1538,18 @@ void send_game_menu_t(
           e.flags |= 0x20;
           break;
         case GameMode::SOLO:
-          // These should only be visible to other BB clients
-          e.flags |= 0x04; // Grayed (but not disabled apparently)
           e.episode = 0x10 | episode_num;
           break;
         default:
           throw logic_error("invalid game mode");
+      }
+      // On v2, render name in orange if v1 is not allowed
+      if (is_v2(c->version()) && !l->version_is_allowed(Version::DC_V1)) {
+        e.flags |= 0x40;
+      }
+      // On BB, gray out games that can't be joined
+      if ((c->version() == Version::BB_V4) && (l->join_error_for_client(c, nullptr) != Lobby::JoinError::ALLOWED)) {
+        e.flags |= 0x04;
       }
     }
     e.name.encode(l->name, c->language());
@@ -1430,7 +1562,9 @@ void send_game_menu(
     shared_ptr<Client> c,
     bool is_spectator_team_list,
     bool show_tournaments_only) {
-  if (uses_utf16(c->version())) {
+  if (is_v4(c->version())) {
+    send_game_menu_t<TextEncoding::UTF16_ALWAYS_MARKED>(c, is_spectator_team_list, show_tournaments_only);
+  } else if (uses_utf16(c->version())) {
     send_game_menu_t<TextEncoding::UTF16>(c, is_spectator_team_list, show_tournaments_only);
   } else {
     send_game_menu_t<TextEncoding::MARKED>(c, is_spectator_team_list, show_tournaments_only);
@@ -1451,7 +1585,7 @@ void send_quest_menu_t(
     }
 
     auto& e = entries.emplace_back();
-    e.menu_id = (it.second->episode == Episode::EP2) ? MenuID::QUEST_EP2 : MenuID::QUEST_EP1;
+    e.menu_id = ((it.second->episode == Episode::EP1) || (it.second->episode == Episode::EP3)) ? MenuID::QUEST_EP1 : MenuID::QUEST_EP2;
     e.item_id = it.second->quest_number;
     e.name.encode(vq->name, c->language());
     e.short_description.encode(add_color(vq->short_description), c->language());
@@ -1472,7 +1606,7 @@ void send_quest_menu_bb(
     }
 
     auto& e = entries.emplace_back();
-    e.menu_id = MenuID::QUEST_EP1;
+    e.menu_id = (it.second->episode == Episode::EP1) ? MenuID::QUEST_EP1 : MenuID::QUEST_EP2;
     e.item_id = it.second->quest_number;
     e.name.encode(vq->name, c->language());
     e.short_description.encode(add_color(vq->short_description), c->language());
@@ -1488,15 +1622,21 @@ void send_quest_categories_menu_t(
     QuestMenuType menu_type,
     Episode episode) {
   QuestIndex::IncludeCondition include_condition = nullptr;
-  if (!(c->license->flags & License::Flag::DISABLE_QUEST_REQUIREMENTS)) {
+  if (!c->login->account->check_flag(Account::Flag::DISABLE_QUEST_REQUIREMENTS)) {
     auto l = c->lobby.lock();
     include_condition = l ? l->quest_include_condition() : nullptr;
   }
 
+  uint16_t version_flags = (1 << static_cast<size_t>(c->version()));
+  auto l = c->lobby.lock();
+  if (l) {
+    version_flags |= l->quest_version_flags();
+  }
+
   vector<EntryT> entries;
-  for (const auto& cat : quest_index->categories(menu_type, episode, c->version(), include_condition)) {
+  for (const auto& cat : quest_index->categories(menu_type, episode, version_flags, include_condition)) {
     auto& e = entries.emplace_back();
-    e.menu_id = MenuID::QUEST_CATEGORIES;
+    e.menu_id = cat->use_ep2_icon() ? MenuID::QUEST_CATEGORIES_EP2 : MenuID::QUEST_CATEGORIES_EP1;
     e.item_id = cat->category_id;
     e.name.encode(cat->name, c->language());
     e.short_description.encode(add_color(cat->description), c->language());
@@ -1516,7 +1656,7 @@ void send_quest_menu(
       send_quest_menu_t<S_QuestMenuEntry_PC_A2_A4>(c, quests, is_download_menu);
       break;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::GC_NTE:
@@ -1547,7 +1687,7 @@ void send_quest_categories_menu(
       send_quest_categories_menu_t<S_QuestMenuEntry_PC_A2_A4>(c, quest_index, menu_type, episode);
       break;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::GC_NTE:
@@ -1620,7 +1760,7 @@ void send_player_records_t(shared_ptr<Client> c, shared_ptr<Lobby> l, shared_ptr
 template <typename LobbyDataT>
 void populate_lobby_data_for_client(LobbyDataT& ret, shared_ptr<const Client> c, shared_ptr<const Client> viewer_c) {
   ret.player_tag = 0x00010000;
-  ret.guild_card_number = c->license->serial_number;
+  ret.guild_card_number = c->login->account->account_id;
   ret.client_id = c->lobby_client_id;
   string name = c->character()->disp.name.decode(c->language());
   ret.name.encode(name, viewer_c->language());
@@ -1629,11 +1769,11 @@ void populate_lobby_data_for_client(LobbyDataT& ret, shared_ptr<const Client> c,
 template <>
 void populate_lobby_data_for_client(PlayerLobbyDataXB& ret, shared_ptr<const Client> c, shared_ptr<const Client> viewer_c) {
   ret.player_tag = 0x00010000;
-  ret.guild_card_number = c->license->serial_number;
+  ret.guild_card_number = c->login->account->account_id;
   if (c->xb_netloc) {
     ret.netloc = *c->xb_netloc;
   } else {
-    ret.netloc.account_id = 0xAE00000000000000 | c->license->serial_number;
+    ret.netloc.account_id = 0xAE00000000000000 | c->login->account->account_id;
   }
   ret.client_id = c->lobby_client_id;
   string name = c->character()->disp.name.decode(c->language());
@@ -1643,23 +1783,18 @@ void populate_lobby_data_for_client(PlayerLobbyDataXB& ret, shared_ptr<const Cli
 template <>
 void populate_lobby_data_for_client<PlayerLobbyDataBB>(PlayerLobbyDataBB& ret, shared_ptr<const Client> c, shared_ptr<const Client> viewer_c) {
   ret.player_tag = 0x00010000;
-  ret.guild_card_number = c->license->serial_number;
+  ret.guild_card_number = c->login->account->account_id;
   ret.client_id = c->lobby_client_id;
   auto team = c->team();
   if (team) {
-    ret.team_master_guild_card_number = team->master_serial_number;
+    ret.team_master_guild_card_number = team->master_account_id;
     ret.team_id = team->team_id;
   } else {
     ret.team_master_guild_card_number = 0;
     ret.team_id = 0;
   }
   string name = c->character()->disp.name.decode(c->language());
-  if ((name.size() >= 2) && (name[0] == '\t') && (name[1] != 'C')) {
-    ret.name.encode(name, viewer_c->language());
-  } else {
-    const char* marker = c->language() ? "\tE" : "\tJ";
-    ret.name.encode(marker + name, viewer_c->language());
-  }
+  ret.name.encode(name, viewer_c->language());
 }
 
 static void send_join_spectator_team(shared_ptr<Client> c, shared_ptr<Lobby> l) {
@@ -1675,13 +1810,13 @@ static void send_join_spectator_team(shared_ptr<Client> c, shared_ptr<Lobby> l) 
 
   auto s = c->require_server_state();
 
-  S_JoinSpectatorTeam_GC_Ep3_E8 cmd;
+  S_JoinSpectatorTeam_Ep3_E8 cmd;
 
-  cmd.variations.clear(0);
+  cmd.variations = Variations();
   cmd.client_id = c->lobby_client_id;
   cmd.event = l->event;
-  cmd.section_id = l->section_id;
-  cmd.rare_seed = l->random_seed;
+  cmd.section_id = l->effective_section_id();
+  cmd.random_seed = l->random_seed;
   cmd.episode = 0xFF;
 
   uint8_t player_count = 0;
@@ -1698,19 +1833,25 @@ static void send_join_spectator_team(shared_ptr<Client> c, shared_ptr<Lobby> l) 
       auto& p = cmd.players[z];
       populate_lobby_data_for_client(p.lobby_data, wc, c);
       p.inventory = wc_p->inventory;
-      p.inventory.encode_for_client(c);
-      p.disp = wc_p->disp.to_dcpcv3(c->language(), p.inventory.language);
-      p.disp.enforce_lobby_join_limits_for_client(c);
+      p.inventory.encode_for_client(c->version(), s->item_parameter_table_for_encode(c->version()));
+      p.disp = wc_p->disp.to_dcpcv3<false>(c->language(), p.inventory.language);
+      p.disp.enforce_lobby_join_limits_for_version(c->version());
 
       auto& e = cmd.entries[z];
       e.player_tag = 0x00010000;
-      e.guild_card_number = wc->license->serial_number;
+      e.guild_card_number = wc->login->account->account_id;
       e.name.encode(wc_p->disp.name.decode(wc_p->inventory.language), c->language());
       e.present = 1;
       e.level = wc->ep3_config
           ? (wc->ep3_config->online_clv_exp / 100)
           : wc_p->disp.stats.level.load();
       e.name_color = wc_p->disp.visual.name_color;
+
+      uint32_t name_color = s->name_color_for_client(wc);
+      if (name_color) {
+        p.disp.visual.name_color = name_color;
+        e.name_color = name_color;
+      }
 
       player_count++;
     }
@@ -1736,9 +1877,9 @@ static void send_join_spectator_team(shared_ptr<Client> c, shared_ptr<Lobby> l) 
       auto& p = cmd.players[client_id];
       p.lobby_data = entry.lobby_data;
       p.inventory = entry.inventory;
-      p.inventory.encode_for_client(c);
+      p.inventory.encode_for_client(c->version(), s->item_parameter_table_for_encode(c->version()));
       p.disp = entry.disp;
-      p.disp.enforce_lobby_join_limits_for_client(c);
+      p.disp.enforce_lobby_join_limits_for_version(c->version());
 
       auto& e = cmd.entries[client_id];
       e.player_tag = 0x00010000;
@@ -1763,17 +1904,23 @@ static void send_join_spectator_team(shared_ptr<Client> c, shared_ptr<Lobby> l) 
       auto& cmd_e = cmd.entries[z];
       populate_lobby_data_for_client(cmd_p.lobby_data, other_c, c);
       cmd_p.inventory = other_p->inventory;
-      cmd_p.disp = other_p->disp.to_dcpcv3(c->language(), cmd_p.inventory.language);
-      cmd_p.disp.enforce_lobby_join_limits_for_client(c);
+      cmd_p.disp = other_p->disp.to_dcpcv3<false>(c->language(), cmd_p.inventory.language);
+      cmd_p.disp.enforce_lobby_join_limits_for_version(c->version());
 
       cmd_e.player_tag = 0x00010000;
-      cmd_e.guild_card_number = other_c->license->serial_number;
+      cmd_e.guild_card_number = other_c->login->account->account_id;
       cmd_e.name = cmd_p.lobby_data.name;
       cmd_e.present = 1;
       cmd_e.level = other_c->ep3_config
           ? (other_c->ep3_config->online_clv_exp / 100)
           : other_p->disp.stats.level.load();
       cmd_e.name_color = other_p->disp.visual.name_color;
+
+      uint32_t name_color = s->name_color_for_client(other_c);
+      if (name_color) {
+        cmd_p.disp.visual.name_color = name_color;
+        cmd_e.name_color = name_color;
+      }
 
       player_count++;
     }
@@ -1810,9 +1957,9 @@ void send_join_game(shared_ptr<Client> c, shared_ptr<Lobby> l) {
     cmd.difficulty = l->difficulty;
     cmd.battle_mode = (l->mode == GameMode::BATTLE) ? 1 : 0;
     cmd.event = l->event;
-    cmd.section_id = l->section_id;
+    cmd.section_id = l->effective_section_id();
     cmd.challenge_mode = (l->mode == GameMode::CHALLENGE) ? 1 : 0;
-    cmd.rare_seed = l->random_seed;
+    cmd.random_seed = l->random_seed;
     return populate_lobby_data(cmd);
   };
   auto populate_v3_cmd = [&](auto& cmd) -> size_t {
@@ -1837,7 +1984,7 @@ void send_join_game(shared_ptr<Client> c, shared_ptr<Lobby> l) {
 
   switch (c->version()) {
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE: {
+    case Version::DC_11_2000: {
       S_JoinGame_DCNTE_64 cmd;
       cmd.client_id = c->lobby_client_id;
       cmd.leader_id = l->leader_id;
@@ -1870,16 +2017,22 @@ void send_join_game(shared_ptr<Client> c, shared_ptr<Lobby> l) {
     }
     case Version::GC_EP3_NTE:
     case Version::GC_EP3: {
-      S_JoinGame_GC_Ep3_64 cmd;
+      S_JoinGame_Ep3_64 cmd;
       size_t player_count = populate_v3_cmd(cmd);
       auto s = c->require_server_state();
       for (size_t x = 0; x < 4; x++) {
-        if (l->clients[x]) {
-          auto other_p = l->clients[x]->character();
-          cmd.players_ep3[x].inventory = other_p->inventory;
-          cmd.players_ep3[x].inventory.encode_for_client(c);
-          cmd.players_ep3[x].disp = convert_player_disp_data<PlayerDispDataDCPCV3>(other_p->disp, c->language(), other_p->inventory.language);
-          cmd.players_ep3[x].disp.enforce_lobby_join_limits_for_client(c);
+        auto lc = l->clients[x];
+        if (lc) {
+          auto other_p = lc->character();
+          auto& cmd_p = cmd.players_ep3[x];
+          cmd_p.inventory = other_p->inventory;
+          cmd_p.inventory.encode_for_client(c->version(), s->item_parameter_table_for_encode(c->version()));
+          cmd_p.disp = convert_player_disp_data<PlayerDispDataDCPCV3>(other_p->disp, c->language(), other_p->inventory.language);
+          cmd_p.disp.enforce_lobby_join_limits_for_version(c->version());
+          uint32_t name_color = s->name_color_for_client(lc);
+          if (name_color) {
+            cmd_p.disp.visual.name_color = name_color;
+          }
         }
       }
       send_command_t(c, 0x64, player_count, cmd);
@@ -1928,41 +2081,46 @@ void send_join_lobby_t(shared_ptr<Client> c, shared_ptr<Lobby> l, shared_ptr<Cli
     send_player_records_t<RecordsT>(c, l, joining_client);
   }
 
-  uint8_t lobby_type;
-  if (c->config.override_lobby_number != 0x80) {
-    lobby_type = c->config.override_lobby_number;
-  } else if (l->check_flag(Lobby::Flag::IS_OVERFLOW)) {
-    lobby_type = is_ep3(c->version()) ? 15 : 0;
+  uint8_t lobby_type, lobby_block;
+  if (l->is_game()) {
+    lobby_type = 0;
+    lobby_block = 0;
   } else {
-    lobby_type = l->block - 1;
+    if (c->config.override_lobby_number != 0x80) {
+      lobby_type = c->config.override_lobby_number;
+    } else if (l->check_flag(Lobby::Flag::IS_OVERFLOW)) {
+      lobby_type = is_ep3(c->version()) ? 15 : 0;
+    } else {
+      lobby_type = l->block - 1;
+    }
+    // Allow non-canonical lobby types on GC. They may work on other versions too,
+    // but I haven't verified which values don't crash on each version.
+    switch (c->version()) {
+      case Version::GC_EP3_NTE:
+      case Version::GC_EP3:
+        if ((lobby_type > 0x14) && (lobby_type < 0xE9)) {
+          lobby_type = l->block - 1;
+        }
+        break;
+      case Version::GC_V3:
+        if ((lobby_type > 0x11) && (lobby_type != 0x67) && (lobby_type != 0xD4) && (lobby_type < 0xFC)) {
+          lobby_type = l->block - 1;
+        }
+        break;
+      default:
+        if (lobby_type > 0x0E) {
+          lobby_type = l->block - 1;
+        }
+    }
+    lobby_block = l->block;
   }
 
-  // Allow non-canonical lobby types on GC. They may work on other versions too,
-  // but I haven't verified which values don't crash on each version.
-  switch (c->version()) {
-    case Version::GC_EP3_NTE:
-    case Version::GC_EP3:
-      if ((lobby_type > 0x14) && (lobby_type < 0xE9)) {
-        lobby_type = l->block - 1;
-      }
-      break;
-    case Version::GC_V3:
-      if ((lobby_type > 0x11) && (lobby_type != 0x67) && (lobby_type != 0xD4) && (lobby_type < 0xFC)) {
-        lobby_type = l->block - 1;
-      }
-      break;
-    default:
-      if (lobby_type > 0x0E) {
-        lobby_type = l->block - 1;
-      }
-  }
-
-  S_JoinLobby<LobbyFlags, LobbyDataT, DispDataT> cmd;
+  S_JoinLobbyT<LobbyFlags, LobbyDataT, DispDataT> cmd;
   cmd.lobby_flags.client_id = c->lobby_client_id;
   cmd.lobby_flags.leader_id = l->leader_id;
   cmd.lobby_flags.disable_udp = 0x01;
   cmd.lobby_flags.lobby_number = lobby_type;
-  cmd.lobby_flags.block_number = l->block;
+  cmd.lobby_flags.block_number = lobby_block;
   cmd.lobby_flags.unknown_a1 = 0;
   cmd.lobby_flags.event = l->event;
   cmd.lobby_flags.unknown_a2 = 0;
@@ -1985,12 +2143,19 @@ void send_join_lobby_t(shared_ptr<Client> c, shared_ptr<Lobby> l, shared_ptr<Cli
     auto& e = cmd.entries[used_entries++];
     populate_lobby_data_for_client(e.lobby_data, lc, c);
     e.inventory = lp->inventory;
-    e.inventory.encode_for_client(c);
+    e.inventory.encode_for_client(c->version(), s->item_parameter_table_for_encode(c->version()));
     if ((lc == c) && is_v1_or_v2(c->version()) && lc->v1_v2_last_reported_disp) {
       e.disp = convert_player_disp_data<DispDataT>(*lc->v1_v2_last_reported_disp, c->language(), lp->inventory.language);
     } else {
       e.disp = convert_player_disp_data<DispDataT>(lp->disp, c->language(), lp->inventory.language);
-      e.disp.enforce_lobby_join_limits_for_client(c);
+      e.disp.enforce_lobby_join_limits_for_version(c->version());
+      uint32_t name_color = s->name_color_for_client(lc);
+      if (name_color) {
+        e.disp.visual.name_color = name_color;
+        if (is_v1_or_v2(c->version())) {
+          e.disp.visual.compute_name_color_checksum();
+        }
+      }
     }
   }
 
@@ -2054,9 +2219,13 @@ void send_join_lobby_xb(shared_ptr<Client> c, shared_ptr<Lobby> l, shared_ptr<Cl
     auto& e = cmd.entries[used_entries++];
     populate_lobby_data_for_client(e.lobby_data, lc, c);
     e.inventory = lp->inventory;
-    e.inventory.encode_for_client(c);
+    e.inventory.encode_for_client(c->version(), s->item_parameter_table_for_encode(c->version()));
     e.disp = convert_player_disp_data<PlayerDispDataDCPCV3>(lp->disp, c->language(), lp->inventory.language);
-    e.disp.enforce_lobby_join_limits_for_client(c);
+    e.disp.enforce_lobby_join_limits_for_version(c->version());
+    uint32_t name_color = s->name_color_for_client(lc);
+    if (name_color) {
+      e.disp.visual.name_color = name_color;
+    }
   }
 
   send_command(c, command, used_entries, &cmd, cmd.size(used_entries));
@@ -2099,9 +2268,18 @@ void send_join_lobby_dc_nte(shared_ptr<Client> c, shared_ptr<Lobby> l,
     auto& e = cmd.entries[used_entries++];
     populate_lobby_data_for_client(e.lobby_data, lc, c);
     e.inventory = lp->inventory;
-    e.inventory.encode_for_client(c);
-    e.disp = convert_player_disp_data<PlayerDispDataDCPCV3>(lp->disp, c->language(), lp->inventory.language);
-    e.disp.enforce_lobby_join_limits_for_client(c);
+    e.inventory.encode_for_client(c->version(), s->item_parameter_table_for_encode(c->version()));
+    if ((lc == c) && is_v1_or_v2(c->version()) && lc->v1_v2_last_reported_disp) {
+      e.disp = convert_player_disp_data<PlayerDispDataDCPCV3>(*lc->v1_v2_last_reported_disp, c->language(), lp->inventory.language);
+    } else {
+      e.disp = convert_player_disp_data<PlayerDispDataDCPCV3>(lp->disp, c->language(), lp->inventory.language);
+      e.disp.enforce_lobby_join_limits_for_version(c->version());
+      uint32_t name_color = s->name_color_for_client(lc);
+      if (name_color) {
+        e.disp.visual.name_color = name_color;
+        e.disp.visual.compute_name_color_checksum();
+      }
+    }
   }
 
   send_command(c, command, used_entries, &cmd, cmd.size(used_entries));
@@ -2113,7 +2291,7 @@ void send_join_lobby(shared_ptr<Client> c, shared_ptr<Lobby> l) {
   } else {
     switch (c->version()) {
       case Version::DC_NTE:
-      case Version::DC_V1_11_2000_PROTOTYPE:
+      case Version::DC_11_2000:
         send_join_lobby_dc_nte(c, l);
         break;
       case Version::DC_V1:
@@ -2153,7 +2331,7 @@ void send_player_join_notification(shared_ptr<Client> c,
     shared_ptr<Lobby> l, shared_ptr<Client> joining_client) {
   switch (c->version()) {
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
       send_join_lobby_dc_nte(c, l, joining_client);
       break;
     case Version::DC_V1:
@@ -2181,6 +2359,17 @@ void send_player_join_notification(shared_ptr<Client> c,
   }
 }
 
+void send_update_lobby_data_bb(std::shared_ptr<Client> c) {
+  auto l = c->require_lobby();
+  for (auto lc : l->clients) {
+    if (lc) {
+      PlayerLobbyDataBB cmd;
+      populate_lobby_data_for_client(cmd, c, lc);
+      send_command_t(lc, 0x00F0, 0x00000000, cmd);
+    }
+  }
+}
+
 void send_player_leave_notification(shared_ptr<Lobby> l, uint8_t leaving_client_id) {
   S_LeaveLobby_66_69_Ep3_E9 cmd = {leaving_client_id, l->leader_id, 1, 0};
   uint8_t cmd_num;
@@ -2200,8 +2389,49 @@ void send_self_leave_notification(shared_ptr<Client> c) {
   send_command_t(c, 0x69, c->lobby_client_id, cmd);
 }
 
-void send_get_player_info(shared_ptr<Client> c) {
-  send_command(c, (c->version() == Version::DC_NTE) ? 0x8D : 0x95, 0x00);
+void send_get_player_info(shared_ptr<Client> c, bool request_extended) {
+  switch (c->version()) {
+    case Version::DC_NTE:
+    case Version::DC_11_2000:
+    case Version::DC_V1:
+    case Version::PC_NTE:
+    case Version::PC_V2:
+    case Version::BB_V4:
+      request_extended = false;
+      break;
+    case Version::DC_V2:
+    case Version::GC_NTE:
+    case Version::GC_V3:
+    case Version::GC_EP3_NTE:
+    case Version::GC_EP3:
+    case Version::XB_V3:
+      break;
+    default:
+      throw logic_error("invalid version");
+  }
+
+  if (request_extended &&
+      c->config.check_flag(Client::Flag::HAS_SEND_FUNCTION_CALL) &&
+      !c->config.check_flag(Client::Flag::SEND_FUNCTION_CALL_CHECKSUM_ONLY)) {
+    auto s = c->require_server_state();
+    prepare_client_for_patches(c, [wc = weak_ptr<Client>(c)]() {
+      auto c = wc.lock();
+      if (!c) {
+        return;
+      }
+      try {
+        auto s = c->require_server_state();
+        auto fn = s->function_code_index->get_patch("GetExtendedPlayerInfo", c->config.specific_version);
+        send_function_call(c, fn);
+        c->function_call_response_queue.emplace_back(empty_function_call_response_handler);
+      } catch (const exception& e) {
+        c->log.warning("Failed to send extended player info request: %s", e.what());
+        send_get_player_info(c, false);
+      }
+    });
+  } else {
+    send_command(c, (c->version() == Version::DC_NTE) ? 0x8D : 0x95, 0x00);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2216,9 +2446,10 @@ void send_execute_item_trade(shared_ptr<Client> c, const vector<ItemData>& items
   }
   cmd.target_client_id = c->lobby_client_id;
   cmd.item_count = items.size();
+  auto item_parameter_table = s->item_parameter_table_for_encode(c->version());
   for (size_t x = 0; x < items.size(); x++) {
     cmd.item_datas[x] = items[x];
-    cmd.item_datas[x].encode_for_version(c->version(), s->item_parameter_table_for_version(c->version()));
+    cmd.item_datas[x].encode_for_version(c->version(), item_parameter_table);
   }
   send_command_t(c, 0xD3, 0x00, cmd);
 }
@@ -2228,7 +2459,7 @@ void send_execute_card_trade(shared_ptr<Client> c, const vector<pair<uint32_t, u
     throw logic_error("cannot send trade cards command to non-Ep3 client");
   }
 
-  SC_TradeCards_GC_Ep3_EE_FlagD0_FlagD3 cmd;
+  SC_TradeCards_Ep3_EE_FlagD0_FlagD3 cmd;
   constexpr size_t max_entries = sizeof(cmd.entries) / sizeof(cmd.entries[0]);
   if (card_to_count.size() > max_entries) {
     throw logic_error("too many items in execute card trade command");
@@ -2261,7 +2492,7 @@ void send_arrow_update(shared_ptr<Lobby> l) {
     }
     auto& e = entries.emplace_back();
     e.player_tag = 0x00010000;
-    e.guild_card_number = lc->license->serial_number;
+    e.guild_card_number = lc->login->account->account_id;
     e.arrow_color = lc->lobby_arrow_color;
   }
 
@@ -2274,10 +2505,20 @@ void send_arrow_update(shared_ptr<Lobby> l) {
   }
 }
 
-// tells the player that the joining player is done joining, and the game can resume
+void send_unblock_join(shared_ptr<Client> c) {
+  if (!is_pre_v1(c->version())) {
+    static const be_uint32_t data = 0x71010000;
+    send_command(c, 0x60, 0x00, &data, sizeof(be_uint32_t));
+  }
+}
+
 void send_resume_game(shared_ptr<Lobby> l, shared_ptr<Client> ready_client) {
-  static const be_uint32_t data = 0x72010000;
-  send_command_excluding_client(l, ready_client, 0x60, 0x00, &data, sizeof(be_uint32_t));
+  for (auto lc : l->clients) {
+    if (lc && (lc != ready_client) && !is_pre_v1(lc->version())) {
+      static const be_uint32_t data = 0x72010000;
+      send_command(lc, 0x60, 0x00, &data, sizeof(be_uint32_t));
+    }
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2310,24 +2551,20 @@ void send_player_stats_change(Channel& ch, uint16_t client_id, PlayerStatsChange
   send_command_vt(ch, (subs.size() > 0x400 / sizeof(G_UpdatePlayerStat_6x9A)) ? 0x6C : 0x60, 0x00, subs);
 }
 
-void send_remove_conditions(shared_ptr<Client> c) {
-  auto l = c->require_lobby();
-  for (auto& lc : l->clients) {
-    if (lc) {
-      send_remove_conditions(lc->channel, c->lobby_client_id);
-    }
-  }
+void send_remove_negative_conditions(shared_ptr<Client> c) {
+  G_AddStatusEffect_6x0C cmd;
+  cmd.header = {0x0C, sizeof(G_AddStatusEffect_6x0C) >> 2, c->lobby_client_id};
+  cmd.effect_type = 7; // Healing ring
+  cmd.level = 0;
+  send_protected_command(c, &cmd, sizeof(cmd), true);
 }
 
-void send_remove_conditions(Channel& ch, uint16_t client_id) {
-  parray<G_AddOrRemoveCondition_6x0C_6x0D, 4> cmds;
-  for (size_t z = 0; z < 4; z++) {
-    auto& cmd = cmds[z];
-    cmd.header = {0x0D, sizeof(G_AddOrRemoveCondition_6x0C_6x0D) >> 2, client_id};
-    cmd.unknown_a1 = z;
-    cmd.unknown_a2 = 0;
-  }
-  ch.send(0x60, 0x00, &cmds, sizeof(cmds));
+void send_remove_negative_conditions(Channel& ch, uint16_t client_id) {
+  G_AddStatusEffect_6x0C cmd;
+  cmd.header = {0x0C, sizeof(G_AddStatusEffect_6x0C) >> 2, client_id};
+  cmd.effect_type = 7; // Healing ring
+  cmd.level = 0;
+  ch.send(0x60, 0x00, &cmd, sizeof(cmd));
 }
 
 void send_warp(Channel& ch, uint8_t client_id, uint32_t floor, bool is_private) {
@@ -2337,7 +2574,6 @@ void send_warp(Channel& ch, uint8_t client_id, uint32_t floor, bool is_private) 
 
 void send_warp(shared_ptr<Client> c, uint32_t floor, bool is_private) {
   send_warp(c->channel, c->lobby_client_id, floor, is_private);
-  c->floor = floor;
 }
 
 void send_warp(shared_ptr<Lobby> l, uint32_t floor, bool is_private) {
@@ -2349,29 +2585,78 @@ void send_warp(shared_ptr<Lobby> l, uint32_t floor, bool is_private) {
 }
 
 void send_ep3_change_music(Channel& ch, uint32_t song) {
-  G_ChangeLobbyMusic_GC_Ep3_6xBF cmd = {{0xBF, 0x02, 0}, song};
+  G_ChangeLobbyMusic_Ep3_6xBF cmd = {{0xBF, 0x02, 0}, song};
   ch.send(0x60, 0x00, cmd);
+}
+
+void send_game_join_sync_command(
+    shared_ptr<Client> c, const void* data, size_t size, uint8_t dc_nte_sc, uint8_t dc_11_2000_sc, uint8_t sc) {
+  string compressed_data = bc0_compress(data, size);
+  if (c->config.check_flag(Client::Flag::DEBUG_ENABLED)) {
+    c->log.info("Compressed sync data from (%zX -> %zX bytes):", size, compressed_data.size());
+    phosg::print_data(stderr, data, size);
+  }
+  send_game_join_sync_command_compressed(c, compressed_data.data(), compressed_data.size(), size, dc_nte_sc, dc_11_2000_sc, sc);
+}
+
+void send_game_join_sync_command(shared_ptr<Client> c, const string& data, uint8_t dc_nte_sc, uint8_t dc_11_2000_sc, uint8_t sc) {
+  send_game_join_sync_command(c, data.data(), data.size(), dc_nte_sc, dc_11_2000_sc, sc);
+}
+
+void send_game_join_sync_command_compressed(
+    shared_ptr<Client> c,
+    const void* data,
+    size_t size,
+    size_t decompressed_size,
+    uint8_t dc_nte_sc,
+    uint8_t dc_11_2000_sc,
+    uint8_t sc) {
+  phosg::StringWriter w;
+  if (is_pre_v1(c->version())) {
+    G_SyncGameStateHeader_DCNTE_6x6B_6x6C_6x6D_6x6E compressed_header;
+    compressed_header.header.basic_header.subcommand = (c->version() == Version::DC_NTE) ? dc_nte_sc : dc_11_2000_sc;
+    compressed_header.header.basic_header.size = 0x00;
+    compressed_header.header.basic_header.unused = 0x0000;
+    compressed_header.header.size = (size + sizeof(G_SyncGameStateHeader_DCNTE_6x6B_6x6C_6x6D_6x6E) + 3) & (~3);
+    compressed_header.decompressed_size = decompressed_size;
+    w.put(compressed_header);
+  } else {
+    G_SyncGameStateHeader_6x6B_6x6C_6x6D_6x6E compressed_header;
+    compressed_header.header.basic_header.subcommand = sc;
+    compressed_header.header.basic_header.size = 0x00;
+    compressed_header.header.basic_header.unused = 0x0000;
+    compressed_header.header.size = (size + sizeof(G_SyncGameStateHeader_6x6B_6x6C_6x6D_6x6E) + 3) & (~3);
+    compressed_header.decompressed_size = decompressed_size;
+    compressed_header.compressed_size = size;
+    w.put(compressed_header);
+  }
+  w.write(data, size);
+  while (w.size() & 3) {
+    w.put_u8(0x00);
+  }
+
+  if (c->game_join_command_queue) {
+    c->log.info("Client not ready to receive game commands; adding to queue");
+    auto& cmd = c->game_join_command_queue->emplace_back();
+    cmd.command = 0x6D;
+    cmd.flag = c->lobby_client_id;
+    cmd.data = std::move(w.str());
+  } else {
+    send_command(c, 0x6D, c->lobby_client_id, w.str());
+  }
 }
 
 void send_game_item_state(shared_ptr<Client> c) {
   auto l = c->require_lobby();
+  if (!l->is_game()) {
+    throw logic_error("cannot send item state in non-game lobby");
+  }
   auto s = c->require_server_state();
-  StringWriter floor_items_w;
+  phosg::StringWriter floor_items_w;
 
   G_SyncItemState_6x6D_Decompressed decompressed_header;
   for (size_t z = 0; z < 12; z++) {
-    if (z == c->lobby_client_id) {
-      // If the player is joining, adjust the next item ID to use the value
-      // before inventory item IDs are assigned
-      size_t num_items = c->character()->inventory.num_items;
-      uint32_t next_id = l->next_item_id_for_client[z] - num_items;
-      if ((next_id & 0xFFE00000) != (l->next_item_id_for_client[z] & 0xFFE00000)) {
-        throw runtime_error("next item ID underflow during joining player item state generation");
-      }
-      decompressed_header.next_item_id_per_player[z] = next_id;
-    } else {
-      decompressed_header.next_item_id_per_player[z] = l->next_item_id_for_client[z];
-    }
+    decompressed_header.next_item_id_per_player[z] = l->next_item_id_for_client[z];
   }
   l->log.info("Sending next item IDs to client: %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32,
       decompressed_header.next_item_id_per_player[0].load(),
@@ -2379,7 +2664,7 @@ void send_game_item_state(shared_ptr<Client> c) {
       decompressed_header.next_item_id_per_player[2].load(),
       decompressed_header.next_item_id_per_player[3].load());
 
-  for (size_t floor = 0; floor < 0x10; floor++) {
+  for (size_t floor = 0; floor < 0x0F; floor++) {
     const auto& m = l->floor_item_managers.at(floor);
     // It's important that these are added in increasing order of item_id (hence
     // why items is a map and not an unordered_map), since the game uses binary
@@ -2394,121 +2679,357 @@ void send_game_item_state(shared_ptr<Client> c) {
 
       FloorItem fi;
       fi.floor = floor;
-      fi.from_enemy = 0;
-      fi.entity_id = 0xFFFF;
-      fi.x = item->x;
-      fi.z = item->z;
+      fi.source_type = 0;
+      fi.entity_index = 0xFFFF;
+      fi.pos = item->pos;
       fi.unknown_a2 = 0;
       fi.drop_number = (floor == 0) ? 0xFFFF : (decompressed_header.next_drop_number_per_floor.at(floor - 1)++);
       fi.item = item->data;
-      fi.item.encode_for_version(c->version(), s->item_parameter_table_for_version(c->version()));
+      fi.item.encode_for_version(c->version(), s->item_parameter_table_for_encode(c->version()));
       floor_items_w.put(fi);
 
       decompressed_header.floor_item_count_per_floor.at(floor)++;
     }
   }
 
-  StringWriter decompressed_w;
+  phosg::StringWriter decompressed_w;
   decompressed_w.put(decompressed_header);
   decompressed_w.write(floor_items_w.str());
+  const auto& data = decompressed_w.str();
+  send_game_join_sync_command(c, data.data(), data.size(), 0x5E, 0x65, 0x6D);
 
-  string compressed_data = bc0_compress(decompressed_w.str());
-
-  StringWriter w;
-  if (is_pre_v1(c->version())) {
-    G_SyncGameStateHeader_DCNTE_6x6B_6x6C_6x6D_6x6E compressed_header;
-    compressed_header.header.basic_header.subcommand = (c->version() == Version::DC_NTE) ? 0x5E : 0x65;
-    compressed_header.header.basic_header.size = 0x00;
-    compressed_header.header.basic_header.unused = 0x0000;
-    compressed_header.header.size = (compressed_data.size() + sizeof(G_SyncGameStateHeader_DCNTE_6x6B_6x6C_6x6D_6x6E) + 3) & (~3);
-    compressed_header.decompressed_size = decompressed_w.size();
-    w.put(compressed_header);
-  } else {
-    G_SyncGameStateHeader_6x6B_6x6C_6x6D_6x6E compressed_header;
-    compressed_header.header.basic_header.subcommand = 0x6D;
-    compressed_header.header.basic_header.size = 0x00;
-    compressed_header.header.basic_header.unused = 0x0000;
-    compressed_header.header.size = (compressed_data.size() + sizeof(G_SyncGameStateHeader_6x6B_6x6C_6x6D_6x6E) + 3) & (~3);
-    compressed_header.decompressed_size = decompressed_w.size();
-    compressed_header.compressed_size = compressed_data.size();
-    w.put(compressed_header);
+  // Items on floors 0x0F and above can't be sent in the 6x6D command, so we
+  // manually send 6x5D commands to create them if needed
+  phosg::StringWriter w;
+  for (size_t floor = 0x0F; floor < l->floor_item_managers.size(); floor++) {
+    const auto& m = l->floor_item_managers[floor];
+    for (const auto& it : m.items) {
+      const auto& item = it.second;
+      if (!item->visible_to_client(c->lobby_client_id)) {
+        continue;
+      }
+      uint8_t subcommand = get_pre_v1_subcommand(c->version(), 0x4F, 0x56, 0x5D);
+      G_DropStackedItem_PC_V3_BB_6x5D cmd = {{{subcommand, 0x0A, 0x0000}, floor, 0, item->pos, item->data}, 0};
+      cmd.item_data.encode_for_version(c->version(), s->item_parameter_table_for_encode(c->version()));
+      w.put(cmd);
+    }
   }
-  w.write(compressed_data);
-  while (w.size() & 3) {
-    w.put_u8(0x00);
-  }
-
-  if (c->game_join_command_queue) {
-    c->log.info("Client not ready to receive join commands; adding to queue");
-    auto& cmd = c->game_join_command_queue->emplace_back();
-    cmd.command = 0x6D;
-    cmd.flag = c->lobby_client_id;
-    cmd.data = std::move(w.str());
-  } else {
+  if (!w.str().empty()) {
     send_command(c, 0x6D, c->lobby_client_id, w.str());
   }
 }
 
-void send_game_flag_state(shared_ptr<Client> c) {
+void send_game_object_state(shared_ptr<Client> c) {
+  auto l = c->require_lobby();
+  if (!l->is_game()) {
+    throw logic_error("cannot send object state in non-game lobby");
+  }
+  auto s = c->require_server_state();
+
+  vector<SyncObjectStateEntry> entries;
+  for (auto obj_st : l->map_state->iter_object_states(c->version())) {
+    auto& entry = entries.emplace_back();
+    entry.flags = obj_st->game_flags;
+    entry.item_drop_id = (obj_st->item_drop_checked)
+        ? 0xFFFF
+        : (0x100 + l->map_state->index_for_object_state(c->version(), obj_st));
+  }
+
+  send_game_join_sync_command(c, entries.data(), entries.size() * sizeof(entries[0]), 0x5D, 0x64, 0x6C);
+}
+
+void send_game_enemy_state(shared_ptr<Client> c) {
+  auto l = c->require_lobby();
+  if (!l->is_game()) {
+    throw logic_error("cannot send enemy state in non-game lobby");
+  }
+  auto s = c->require_server_state();
+
+  vector<SyncEnemyStateEntry> entries;
+  for (auto ene_st : l->map_state->iter_enemy_states(c->version())) {
+    auto& entry = entries.emplace_back();
+    entry.flags = ene_st->game_flags;
+    entry.item_drop_id = (ene_st->server_flags & MapState::EnemyState::Flag::ITEM_DROPPED)
+        ? 0xFFFF
+        : (0xCA0 + l->map_state->index_for_enemy_state(c->version(), ene_st));
+    entry.total_damage = ene_st->total_damage;
+  }
+
+  send_game_join_sync_command(c, entries.data(), entries.size() * sizeof(entries[0]), 0x5C, 0x63, 0x6B);
+}
+
+void send_game_set_state(shared_ptr<Client> c) {
+  auto l = c->require_lobby();
+  if (!l->is_game()) {
+    throw logic_error("cannot send set state in non-game lobby");
+  }
+
+  size_t num_object_sets = 0;
+  size_t num_enemy_sets = 0;
+  size_t num_events = 0;
+  for (const auto& fc : l->map_state->floor_config_entries) {
+    if (fc.super_map) {
+      const auto& entities = fc.super_map->version(c->version());
+      num_object_sets += entities.objects.size();
+      num_enemy_sets += entities.enemy_sets.size();
+      num_events += entities.events.size();
+    }
+  }
+
+  G_SyncSetFlagState_6x6E_Decompressed::EntitySetFlags entity_set_flags_header;
+  entity_set_flags_header.object_set_flags_offset = sizeof(entity_set_flags_header);
+  entity_set_flags_header.num_object_sets = num_object_sets;
+  entity_set_flags_header.enemy_set_flags_offset = sizeof(entity_set_flags_header) + num_object_sets * sizeof(le_uint16_t);
+  entity_set_flags_header.num_enemy_sets = num_enemy_sets;
+
+  G_SyncSetFlagState_6x6E_Decompressed header;
+  header.entity_set_flags_size = sizeof(entity_set_flags_header) + (num_object_sets + num_enemy_sets) * sizeof(le_uint16_t);
+  header.event_set_flags_size = sizeof(le_uint16_t) * num_events;
+  header.switch_flags_size = is_v1(c->version()) ? 0x200 : 0x240;
+  header.total_size = header.entity_set_flags_size + header.event_set_flags_size + header.switch_flags_size;
+
+  phosg::StringWriter w;
+  w.put(header);
+  w.put(entity_set_flags_header);
+
+  {
+    size_t size_before = w.size();
+    for (const auto& obj_st : l->map_state->iter_object_states(c->version())) {
+      w.put_u16l(obj_st->set_flags);
+    }
+    size_t bytes_added = w.size() - size_before;
+    if (bytes_added != num_object_sets * sizeof(le_uint16_t)) {
+      throw logic_error("incorrect number of object set flags added");
+    }
+  }
+
+  {
+    size_t size_before = w.size();
+    for (const auto& ene_st : l->map_state->iter_enemy_set_states(c->version())) {
+      w.put_u16l(ene_st->set_flags);
+    }
+    size_t bytes_added = w.size() - size_before;
+    if (bytes_added != num_enemy_sets * sizeof(le_uint16_t)) {
+      throw logic_error("incorrect number of enemy set flags added");
+    }
+  }
+
+  {
+    size_t size_before = w.size();
+    for (const auto& ev_st : l->map_state->iter_event_states(c->version())) {
+      w.put_u16l(ev_st->flags);
+    }
+    size_t bytes_added = w.size() - size_before;
+    if (bytes_added != num_events * sizeof(le_uint16_t)) {
+      throw logic_error("incorrect number of event flags added");
+    }
+  }
+
+  if (l->switch_flags) {
+    static_assert(sizeof(SwitchFlags) == 0x240, "switch_flags size is incorrect");
+    w.write(l->switch_flags->data.data(), header.switch_flags_size);
+  } else {
+    w.extend_by(header.switch_flags_size, 0x00);
+  }
+
+  send_game_join_sync_command(c, w.str(), 0x5F, 0x66, 0x6E);
+}
+
+template <typename CmdT>
+void send_game_flag_state_t(shared_ptr<Client> c) {
   auto l = c->require_lobby();
 
-  G_SetQuestFlags_6x6F cmd;
-  cmd.header.subcommand = 0x6F;
-  cmd.header.size = sizeof(G_SetQuestFlags_6x6F) >> 2;
-  cmd.header.unused = 0x0000;
-  cmd.quest_flags = c->character()->quest_flags;
-
-  for (const auto& lc : l->clients) {
-    if (!lc) {
-      continue;
+  if (l->quest_flags_known) { // Not all flags known; send multiple 6x75s
+    phosg::StringWriter w;
+    bool use_v3_cmd = !is_v1_or_v2(c->version()) || (c->version() == Version::GC_NTE);
+    for (uint8_t difficulty = 0; difficulty < 4; difficulty++) {
+      if ((difficulty != l->difficulty) && !use_v3_cmd) {
+        continue;
+      }
+      const auto& diff_flags = l->quest_flag_values->data.at(difficulty);
+      const auto& diff_known_flags = l->quest_flags_known->data.at(difficulty);
+      for (uint8_t z = 0; z < diff_known_flags.data.size(); z++) {
+        uint8_t known_flags = diff_known_flags.data[z];
+        if (!known_flags) {
+          continue;
+        }
+        uint8_t flag_values = diff_flags.data[z];
+        for (uint8_t sh = 0; sh < 8; sh++) {
+          if ((known_flags << sh) & 0x80) {
+            uint16_t flag_num = ((z << 3) | sh);
+            if (use_v3_cmd) {
+              w.put(G_UpdateQuestFlag_V3_BB_6x75{
+                  {{0x75, 0x03, 0x0000}, flag_num, (((flag_values << sh) & 0x80) ? 0 : 1)}, difficulty, 0});
+            } else {
+              w.put(G_UpdateQuestFlag_DC_PC_6x75{
+                  {0x75, 0x02, 0x0000}, flag_num, (((flag_values << sh) & 0x80) ? 0 : 1)});
+            }
+          }
+        }
+      }
     }
-    if (lc->game_join_command_queue) {
-      lc->log.info("Client not ready to receive join commands; adding to queue");
-      auto& cmd = lc->game_join_command_queue->emplace_back();
-      cmd.command = 0x0060;
-      cmd.flag = 0x00000000;
-      cmd.data.assign(reinterpret_cast<const char*>(&cmd), sizeof(cmd));
+
+    if (w.size() > 0) {
+      if (c->game_join_command_queue) {
+        c->log.info("Client not ready to receive join commands; adding to queue");
+        auto& cmd = c->game_join_command_queue->emplace_back();
+        cmd.command = 0x006D;
+        cmd.flag = c->lobby_client_id;
+        cmd.data = std::move(w.str());
+      } else {
+        send_command(c, 0x6D, c->lobby_client_id, w.str());
+      }
+    }
+
+  } else { // All flags known; send 6x6F
+    CmdT cmd;
+    cmd.header.subcommand = 0x6F;
+    cmd.header.size = sizeof(CmdT) >> 2;
+    cmd.header.unused = 0x0000;
+    cmd.quest_flags = (l && !l->quest_flags_known) ? *l->quest_flag_values : c->character()->quest_flags;
+
+    if (c->game_join_command_queue) {
+      c->log.info("Client not ready to receive join commands; adding to queue");
+      auto& queue_cmd = c->game_join_command_queue->emplace_back();
+      queue_cmd.command = 0x0062;
+      queue_cmd.flag = c->lobby_client_id;
+      queue_cmd.data.assign(reinterpret_cast<const char*>(&cmd), sizeof(cmd));
     } else {
-      send_command_t(lc, 0x60, 0x00, cmd);
+      send_command_t(c, 0x62, c->lobby_client_id, cmd);
     }
   }
 }
 
-void send_drop_item_to_channel(shared_ptr<ServerState> s, Channel& ch, const ItemData& item,
-    bool from_enemy, uint8_t floor, float x, float z, uint16_t entity_id) {
-  uint8_t subcommand = get_pre_v1_subcommand(ch.version, 0x51, 0x58, 0x5F);
-  G_DropItem_PC_V3_BB_6x5F cmd = {
-      {{subcommand, 0x0B, 0x0000}, {floor, from_enemy, entity_id, x, z, 0, 0, item}}, 0};
-  cmd.item.item.encode_for_version(ch.version, s->item_parameter_table_for_version(ch.version));
-  ch.send(0x60, 0x00, &cmd, sizeof(cmd));
+void send_game_flag_state(shared_ptr<Client> c) {
+  // DC NTE and 11/2000 don't have this command at all; v1 has it but it doesn't
+  // include flags for Ultimate.
+  if (is_pre_v1(c->version())) {
+    return;
+  } else if (is_v1(c->version())) {
+    send_game_flag_state_t<G_SetQuestFlags_DCv1_6x6F>(c);
+  } else if (!is_v4(c->version())) {
+    send_game_flag_state_t<G_SetQuestFlags_V2_V3_6x6F>(c);
+  } else {
+    send_game_flag_state_t<G_SetQuestFlags_BB_6x6F>(c);
+  }
 }
 
-void send_drop_item_to_lobby(shared_ptr<Lobby> l, const ItemData& item,
-    bool from_enemy, uint8_t floor, float x, float z, uint16_t entity_id) {
-  auto s = l->require_server_state();
-  for (auto& c : l->clients) {
-    if (!c) {
-      continue;
+void send_game_player_state(shared_ptr<Client> to_c, shared_ptr<Client> from_c, bool apply_overrides) {
+  if (!from_c->last_reported_6x70) {
+    throw runtime_error("source client did not send a 6x70 command");
+  }
+  if (!from_c->login) {
+    throw logic_error("source client is not logged in");
+  }
+
+  auto s = to_c->require_server_state();
+  Parsed6x70Data to_send = *from_c->last_reported_6x70;
+
+  to_send.base.client_id = from_c->lobby_client_id;
+  to_send.player_tag = 0x00010000;
+  to_send.guild_card_number = from_c->login->account->account_id;
+
+  auto to_l = to_c->lobby.lock();
+  if (to_l && (from_c->telepipe_lobby_id == to_l->lobby_id)) {
+    to_send.telepipe.owner_client_id = from_c->telepipe_state.client_id2;
+    to_send.telepipe.floor = from_c->telepipe_state.floor;
+    to_send.telepipe.unknown_a1 = from_c->telepipe_state.unknown_b3;
+    to_send.telepipe.pos = from_c->telepipe_state.pos;
+    to_send.telepipe.unknown_a3 = from_c->telepipe_state.unknown_a3;
+  }
+
+  if (apply_overrides) {
+    auto from_p = from_c->character();
+    to_send.base.pos.x = from_c->pos.x;
+    to_send.base.pos.y = 0.0;
+    to_send.base.pos.z = from_c->pos.z;
+    to_send.bonus_hp_from_materials = from_p->inventory.hp_from_materials;
+    to_send.bonus_tp_from_materials = from_p->inventory.tp_from_materials;
+    to_send.language = from_c->language();
+    // TODO: Deal with telepipes. Probably we should track their state via the
+    // subcommands sent when they're created/destroyed, but currently we don't.
+    to_send.area = from_c->floor;
+    to_send.technique_levels_v1 = from_p->disp.technique_levels_v1;
+    to_send.visual = from_p->disp.visual;
+    to_send.name = from_p->disp.name.decode(from_c->language());
+    if (to_c->version() != Version::BB_V4) {
+      to_send.visual.name.encode(to_send.name, to_c->language());
     }
-    send_drop_item_to_channel(s, c->channel, item, from_enemy, floor, x, z, entity_id);
+    to_send.stats = from_p->disp.stats;
+    to_send.num_items = from_p->inventory.num_items;
+    to_send.items = from_p->inventory.items;
+    to_send.item_version = Version::BB_V4; // Server-side items are stored in BB encoding
+    to_send.floor = from_c->floor;
+  }
+
+  switch (to_c->version()) {
+    case Version::DC_NTE:
+      send_or_enqueue_command(to_c, 0x6D, to_c->lobby_client_id, to_send.as_dc_nte(s));
+      break;
+    case Version::DC_11_2000:
+      send_or_enqueue_command(to_c, 0x6D, to_c->lobby_client_id, to_send.as_dc_112000(s));
+      break;
+    case Version::DC_V1:
+    case Version::DC_V2:
+    case Version::PC_NTE:
+    case Version::PC_V2:
+      send_or_enqueue_command(to_c, 0x6D, to_c->lobby_client_id, to_send.as_dc_pc(s, to_c->version()));
+      break;
+    case Version::GC_NTE:
+    case Version::GC_V3:
+    case Version::GC_EP3_NTE:
+    case Version::GC_EP3:
+      send_or_enqueue_command(to_c, 0x6D, to_c->lobby_client_id, to_send.as_gc_gcnte(s, to_c->version()));
+      break;
+    case Version::XB_V3:
+      send_or_enqueue_command(to_c, 0x6D, to_c->lobby_client_id, to_send.as_xb(s));
+      break;
+    case Version::BB_V4:
+      send_or_enqueue_command(to_c, 0x6D, to_c->lobby_client_id, to_send.as_bb(s, to_c->language()));
+      break;
+    default:
+      throw logic_error("attempting to send 6x70 command to unknown game version");
+  }
+}
+
+void send_drop_item_to_channel(
+    shared_ptr<ServerState> s,
+    Channel& ch,
+    const ItemData& item,
+    uint8_t source_type,
+    uint8_t floor,
+    const VectorXZF& pos,
+    uint16_t entity_index) {
+  if (entity_index == 0xFFFF) {
+    send_drop_stacked_item_to_channel(s, ch, item, floor, pos);
+  } else {
+    uint8_t subcommand = get_pre_v1_subcommand(ch.version, 0x51, 0x58, 0x5F);
+    G_DropItem_PC_V3_BB_6x5F cmd = {
+        {{subcommand, 0x0B, 0x0000}, {floor, source_type, entity_index, pos, 0, 0, item}}, 0};
+    cmd.item.item.encode_for_version(ch.version, s->item_parameter_table_for_encode(ch.version));
+    ch.send(0x60, 0x00, &cmd, sizeof(cmd));
   }
 }
 
 void send_drop_stacked_item_to_channel(
-    shared_ptr<ServerState> s, Channel& ch, const ItemData& item, uint8_t floor, float x, float z) {
+    shared_ptr<ServerState> s,
+    Channel& ch,
+    const ItemData& item,
+    uint8_t floor,
+    const VectorXZF& pos) {
   uint8_t subcommand = get_pre_v1_subcommand(ch.version, 0x4F, 0x56, 0x5D);
-  G_DropStackedItem_PC_V3_BB_6x5D cmd = {{{subcommand, 0x0A, 0x0000}, floor, 0, x, z, item}, 0};
-  cmd.item_data.encode_for_version(ch.version, s->item_parameter_table_for_version(ch.version));
+  G_DropStackedItem_PC_V3_BB_6x5D cmd = {{{subcommand, 0x0A, 0x0000}, floor, 0, pos, item}, 0};
+  cmd.item_data.encode_for_version(ch.version, s->item_parameter_table_for_encode(ch.version));
   ch.send(0x60, 0x00, &cmd, sizeof(cmd));
 }
 
-void send_drop_stacked_item_to_lobby(shared_ptr<Lobby> l, const ItemData& item, uint8_t floor, float x, float z) {
+void send_drop_stacked_item_to_lobby(shared_ptr<Lobby> l, const ItemData& item, uint8_t floor, const VectorXZF& pos) {
   auto s = l->require_server_state();
   for (auto& c : l->clients) {
     if (!c) {
       continue;
     }
-    send_drop_stacked_item_to_channel(s, c->channel, item, floor, x, z);
+    send_drop_stacked_item_to_channel(s, c->channel, item, floor, pos);
   }
 }
 
@@ -2561,7 +3082,7 @@ void send_destroy_item_to_lobby(shared_ptr<Client> c, uint32_t item_id, uint32_t
 
 void send_destroy_floor_item_to_client(shared_ptr<Client> c, uint32_t item_id, uint32_t floor) {
   uint8_t subcommand = get_pre_v1_subcommand(c->version(), 0x55, 0x5C, 0x63);
-  G_DestroyFloorItem_6x63 cmd = {{subcommand, 0x03, 0x0000}, item_id, floor};
+  G_DestroyFloorItem_6x5C_6x63 cmd = {{subcommand, 0x03, 0x0000}, item_id, floor};
   send_command_t(c, 0x60, 0x00, cmd);
 }
 
@@ -2591,9 +3112,7 @@ void send_bank(shared_ptr<Client> c) {
 
   G_BankContentsHeader_BB_6xBC cmd = {
       {{0xBC, 0, 0}, sizeof(G_BankContentsHeader_BB_6xBC) + items.size() * sizeof(PlayerBankItem)},
-      random_object<uint32_t>(),
-      bank.num_items,
-      bank.meseta};
+      bank.checksum(), bank.num_items, bank.meseta};
 
   send_command_t_vt(c, 0x6C, 0x00, cmd, items);
 }
@@ -2631,8 +3150,8 @@ void send_level_up(shared_ptr<Client> c) {
   }
 
   uint8_t subcommand = get_pre_v1_subcommand(c->version(), 0x2C, 0x2E, 0x30);
-  G_LevelUp_6x30 cmd = {
-      {subcommand, sizeof(G_LevelUp_6x30) / 4, c->lobby_client_id},
+  G_ChangePlayerLevel_6x30 cmd = {
+      {subcommand, sizeof(G_ChangePlayerLevel_6x30) / 4, c->lobby_client_id},
       stats.atp + (mag ? ((mag->data1w[3] / 100) * 2) : 0),
       stats.mst + (mag ? ((mag->data1w[5] / 100) * 2) : 0),
       stats.evp,
@@ -2656,14 +3175,15 @@ void send_give_experience(shared_ptr<Client> c, uint32_t amount) {
 }
 
 void send_set_exp_multiplier(shared_ptr<Lobby> l) {
-  if (l->base_version != Version::BB_V4) {
-    throw logic_error("6xDD can only be sent to BB clients");
-  }
   if (!l->is_game()) {
     throw logic_error("6xDD can only be sent in games (not in lobbies)");
   }
   G_SetEXPMultiplier_BB_6xDD cmd = {{0xDD, sizeof(G_SetEXPMultiplier_BB_6xDD) / 4, (l->mode == GameMode::CHALLENGE) ? 1 : l->base_exp_multiplier}};
-  send_command_t(l, 0x60, 0x00, cmd);
+  for (auto lc : l->clients) {
+    if (lc && (lc->version() == Version::BB_V4)) {
+      send_command_t(lc, 0x60, 0x00, cmd);
+    }
+  }
 }
 
 void send_rare_enemy_index_list(shared_ptr<Client> c, const vector<size_t>& indexes) {
@@ -2678,14 +3198,14 @@ void send_rare_enemy_index_list(shared_ptr<Client> c, const vector<size_t>& inde
   send_command_t(c, 0xDE, 0x00, cmd);
 }
 
-void send_quest_function_call(Channel& ch, uint16_t function_id) {
+void send_quest_function_call(Channel& ch, uint16_t label) {
   S_CallQuestFunction_V3_BB_AB cmd;
-  cmd.function_id = function_id;
+  cmd.label = label;
   ch.send(0xAB, 0x00, &cmd, sizeof(cmd));
 }
 
-void send_quest_function_call(shared_ptr<Client> c, uint16_t function_id) {
-  send_quest_function_call(c->channel, function_id);
+void send_quest_function_call(shared_ptr<Client> c, uint16_t label) {
+  send_quest_function_call(c->channel, label);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2698,7 +3218,7 @@ void send_ep3_card_list_update(shared_ptr<Client> c) {
         ? s->ep3_card_index_trial->get_compressed_definitions()
         : s->ep3_card_index->get_compressed_definitions();
 
-    StringWriter w;
+    phosg::StringWriter w;
     w.put_u32l(data.size());
     w.write(data);
 
@@ -2711,8 +3231,8 @@ void send_ep3_media_update(
     uint32_t type,
     uint32_t which,
     const string& compressed_data) {
-  StringWriter w;
-  w.put<S_UpdateMediaHeader_GC_Ep3_B9>({type, which, compressed_data.size(), 0});
+  phosg::StringWriter w;
+  w.put<S_UpdateMediaHeader_Ep3_B9>({type, which, compressed_data.size(), 0});
   w.write(compressed_data);
   while (w.size() & 3) {
     w.put_u8(0);
@@ -2722,21 +3242,18 @@ void send_ep3_media_update(
 
 void send_ep3_rank_update(shared_ptr<Client> c) {
   auto s = c->require_server_state();
-  uint32_t current_meseta = s->ep3_infinite_meseta ? 1000000 : c->license->ep3_current_meseta;
-  uint32_t total_meseta_earned = s->ep3_infinite_meseta ? 1000000 : c->license->ep3_total_meseta_earned;
-  S_RankUpdate_GC_Ep3_B7 cmd = {0, {}, current_meseta, total_meseta_earned, 0xFFFFFFFF};
+  uint32_t current_meseta = s->ep3_infinite_meseta ? 1000000 : c->login->account->ep3_current_meseta;
+  uint32_t total_meseta_earned = s->ep3_infinite_meseta ? 1000000 : c->login->account->ep3_total_meseta_earned;
+  S_RankUpdate_Ep3_B7 cmd = {0, {}, current_meseta, total_meseta_earned, 0xFFFFFFFF};
   send_command_t(c, 0xB7, 0x00, cmd);
 }
 
 void send_ep3_card_battle_table_state(shared_ptr<Lobby> l, uint16_t table_number) {
-  S_CardBattleTableState_GC_Ep3_E4 cmd;
-  for (size_t z = 0; z < 4; z++) {
-    cmd.entries[z].state = 0;
-    cmd.entries[z].unknown_a1 = 0;
-    cmd.entries[z].guild_card_number = 0;
-  }
+  S_CardBattleTableState_Ep3_E4 cmd_nte;
+  S_CardBattleTableState_Ep3_E4 cmd_final;
 
-  set<shared_ptr<Client>> clients;
+  set<shared_ptr<Client>> clients_nte;
+  set<shared_ptr<Client>> clients_final;
   for (const auto& c : l->clients) {
     if (!c) {
       continue;
@@ -2745,22 +3262,28 @@ void send_ep3_card_battle_table_state(shared_ptr<Lobby> l, uint16_t table_number
       if (c->card_battle_table_seat_number > 3) {
         throw runtime_error("invalid battle table seat number");
       }
-      auto& e = cmd.entries[c->card_battle_table_seat_number];
+
+      bool is_nte = (c->version() == Version::GC_EP3_NTE);
+      auto& e = is_nte ? cmd_nte.entries[c->card_battle_table_seat_number] : cmd_final.entries[c->card_battle_table_seat_number];
       if (e.state == 0) {
         e.state = c->card_battle_table_seat_state;
-        e.guild_card_number = c->license->serial_number;
+        e.guild_card_number = c->login->account->account_id;
+        auto& clients = is_nte ? clients_nte : clients_final;
         clients.emplace(c);
       }
     }
   }
 
-  for (const auto& c : clients) {
-    send_command_t(c, 0xE4, table_number, cmd);
+  for (const auto& c : clients_nte) {
+    send_command_t(c, 0xE4, table_number, cmd_nte);
+  }
+  for (const auto& c : clients_final) {
+    send_command_t(c, 0xE4, table_number, cmd_final);
   }
 }
 
 void send_ep3_set_context_token(shared_ptr<Client> c, uint32_t context_token) {
-  G_SetContextToken_GC_Ep3_6xB4x1F cmd;
+  G_SetContextToken_Ep3_6xB4x1F cmd;
   cmd.context_token = context_token;
   send_command_t(c, 0xC9, 0x00, cmd);
 }
@@ -2772,7 +3295,7 @@ void send_ep3_confirm_tournament_entry(
     throw runtime_error("cannot send tournament entry command to Episode 3 Trial Edition client");
   }
 
-  S_ConfirmTournamentEntry_GC_Ep3_CC cmd;
+  S_ConfirmTournamentEntry_Ep3_CC cmd;
   if (tourn) {
     auto s = c->require_server_state();
     cmd.tournament_name.encode(tourn->get_name(), c->language());
@@ -2791,12 +3314,11 @@ void send_ep3_confirm_tournament_entry(
   send_command_t(c, 0xCC, tourn ? 0x01 : 0x00, cmd);
 }
 
-void send_ep3_tournament_list(
-    shared_ptr<Client> c,
-    bool is_for_spectator_team_create) {
+template <typename CmdT>
+void send_ep3_tournament_list_t(shared_ptr<Client> c, bool is_for_spectator_team_create) {
   auto s = c->require_server_state();
 
-  S_TournamentList_GC_Ep3_E0 cmd;
+  CmdT cmd;
   size_t z = 0;
   for (const auto& it : s->ep3_tournament_index->all_tournaments()) {
     const auto& tourn = it.second;
@@ -2827,18 +3349,24 @@ void send_ep3_tournament_list(
       }
     }
     entry.max_teams = teams.size();
-    entry.unknown_a3 = 0xFFFF;
-    entry.unknown_a4 = 0xFFFF;
     z++;
   }
   send_command_t(c, 0xE0, z, cmd);
+}
+
+void send_ep3_tournament_list(shared_ptr<Client> c, bool is_for_spectator_team_create) {
+  if (c->version() == Version::GC_EP3_NTE) {
+    send_ep3_tournament_list_t<S_TournamentList_Ep3NTE_E0>(c, is_for_spectator_team_create);
+  } else {
+    send_ep3_tournament_list_t<S_TournamentList_Ep3_E0>(c, is_for_spectator_team_create);
+  }
 }
 
 void send_ep3_tournament_entry_list(
     shared_ptr<Client> c,
     shared_ptr<const Episode3::Tournament> tourn,
     bool is_for_spectator_team_create) {
-  S_TournamentEntryList_GC_Ep3_E2 cmd;
+  S_TournamentEntryList_Ep3_E2 cmd;
   cmd.players_per_team = (tourn->get_flags() & Episode3::Tournament::Flag::IS_2V2) ? 2 : 1;
   size_t z = 0;
   for (const auto& team : tourn->all_teams()) {
@@ -2865,10 +3393,11 @@ void send_ep3_tournament_entry_list(
   send_command_t(c, is_for_spectator_team_create ? 0xE7 : 0xE2, z, cmd);
 }
 
-void send_ep3_tournament_details(
+template <typename RulesT>
+void send_ep3_tournament_details_t(
     shared_ptr<Client> c,
     shared_ptr<const Episode3::Tournament> tourn) {
-  S_TournamentGameDetails_GC_Ep3_E3 cmd;
+  S_TournamentGameDetailsBaseT_Ep3_E3<RulesT> cmd;
   auto vm = tourn->get_map()->version(c->language());
   cmd.name.encode(tourn->get_name(), c->language());
   cmd.map_name.encode(vm->map->name.decode(vm->language), c->language());
@@ -2884,19 +3413,30 @@ void send_ep3_tournament_details(
   send_command_t(c, 0xE3, 0x02, cmd);
 }
 
+void send_ep3_tournament_details(
+    shared_ptr<Client> c,
+    shared_ptr<const Episode3::Tournament> tourn) {
+  if (c->version() == Version::GC_EP3_NTE) {
+    send_ep3_tournament_details_t<Episode3::RulesTrial>(c, tourn);
+  } else {
+    send_ep3_tournament_details_t<Episode3::Rules>(c, tourn);
+  }
+}
+
 string ep3_description_for_client(shared_ptr<Client> c) {
   if (!is_ep3(c->version())) {
     throw runtime_error("client is not Episode 3");
   }
   auto p = c->character();
-  return string_printf(
+  return phosg::string_printf(
       "%s CLv%" PRIu32 " %c",
       name_for_char_class(p->disp.visual.char_class),
       p->disp.stats.level + 1,
       char_for_language_code(p->inventory.language));
 }
 
-void send_ep3_game_details(shared_ptr<Client> c, shared_ptr<Lobby> l) {
+template <typename RulesT>
+void send_ep3_game_details_t(shared_ptr<Client> c, shared_ptr<Lobby> l) {
 
   shared_ptr<Lobby> primary_lobby;
   if (l->check_flag(Lobby::Flag::IS_SPECTATOR_TEAM)) {
@@ -2909,7 +3449,7 @@ void send_ep3_game_details(shared_ptr<Client> c, shared_ptr<Lobby> l) {
   auto tourn = tourn_match ? tourn_match->tournament.lock() : nullptr;
 
   if (tourn) {
-    S_TournamentGameDetails_GC_Ep3_E3 cmd;
+    S_TournamentGameDetailsBaseT_Ep3_E3<RulesT> cmd;
     cmd.name.encode(l->name, c->language());
 
     auto vm = tourn->get_map()->version(c->language());
@@ -2927,15 +3467,16 @@ void send_ep3_game_details(shared_ptr<Client> c, shared_ptr<Lobby> l) {
     cmd.players_per_team = (tourn->get_flags() & Episode3::Tournament::Flag::IS_2V2) ? 2 : 1;
 
     if (primary_lobby) {
-      auto serial_number_to_client = primary_lobby->clients_by_serial_number();
-      auto describe_team = [&](S_TournamentGameDetails_GC_Ep3_E3::TeamEntry& team_entry, shared_ptr<const Episode3::Tournament::Team> team) -> void {
+      auto account_id_to_client = primary_lobby->clients_by_account_id();
+      using TeamEntryT = typename S_TournamentGameDetailsBaseT_Ep3_E3<RulesT>::TeamEntry;
+      auto describe_team = [&](TeamEntryT& team_entry, shared_ptr<const Episode3::Tournament::Team> team) -> void {
         team_entry.team_name.encode(team->name, c->language());
         for (size_t z = 0; z < team->players.size(); z++) {
           auto& entry = team_entry.players[z];
           const auto& player = team->players[z];
           if (player.is_human()) {
             try {
-              auto other_c = serial_number_to_client.at(player.serial_number);
+              auto other_c = account_id_to_client.at(player.account_id);
               entry.name.encode(other_c->character()->disp.name.decode(other_c->language()), c->language());
               entry.description.encode(ep3_description_for_client(other_c), c->language());
             } catch (const out_of_range&) {
@@ -2968,7 +3509,7 @@ void send_ep3_game_details(shared_ptr<Client> c, shared_ptr<Lobby> l) {
     send_command_t(c, 0xE3, flag, cmd);
 
   } else {
-    S_GameInformation_GC_Ep3_E1 cmd;
+    S_GameInformationBaseT_Ep3_E1<RulesT> cmd;
     cmd.game_name.encode(l->name, c->language());
     if (primary_lobby) {
       size_t num_players = 0;
@@ -2997,7 +3538,7 @@ void send_ep3_game_details(shared_ptr<Client> c, shared_ptr<Lobby> l) {
       // spectator count in the info window object. To account for this, we send
       // a mostly-blank E3 to set the spectator count, followed by an E1 with
       // the correct data.
-      S_TournamentGameDetails_GC_Ep3_E3 cmd_E3;
+      S_TournamentGameDetailsBaseT_Ep3_E3<RulesT> cmd_E3;
       cmd_E3.num_spectators = num_spectators;
       send_command_t(c, 0xE3, 0x04, cmd_E3);
 
@@ -3017,7 +3558,16 @@ void send_ep3_game_details(shared_ptr<Client> c, shared_ptr<Lobby> l) {
   }
 }
 
-void send_ep3_set_tournament_player_decks(shared_ptr<Client> c) {
+void send_ep3_game_details(shared_ptr<Client> c, shared_ptr<Lobby> l) {
+  if (c->version() == Version::GC_EP3_NTE) {
+    send_ep3_game_details_t<Episode3::RulesTrial>(c, l);
+  } else {
+    send_ep3_game_details_t<Episode3::Rules>(c, l);
+  }
+}
+
+template <typename CmdT>
+void send_ep3_set_tournament_player_decks_t(shared_ptr<Client> c) {
   auto s = c->require_server_state();
   auto l = c->require_lobby();
 
@@ -3027,7 +3577,7 @@ void send_ep3_set_tournament_player_decks(shared_ptr<Client> c) {
     throw runtime_error("tournament is deleted");
   }
 
-  G_SetTournamentPlayerDecks_GC_Ep3_6xB4x3D cmd;
+  CmdT cmd;
   cmd.rules = tourn->get_rules();
   cmd.map_number = tourn->get_map()->map_number;
   cmd.player_slot = 0xFF;
@@ -3048,7 +3598,7 @@ void send_ep3_set_tournament_player_decks(shared_ptr<Client> c) {
       if (player.is_human()) {
         entry.type = 1; // Human
         entry.player_name.encode(player.player_name, c->language());
-        if (player.serial_number == c->license->serial_number) {
+        if (player.account_id == c->login->account->account_id) {
           cmd.player_slot = base_index + z;
         }
       } else {
@@ -3063,8 +3613,9 @@ void send_ep3_set_tournament_player_decks(shared_ptr<Client> c) {
   add_entries_for_team(match->preceding_a->winner_team, 0);
   add_entries_for_team(match->preceding_b->winner_team, 2);
 
-  if (!(s->ep3_behavior_flags & Episode3::BehaviorFlag::DISABLE_MASKING)) {
-    uint8_t mask_key = (random_object<uint32_t>() % 0xFF) + 1;
+  if ((c->version() != Version::GC_EP3_NTE) &&
+      !(s->ep3_behavior_flags & Episode3::BehaviorFlag::DISABLE_MASKING)) {
+    uint8_t mask_key = (phosg::random_object<uint32_t>() % 0xFF) + 1;
     set_mask_for_ep3_game_command(&cmd, sizeof(cmd), mask_key);
   }
 
@@ -3086,18 +3637,18 @@ void send_ep3_tournament_match_result(shared_ptr<Lobby> l, uint32_t meseta_rewar
     throw logic_error("cannot send tournament result without valid winner team");
   }
 
-  auto serial_number_to_client = l->clients_by_serial_number();
+  auto account_id_to_client = l->clients_by_account_id();
 
   for (const auto& lc : l->clients) {
     if (!lc) {
       continue;
     }
-    auto write_player_names = [&](G_TournamentMatchResult_GC_Ep3_6xB4x51::NamesEntry& entry, shared_ptr<const Episode3::Tournament::Team> team) -> void {
+    auto write_player_names = [&](G_TournamentMatchResult_Ep3_6xB4x51::NamesEntry& entry, shared_ptr<const Episode3::Tournament::Team> team) -> void {
       for (size_t z = 0; z < team->players.size(); z++) {
         const auto& player = team->players[z];
         if (player.is_human()) {
           try {
-            auto pc = serial_number_to_client.at(player.serial_number);
+            auto pc = account_id_to_client.at(player.account_id);
             entry.player_names[z].encode(pc->character()->disp.name.decode(pc->language()), lc->language());
           } catch (const out_of_range&) {
             entry.player_names[z].encode(player.player_name, lc->language());
@@ -3108,10 +3659,10 @@ void send_ep3_tournament_match_result(shared_ptr<Lobby> l, uint32_t meseta_rewar
       }
     };
 
-    G_TournamentMatchResult_GC_Ep3_6xB4x51 cmd;
+    G_TournamentMatchResult_Ep3_6xB4x51 cmd;
     cmd.match_description.encode((match == tourn->get_final_match())
-            ? string_printf("(%s) Final match", tourn->get_name().c_str())
-            : string_printf("(%s) Round %zu", tourn->get_name().c_str(), match->round_num),
+            ? phosg::string_printf("(%s) Final match", tourn->get_name().c_str())
+            : phosg::string_printf("(%s) Round %zu", tourn->get_name().c_str(), match->round_num),
         lc->language());
     cmd.names_entries[0].team_name.encode(match->preceding_a->winner_team->name, lc->language());
     write_player_names(cmd.names_entries[0], match->preceding_a->winner_team);
@@ -3124,8 +3675,9 @@ void send_ep3_tournament_match_result(shared_ptr<Lobby> l, uint32_t meseta_rewar
     cmd.winner_team_id = (match->preceding_b->winner_team == match->winner_team);
     cmd.meseta_amount = meseta_reward;
     cmd.meseta_reward_text.encode("You got %s meseta!", 1);
-    if (!(s->ep3_behavior_flags & Episode3::BehaviorFlag::DISABLE_MASKING)) {
-      uint8_t mask_key = (random_object<uint32_t>() % 0xFF) + 1;
+    if ((lc->version() != Version::GC_EP3_NTE) &&
+        !(s->ep3_behavior_flags & Episode3::BehaviorFlag::DISABLE_MASKING)) {
+      uint8_t mask_key = (phosg::random_object<uint32_t>() % 0xFF) + 1;
       set_mask_for_ep3_game_command(&cmd, sizeof(cmd), mask_key);
     }
     send_command_t(lc, 0xC9, 0x00, cmd);
@@ -3135,6 +3687,14 @@ void send_ep3_tournament_match_result(shared_ptr<Lobby> l, uint32_t meseta_rewar
     send_text_message_printf(l, "$C5TOURN/%" PRIX32 "/%zu WIN %c",
         tourn->get_menu_item_id(), match->round_num,
         match->winner_team == match->preceding_a->winner_team ? 'A' : 'B');
+  }
+}
+
+void send_ep3_set_tournament_player_decks(shared_ptr<Client> c) {
+  if (c->version() == Version::GC_EP3_NTE) {
+    send_ep3_set_tournament_player_decks_t<G_SetTournamentPlayerDecks_Ep3NTE_6xB4x3D>(c);
+  } else {
+    send_ep3_set_tournament_player_decks_t<G_SetTournamentPlayerDecks_Ep3_6xB4x3D>(c);
   }
 }
 
@@ -3149,19 +3709,19 @@ void send_ep3_update_game_metadata(shared_ptr<Lobby> l) {
   auto s = l->require_server_state();
 
   {
-    G_SetGameMetadata_GC_Ep3_6xB4x52 cmd;
+    G_SetGameMetadata_Ep3_6xB4x52 cmd;
     cmd.total_spectators = total_spectators;
-    if (!(s->ep3_behavior_flags & Episode3::BehaviorFlag::DISABLE_MASKING)) {
-      uint8_t mask_key = (random_object<uint32_t>() % 0xFF) + 1;
-      set_mask_for_ep3_game_command(&cmd, sizeof(cmd), mask_key);
-    }
-    // Note: We can't use send_command_t(l, ...) here because that would send
-    // the same command to l and to all watcher lobbies. The commands should
-    // have different values depending on who's in each watcher lobby, so we
-    // have to manually send to each client here.
     for (auto c : l->clients) {
       if (c) {
-        send_command_t(c, 0xC9, 0x00, cmd);
+        if ((c->version() == Version::GC_EP3) &&
+            !(s->ep3_behavior_flags & Episode3::BehaviorFlag::DISABLE_MASKING)) {
+          G_SetGameMetadata_Ep3_6xB4x52 masked_cmd = cmd;
+          uint8_t mask_key = (phosg::random_object<uint32_t>() % 0xFF) + 1;
+          set_mask_for_ep3_game_command(&masked_cmd, sizeof(masked_cmd), mask_key);
+          send_command_t(c, 0xC9, 0x00, masked_cmd);
+        } else {
+          send_command_t(c, 0xC9, 0x00, cmd);
+        }
       }
     }
   }
@@ -3170,9 +3730,9 @@ void send_ep3_update_game_metadata(shared_ptr<Lobby> l) {
     auto tourn = l->tournament_match ? l->tournament_match->tournament.lock() : 0;
     if (l->tournament_match && tourn) {
       if (tourn->get_final_match() == l->tournament_match) {
-        text = string_printf("Viewing final match of tournament %s", tourn->get_name().c_str());
+        text = phosg::string_printf("Viewing final match of tournament %s", tourn->get_name().c_str());
       } else {
-        text = string_printf(
+        text = phosg::string_printf(
             "Viewing match in round %zu of tournament %s",
             l->tournament_match->round_num, tourn->get_name().c_str());
       }
@@ -3181,7 +3741,7 @@ void send_ep3_update_game_metadata(shared_ptr<Lobby> l) {
     }
     add_color_inplace(text);
     for (auto watcher_l : l->watcher_lobbies) {
-      G_SetGameMetadata_GC_Ep3_6xB4x52 cmd;
+      G_SetGameMetadata_Ep3_6xB4x52 cmd;
       cmd.local_spectators = 0;
       for (auto c : watcher_l->clients) {
         cmd.local_spectators += (c.get() != nullptr);
@@ -3189,11 +3749,19 @@ void send_ep3_update_game_metadata(shared_ptr<Lobby> l) {
       cmd.total_spectators = total_spectators;
       cmd.text_size = text.size();
       cmd.text.encode(text, 1);
-      if (!(s->ep3_behavior_flags & Episode3::BehaviorFlag::DISABLE_MASKING)) {
-        uint8_t mask_key = (random_object<uint32_t>() % 0xFF) + 1;
-        set_mask_for_ep3_game_command(&cmd, sizeof(cmd), mask_key);
+      for (auto c : watcher_l->clients) {
+        if (c) {
+          if ((c->version() == Version::GC_EP3) &&
+              !(s->ep3_behavior_flags & Episode3::BehaviorFlag::DISABLE_MASKING)) {
+            G_SetGameMetadata_Ep3_6xB4x52 masked_cmd = cmd;
+            uint8_t mask_key = (phosg::random_object<uint32_t>() % 0xFF) + 1;
+            set_mask_for_ep3_game_command(&masked_cmd, sizeof(masked_cmd), mask_key);
+            send_command_t(c, 0xC9, 0x00, masked_cmd);
+          } else {
+            send_command_t(c, 0xC9, 0x00, cmd);
+          }
+        }
       }
-      send_command_t(watcher_l, 0xC9, 0x00, cmd);
     }
   }
 }
@@ -3330,7 +3898,7 @@ void send_open_quest_file(
     shared_ptr<const string> contents) {
 
   switch (c->version()) {
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::GC_NTE:
@@ -3353,18 +3921,27 @@ void send_open_quest_file(
       throw logic_error("cannot send quest files to this version of client");
   }
 
-  // For GC/XB/BB, we wait for acknowledgement commands before sending each
-  // chunk. For DC/PC, we send the entire quest all at once.
-  if (is_v1_or_v2(c->version()) && (c->version() != Version::GC_NTE)) {
-    for (size_t offset = 0; offset < contents->size(); offset += 0x400) {
-      size_t chunk_bytes = contents->size() - offset;
-      if (chunk_bytes > 0x400) {
-        chunk_bytes = 0x400;
-      }
-      send_quest_file_chunk(c, filename.c_str(), offset / 0x400,
-          contents->data() + offset, chunk_bytes, (type != QuestFileType::ONLINE));
+  // On most versions, we can trust the TCP stack to do the right thing when we
+  // send a lot of data at once, but on GC, the client will crash if too much
+  // quest data is sent at once. This is likely a bug in the TCP stack, since
+  // the client should apply backpressure to avoid bad situations, but we have
+  // to deal with it here instead.
+  size_t total_chunks = (contents->size() + 0x3FF) / 0x400;
+  size_t chunks_to_send = is_v1_or_v2(c->version()) ? total_chunks : min<size_t>(V3_V4_QUEST_LOAD_MAX_CHUNKS_IN_FLIGHT, total_chunks);
+
+  for (size_t z = 0; z < chunks_to_send; z++) {
+    size_t offset = z * 0x400;
+    size_t chunk_bytes = contents->size() - offset;
+    if (chunk_bytes > 0x400) {
+      chunk_bytes = 0x400;
     }
-  } else {
+    send_quest_file_chunk(c, filename.c_str(), offset / 0x400,
+        contents->data() + offset, chunk_bytes, (type != QuestFileType::ONLINE));
+  }
+
+  // If there are still chunks to send, track the file so the chunk
+  // acknowledgement handler (13 or A7) cna know what to send next
+  if (chunks_to_send < total_chunks) {
     c->sending_files.emplace(filename, contents);
     c->log.info("Opened file %s", filename.c_str());
   }
@@ -3391,10 +3968,12 @@ bool send_quest_barrier_if_all_clients_ready(shared_ptr<Lobby> l) {
     return false;
   }
 
-  send_command(l, 0xAC, 0x00);
-  for (x = 0; x < l->max_clients; x++) {
-    if (l->clients[x]) {
-      l->clients[x]->disconnect_hooks.erase(QUEST_BARRIER_DISCONNECT_HOOK_NAME);
+  for (auto& lc : l->clients) {
+    if (lc) {
+      if (!is_v1_or_v2(lc->version())) {
+        send_command(lc, 0xAC, 0x00);
+      }
+      lc->disconnect_hooks.erase(QUEST_BARRIER_DISCONNECT_HOOK_NAME);
     }
   }
   return true;
@@ -3450,23 +4029,21 @@ void send_ep3_card_auction(shared_ptr<Lobby> l) {
     num_cards = s->ep3_card_auction_min_size;
   } else {
     num_cards = s->ep3_card_auction_min_size +
-        (random_object<uint16_t>() % (s->ep3_card_auction_max_size - s->ep3_card_auction_min_size + 1));
+        (phosg::random_object<uint16_t>() % (s->ep3_card_auction_max_size - s->ep3_card_auction_min_size + 1));
   }
   num_cards = min<uint16_t>(num_cards, 0x14);
+
+  auto card_index = l->is_ep3_nte() ? s->ep3_card_index_trial : s->ep3_card_index;
 
   uint64_t distribution_size = 0;
   for (const auto& e : s->ep3_card_auction_pool) {
     distribution_size += e.probability;
   }
 
-  auto card_index = (l->base_version == Version::GC_EP3_NTE)
-      ? s->ep3_card_index_trial
-      : s->ep3_card_index;
-
-  S_StartCardAuction_GC_Ep3_EF cmd;
+  S_StartCardAuction_Ep3_EF cmd;
   cmd.points_available = s->ep3_card_auction_points;
   for (size_t z = 0; z < num_cards; z++) {
-    uint64_t v = random_object<uint64_t>() % distribution_size;
+    uint64_t v = phosg::random_object<uint64_t>() % distribution_size;
     for (const auto& e : s->ep3_card_auction_pool) {
       if (v >= e.probability) {
         v -= e.probability;
@@ -3491,21 +4068,25 @@ void send_ep3_disband_watcher_lobbies(shared_ptr<Lobby> primary_l) {
 }
 
 void send_server_time(shared_ptr<Client> c) {
-  uint64_t t = now();
+  uint64_t t = phosg::now();
 
   time_t t_secs = t / 1000000;
   struct tm t_parsed;
   gmtime_r(&t_secs, &t_parsed);
 
   string time_str(128, 0);
-  size_t len = strftime(time_str.data(), time_str.size(),
-      "%Y:%m:%d: %H:%M:%S.000", &t_parsed);
+  size_t len = strftime(time_str.data(), time_str.size(), "%Y:%m:%d: %H:%M:%S.000", &t_parsed);
   if (len == 0) {
-    throw runtime_error("format_time buffer too short");
+    throw logic_error("strftime buffer too short");
   }
   time_str.resize(len);
 
-  send_command(c, 0xB1, 0x00, time_str);
+  S_ServerTime_B1 cmd;
+  cmd.time_str.encode(time_str);
+  cmd.time_flags_low = 0x01;
+  cmd.time_flags_mid = 0x00;
+  cmd.time_flags_high = 0x00;
+  send_command_t(c, 0xB1, 0x00, cmd);
 }
 
 void send_change_event(shared_ptr<Client> c, uint8_t new_event) {
@@ -3539,9 +4120,10 @@ void send_team_membership_info(shared_ptr<Client> c) {
   auto team = c->team();
   S_TeamMembershipInformation_BB_12EA cmd;
   if (team) {
-    cmd.guild_card_number = c->license->serial_number;
+    cmd.guild_card_number = c->login->account->account_id;
     cmd.team_id = team->team_id;
-    cmd.privilege_level = team->members.at(c->license->serial_number).privilege_level();
+    cmd.privilege_level = team->members.at(c->login->account->account_id).privilege_level();
+    cmd.team_member_count = min<size_t>(team->members.size(), 100);
     cmd.team_name.encode(team->name);
   }
   send_command_t(c, 0x12EA, 0x00000000, cmd);
@@ -3551,12 +4133,13 @@ static S_TeamInfoForPlayer_BB_13EA_15EA_Entry team_metadata_for_client(shared_pt
   auto team = c->team();
   S_TeamInfoForPlayer_BB_13EA_15EA_Entry cmd;
   cmd.lobby_client_id = c->lobby_client_id;
-  cmd.guild_card_number2 = c->license->serial_number;
+  cmd.guild_card_number2 = c->login->account->account_id;
   cmd.player_name = c->character()->disp.name;
   if (team) {
-    cmd.guild_card_number = c->license->serial_number;
+    cmd.guild_card_number = c->login->account->account_id;
     cmd.team_id = team->team_id;
-    cmd.privilege_level = team->members.at(c->license->serial_number).privilege_level();
+    cmd.privilege_level = team->members.at(c->login->account->account_id).privilege_level();
+    cmd.team_member_count = min<size_t>(team->members.size(), 100);
     cmd.team_name.encode(team->name);
     if (team->flag_data) {
       cmd.flag_data = *team->flag_data;
@@ -3613,7 +4196,7 @@ void send_team_member_list(shared_ptr<Client> c) {
     auto& e = entries.emplace_back();
     e.rank = z + 1;
     e.privilege_level = m->privilege_level();
-    e.guild_card_number = m->serial_number;
+    e.guild_card_number = m->account_id;
     e.name.encode(m->name, c->language());
   }
 
@@ -3648,7 +4231,7 @@ void send_intra_team_ranking(shared_ptr<Client> c) {
     auto& e = entries.emplace_back();
     e.rank = z + 1;
     e.privilege_level = m->privilege_level();
-    e.guild_card_number = m->serial_number;
+    e.guild_card_number = m->account_id;
     e.player_name.encode(m->name);
     e.points = m->points;
   }
@@ -3691,11 +4274,15 @@ void send_team_reward_list(shared_ptr<Client> c, bool show_purchased) {
   }
   auto s = c->require_server_state();
 
+  // Hide item rewards if the player's bank is full
   bool show_item_rewards = show_purchased || (c->current_bank().num_items < 200);
 
   vector<S_TeamRewardList_BB_19EA_1AEA::Entry> entries;
   for (const auto& reward : s->team_index->reward_definitions()) {
-    if (team->has_reward(reward.key) != show_purchased) {
+    // In the buy menu, hide rewards that can't be bought again (that is, unique
+    // rewards that the team already has). In the bought menu, hide rewards that
+    // the team does not have or that can be bought again.
+    if (show_purchased != (team->has_reward(reward.key) && reward.is_unique)) {
       continue;
     }
     if (!show_item_rewards && !reward.reward_item.empty()) {

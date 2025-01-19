@@ -1,5 +1,8 @@
 #include "RulerServer.hh"
 
+#include <optional>
+
+#include "DataIndexes.hh"
 #include "Server.hh"
 
 using namespace std;
@@ -12,8 +15,8 @@ void compute_effective_range(
     uint16_t card_id,
     const Location& loc,
     shared_ptr<const MapAndRulesState> map_and_rules,
-    PrefixedLogger* log) {
-  if (log && log->should_log(LogLevel::DEBUG)) {
+    phosg::PrefixedLogger* log) {
+  if (log && log->should_log(phosg::LogLevel::DEBUG)) {
     string loc_str = loc.str();
     log->debug("compute_effective_range: card_id=#%04hX, loc=%s", card_id, loc_str.c_str());
     log->debug("compute_effective_range: map_and_rules->map:");
@@ -204,6 +207,8 @@ const ActionChainWithConds* RulerServer::action_chain_with_conds_for_card_ref(
     uint16_t card_ref) const {
   uint8_t client_id = client_id_for_card_ref(card_ref);
   if (client_id != 0xFF) {
+    // There appears to be a bug in Trial Edition: the bound on this loop is
+    // 0x10, not 9.
     for (size_t z = 0; z < 9; z++) {
       const auto* chain = &this->set_card_action_chains[client_id]->at(z);
       if (card_ref == chain->chain.acting_card_ref) {
@@ -235,19 +240,25 @@ bool RulerServer::card_has_pierce_or_rampage(
     uint16_t action_card_ref,
     uint8_t def_effect_index,
     AttackMedium attack_medium) const {
-  auto short_statuses = (client_id != 0xFF) ? this->short_statuses[client_id] : nullptr;
+  auto short_statuses = (client_id < 4) ? this->short_statuses[client_id] : nullptr;
   *out_has_rampage = false;
 
-  if (cond_type == ConditionType::NONE) {
-    return false;
+  bool ret;
+  bool is_nte = this->server()->options.is_nte();
+  if (is_nte) {
+    ret = true;
+  } else {
+    if (cond_type == ConditionType::NONE) {
+      return false;
+    }
+    ret = this->check_usability_or_apply_condition_for_card_refs(
+        action_card_ref,
+        attacker_card_ref,
+        // Original code omitted this null check and presumably could crash here
+        short_statuses ? short_statuses->at(0).card_ref.load() : 0xFFFF,
+        def_effect_index,
+        attack_medium);
   }
-  bool ret = this->check_usability_or_apply_condition_for_card_refs(
-      action_card_ref,
-      attacker_card_ref,
-      // Original code omitted this null check and presumably could crash here
-      short_statuses ? short_statuses->at(0).card_ref.load() : 0xFFFF,
-      def_effect_index,
-      attack_medium);
 
   switch (cond_type) {
     case ConditionType::RAMPAGE:
@@ -280,7 +291,10 @@ bool RulerServer::card_has_pierce_or_rampage(
       if (short_statuses) {
         const auto& sc_status = short_statuses->at(0);
         auto ce = this->definition_for_card_ref(sc_status.card_ref);
-        if (ce && (this->get_card_ref_max_hp(sc_status.card_ref) <= sc_status.current_hp * 2)) {
+        // This appears to be an NTE bug: Major Pierce doesn't work on Arkz SCs.
+        if (ce &&
+            (!is_nte || (ce->def.type == CardType::HUNTERS_SC)) &&
+            (this->get_card_ref_max_hp(sc_status.card_ref) <= sc_status.current_hp * 2)) {
           return ret;
         }
       }
@@ -290,8 +304,7 @@ bool RulerServer::card_has_pierce_or_rampage(
   }
 }
 
-bool RulerServer::attack_action_has_rampage_and_not_pierce(
-    const ActionState& pa, uint16_t card_ref) const {
+bool RulerServer::attack_action_has_rampage_and_not_pierce(const ActionState& pa, uint16_t card_ref) const {
   uint16_t orig_card_ref;
   uint16_t effective_range_card_id;
   TargetMode effective_target_mode;
@@ -365,15 +378,15 @@ bool RulerServer::attack_action_has_rampage_and_not_pierce(
   return false;
 }
 
-bool RulerServer::attack_action_has_pierce_and_not_rampage(
-    const ActionState& pa, uint8_t client_id) {
-  if ((client_id_for_card_ref(pa.attacker_card_ref) == 0xFF) || (client_id == 0xFF)) {
+bool RulerServer::attack_action_has_pierce_and_not_rampage(const ActionState& pa, uint8_t client_id) const {
+  if ((client_id_for_card_ref(pa.attacker_card_ref) == 0xFF) || (client_id >= 4)) {
     return false;
   }
 
+  bool is_nte = this->server()->options.is_nte();
   auto attack_medium = this->get_attack_medium(pa);
   auto stat = this->short_statuses[client_id];
-  if (!stat || !this->card_exists_by_status(stat->at(0)) || (stat->at(0).card_ref == 0xFFFF)) {
+  if (!stat || (!is_nte && !this->card_exists_by_status(stat->at(0))) || (stat->at(0).card_ref == 0xFFFF)) {
     return false;
   }
 
@@ -390,6 +403,33 @@ bool RulerServer::attack_action_has_pierce_and_not_rampage(
   ssize_t last_action_card_index = -1;
   for (size_t z = 0; (z < 8) && (pa.action_card_refs[z] != 0xFFFF); z++) {
     last_action_card_index = z;
+  }
+
+  auto check_chain = [&]() -> optional<bool> {
+    const auto* chain = this->action_chain_with_conds_for_card_ref(pa.attacker_card_ref);
+    if (chain) {
+      for (ssize_t cond_index = 8; cond_index >= 0; cond_index--) {
+        bool has_rampage = false;
+        if (this->card_has_pierce_or_rampage(
+                client_id, chain->conditions[cond_index].type, &has_rampage,
+                pa.attacker_card_ref, chain->conditions[cond_index].card_ref,
+                chain->conditions[cond_index].card_definition_effect_index,
+                attack_medium)) {
+          return true;
+        }
+        if (has_rampage) {
+          return false;
+        }
+      }
+    }
+    return nullopt;
+  };
+
+  if (is_nte) {
+    auto res = check_chain();
+    if (res.has_value()) {
+      return res.value();
+    }
   }
 
   for (; last_action_card_index >= 0; last_action_card_index--) {
@@ -418,20 +458,10 @@ bool RulerServer::attack_action_has_pierce_and_not_rampage(
     }
   }
 
-  const auto* chain = this->action_chain_with_conds_for_card_ref(pa.attacker_card_ref);
-  if (chain) {
-    for (ssize_t cond_index = 8; cond_index >= 0; cond_index--) {
-      bool has_rampage = false;
-      if (this->card_has_pierce_or_rampage(
-              client_id, chain->conditions[cond_index].type, &has_rampage,
-              pa.attacker_card_ref, chain->conditions[cond_index].card_ref,
-              chain->conditions[cond_index].card_definition_effect_index,
-              attack_medium)) {
-        return true;
-      }
-      if (has_rampage) {
-        return false;
-      }
+  if (!is_nte) {
+    auto res = check_chain();
+    if (res.has_value()) {
+      return res.value();
     }
   }
 
@@ -634,9 +664,11 @@ bool RulerServer::card_ref_has_free_maneuver(uint16_t card_ref) const {
 }
 
 bool RulerServer::card_ref_is_aerial(uint16_t card_ref) const {
-  const auto* stat = this->short_status_for_card_ref(card_ref);
-  if (!stat || !this->card_exists_by_status(*stat)) {
-    return false;
+  if (!this->server()->options.is_nte()) {
+    const auto* stat = this->short_status_for_card_ref(card_ref);
+    if (!stat || !this->card_exists_by_status(*stat)) {
+      return false;
+    }
   }
 
   uint8_t client_id = client_id_for_card_ref(card_ref);
@@ -791,10 +823,13 @@ bool RulerServer::check_pierce_and_rampage(
     uint16_t action_card_ref,
     uint8_t def_effect_index,
     AttackMedium attack_medium) const {
+  bool is_nte = this->server()->options.is_nte();
+
+  // Note: NTE doesn't set this to zero; it apparently expects the caller to.
   *out_has_pierce = false;
 
   const auto* card_short_status = this->short_status_for_card_ref(card_ref);
-  if (cond_type == ConditionType::NONE) {
+  if (!is_nte && (cond_type == ConditionType::NONE)) {
     return false;
   }
 
@@ -816,8 +851,9 @@ bool RulerServer::check_pierce_and_rampage(
     client_short_statuses = nullptr;
   }
 
-  bool apply_check_result = this->check_usability_or_apply_condition_for_card_refs(
-      action_card_ref, attacker_card_ref, card_ref, def_effect_index, attack_medium);
+  bool apply_check_result = (is_nte ||
+      this->check_usability_or_apply_condition_for_card_refs(
+          action_card_ref, attacker_card_ref, card_ref, def_effect_index, attack_medium));
 
   switch (cond_type) {
     case ConditionType::PIERCE:
@@ -903,7 +939,9 @@ bool RulerServer::check_usability_or_condition_apply(
     uint8_t def_effect_index,
     bool is_item_usability_check,
     AttackMedium attack_medium) const {
-  auto log = this->server()->log_stack(string_printf("check_usability_or_condition_apply(%02hhX, #%04hX, %02hhX, #%04hX, #%04hX, %02hhX, %s, %s): ", client_id1, card_id1, client_id2, card_id2, card_id3, def_effect_index, is_item_usability_check ? "true" : "false", name_for_attack_medium(attack_medium)));
+  auto s = this->server();
+  bool is_nte = s->options.is_nte();
+  auto log = s->log_stack(phosg::string_printf("check_usability_or_condition_apply(%02hhX, #%04hX, %02hhX, #%04hX, #%04hX, %02hhX, %s, %s): ", client_id1, card_id1, client_id2, card_id2, card_id3, def_effect_index, is_item_usability_check ? "true" : "false", phosg::name_for_enum(attack_medium)));
 
   if (static_cast<uint8_t>(attack_medium) & 0x80) {
     attack_medium = AttackMedium::UNKNOWN;
@@ -916,7 +954,7 @@ bool RulerServer::check_usability_or_condition_apply(
     log.debug("ce1 missing");
     return false;
   }
-  if ((ce1->def.type == CardType::ITEM) && this->card_id_is_boss_sc(card_id2)) {
+  if (!is_nte && (ce1->def.type == CardType::ITEM) && this->card_id_is_boss_sc(card_id2)) {
     log.debug("ce1 is item and card_id2 is boss sc");
     return false;
   }
@@ -931,7 +969,7 @@ bool RulerServer::check_usability_or_condition_apply(
     }
     criterion_code = ce1->def.effects[def_effect_index].apply_criterion;
   }
-  log.debug("criterion_code=%s", name_for_criterion_code(criterion_code));
+  log.debug("criterion_code=%s", phosg::name_for_enum(criterion_code));
 
   // For item usability checks, prevent criteria that depend on player
   // positioning/team setup
@@ -952,8 +990,8 @@ bool RulerServer::check_usability_or_condition_apply(
   // creature card is usable, the two client IDs should be the same or the
   // second should not be given, so we'd return true if the criterion passes. If
   // neither of these cases apply, we should return false as a failsafe even if
-  // the criterion passes.
-  bool ret = (!(def_effect_index & 0x80) || (client_id1 == client_id2)) || (client_id2 == 0xFF);
+  // the criterion passes. NTE did not have such a check.
+  bool ret = is_nte || (!(def_effect_index & 0x80) || (client_id1 == client_id2)) || (client_id2 == 0xFF);
   switch (criterion_code) {
     case CriterionCode::NONE:
       return ret;
@@ -1361,6 +1399,7 @@ uint16_t RulerServer::compute_attack_or_defense_costs(
     cost_bias++;
   }
 
+  bool is_nte = this->server()->options.is_nte();
   if (pa.action_card_refs[0] == 0xFFFF) {
     total_cost = cost_bias + 1;
   } else {
@@ -1369,26 +1408,29 @@ uint16_t RulerServer::compute_attack_or_defense_costs(
       tech_cost_bias = -1;
     }
 
+    auto s = this->server();
     for (size_t z = 0; pa.action_card_refs[z] != 0xFFFF; z++) {
       auto ce = this->definition_for_card_ref(pa.action_card_refs[z]);
       if (has_mighty_knuckle || !ce || (ce->def.type != CardType::ACTION)) {
         return 99;
       }
       total_cost += (ce->def.self_cost + cost_bias);
-      if (card_class_is_tech_like(ce->def.card_class())) {
+      if (card_class_is_tech_like(ce->def.card_class(), is_nte)) {
         total_cost += tech_cost_bias;
       }
       total_ally_cost += ce->def.ally_cost;
       if (this->card_has_mighty_knuckle(pa.action_card_refs[z])) {
         has_mighty_knuckle = true;
       }
-      size_t num_assists = this->assist_server->compute_num_assist_effects_for_client(pa.client_id);
-      for (size_t w = 0; w < num_assists; w++) {
-        auto assist_effect = this->assist_server->get_active_assist_by_index(w);
-        if (assist_effect == AssistEffect::INFLATION) {
-          assist_cost_bias++;
-        } else if (assist_effect == AssistEffect::DEFLATION) {
-          assist_cost_bias--;
+      if (!is_nte) {
+        size_t num_assists = this->assist_server->compute_num_assist_effects_for_client(pa.client_id);
+        for (size_t w = 0; w < num_assists; w++) {
+          auto assist_effect = this->assist_server->get_active_assist_by_index(w);
+          if (assist_effect == AssistEffect::INFLATION) {
+            assist_cost_bias++;
+          } else if (assist_effect == AssistEffect::DEFLATION) {
+            assist_cost_bias--;
+          }
         }
       }
     }
@@ -1397,8 +1439,11 @@ uint16_t RulerServer::compute_attack_or_defense_costs(
   size_t num_assists = this->assist_server->compute_num_assist_effects_for_client(pa.client_id);
   for (size_t w = 0; w < num_assists; w++) {
     auto assist_effect = this->assist_server->get_active_assist_by_index(w);
-    if ((assist_effect == AssistEffect::BATTLE_ROYALE) &&
-        (pa.action_card_refs[0] == 0xFFFF)) {
+    if (is_nte && (assist_effect == AssistEffect::INFLATION)) {
+      assist_cost_bias++;
+    } else if (is_nte && (assist_effect == AssistEffect::DEFLATION)) {
+      assist_cost_bias--;
+    } else if ((assist_effect == AssistEffect::BATTLE_ROYALE) && (pa.action_card_refs[0] == 0xFFFF)) {
       total_cost = 0;
       final_cost = 0;
     }
@@ -1406,7 +1451,9 @@ uint16_t RulerServer::compute_attack_or_defense_costs(
 
   if (has_mighty_knuckle) {
     if (!allow_mighty_knuckle) {
-      final_cost = 0;
+      if (!is_nte) {
+        final_cost = 0;
+      }
     } else {
       final_cost = max<int16_t>(final_cost, this->hand_and_equip_states[pa.client_id]->atk_points);
     }
@@ -1423,35 +1470,53 @@ bool RulerServer::compute_effective_range_and_target_mode_for_attack(
     uint16_t* out_effective_card_id,
     TargetMode* out_effective_target_mode,
     uint16_t* out_orig_card_ref) const {
+  auto s = this->server();
+  bool is_nte = s->options.is_nte();
+  auto log = s->log_stack("compute_effective_range_and_target_mode_for_attack: ");
+
   size_t z;
-  for (z = 0; (z < 9) && (pa.action_card_refs[z] != 0xFFFF); z++) {
+  for (z = 0; (z < 8) && (pa.action_card_refs[z] != 0xFFFF); z++) {
   }
-  if (z >= 9) {
+  if (z >= 8) {
+    log.debug("too many action card refs");
     return false;
   }
+  log.debug("%zu action card refs", z);
   uint16_t card_ref = (z == 0) ? pa.attacker_card_ref : pa.action_card_refs[z - 1];
+  log.debug("base card ref = @%04hX", card_ref);
 
   uint16_t card_id = this->card_id_for_card_ref(card_ref);
   if (card_id == 0xFFFF) {
+    log.debug("card ref is broken");
     return false;
   }
 
   auto ce = this->definition_for_card_id(card_id);
   uint8_t client_id = client_id_for_card_ref(pa.attacker_card_ref);
   if ((client_id == 0xFF) || !ce) {
+    log.debug("card ref is broken or definition is missing");
     return false;
   }
 
   if (out_orig_card_ref) {
+    log.debug("orig_card_ref = @%04hX", card_ref);
     *out_orig_card_ref = card_ref;
   }
 
   auto target_mode = ce->def.target_mode;
   if (this->card_ref_or_sc_has_fixed_range(pa.attacker_card_ref)) {
+    const char* target_mode_name = name_for_target_mode(target_mode);
+    log.debug("attacker card ref @%04hX has fixed range; target mode is %s (%hhu)",
+        pa.attacker_card_ref.load(), target_mode_name, static_cast<uint8_t>(target_mode));
     card_id = this->card_id_for_card_ref(pa.attacker_card_ref);
-    auto sc_ce = this->definition_for_card_id(card_id);
-    if (sc_ce && (static_cast<uint8_t>(target_mode) < 6)) {
-      target_mode = sc_ce->def.target_mode;
+    if (!is_nte) {
+      auto sc_ce = this->definition_for_card_id(card_id);
+      if (sc_ce && (static_cast<uint8_t>(target_mode) < 6)) {
+        target_mode = sc_ce->def.target_mode;
+        const char* target_mode_name = name_for_target_mode(target_mode);
+        log.debug("sc_ce overrides target mode with %s (%hhu)",
+            target_mode_name, static_cast<uint8_t>(target_mode));
+      }
     }
   }
 
@@ -1460,8 +1525,10 @@ bool RulerServer::compute_effective_range_and_target_mode_for_attack(
     auto assist_effect = this->assist_server->get_active_assist_by_index(z);
     if (assist_effect == AssistEffect::SIMPLE) {
       card_id = this->card_id_for_card_ref(pa.attacker_card_ref);
+      log.debug("SIMPLE assist overrides card id with #%04hX", card_id);
     } else if (assist_effect == AssistEffect::HEAVY_FOG) {
       card_id = 0xFFFE;
+      log.debug("HEAVY_FOG assist overrides card id with #%04hX", card_id);
     }
   }
 
@@ -1474,8 +1541,7 @@ bool RulerServer::compute_effective_range_and_target_mode_for_attack(
   return true;
 }
 
-size_t RulerServer::count_rampage_targets_for_attack(
-    const ActionState& pa, uint8_t client_id) const {
+size_t RulerServer::count_rampage_targets_for_attack(const ActionState& pa, uint8_t client_id) const {
   if (client_id == 0xFF) {
     return 0;
   }
@@ -1583,8 +1649,7 @@ bool RulerServer::defense_card_can_apply_to_attack(
   return true;
 }
 
-bool RulerServer::defense_card_matches_any_attack_card_top_color(
-    const ActionState& pa) const {
+bool RulerServer::defense_card_matches_any_attack_card_top_color(const ActionState& pa) const {
   auto ce = this->definition_for_card_ref(pa.action_card_refs[0]);
   if (!ce) {
     throw runtime_error("defense card definition is missing");
@@ -1632,7 +1697,8 @@ int32_t RulerServer::error_code_for_client_setting_card(
     return -0x76;
   }
 
-  if (!this->is_card_ref_in_hand(card_ref)) {
+  bool is_nte = this->server()->options.is_nte();
+  if (!is_nte && !this->is_card_ref_in_hand(card_ref)) {
     return -0x5E;
   }
 
@@ -1672,8 +1738,8 @@ int32_t RulerServer::error_code_for_client_setting_card(
     }
 
     // Check for assists that can only be set on yourself
-    auto eff = assist_effect_number_for_card_id(ce->def.card_id);
-    if (((eff == AssistEffect::LEGACY) || (eff == AssistEffect::EXCHANGE)) &&
+    auto eff = assist_effect_number_for_card_id(ce->def.card_id, is_nte);
+    if (((eff == AssistEffect::LEGACY) || (!is_nte && (eff == AssistEffect::EXCHANGE))) &&
         (assist_target_client_id != 0xFF) &&
         (assist_target_client_id != client_id_for_card_ref(card_ref))) {
       return -0x75;
@@ -1712,8 +1778,8 @@ int32_t RulerServer::error_code_for_client_setting_card(
 
   if ((ce->def.type == CardType::ITEM) || (ce->def.type == CardType::CREATURE)) {
     int16_t existing_fcs_cost = 0;
-    bool limit_summoning_by_count = this->find_condition_on_card_ref(
-        short_statuses->at(0).card_ref, ConditionType::FC_LIMIT_BY_COUNT);
+    bool limit_summoning_by_count = !is_nte &&
+        this->find_condition_on_card_ref(short_statuses->at(0).card_ref, ConditionType::FC_LIMIT_BY_COUNT);
     for (size_t z = 7; z < 15; z++) {
       const auto& this_status = short_statuses->at(z);
       if ((this_status.card_ref != 0xFFFF) && this->card_exists_by_status(this_status)) {
@@ -1752,71 +1818,91 @@ int32_t RulerServer::error_code_for_client_setting_card(
       return 0;
     }
 
-    Location summon_area_loc;
-    uint8_t summon_area_size;
-    if (!this->get_creature_summon_area(
-            client_id, &summon_area_loc, &summon_area_size)) {
-      if (team_id != 1) {
-        if ((loc->x > 0) && (loc->x < this->map_and_rules->map.width - 1)) {
-          if ((loc->y < this->map_and_rules->map.height - summon_cost - 1) &&
-              (loc->y > 0)) {
-            return 0;
+    if (is_nte) {
+      // It seems NTE assumes that teams always start on the same ends of the
+      // map; non-NTE removes this restriction.
+      if (team_id == 1) {
+        if (((loc->x < 1) ||
+                (loc->x >= this->map_and_rules->map.width - 1) ||
+                (loc->y < summon_cost + 1) ||
+                (loc->y >= this->map_and_rules->map.height - 1)) &&
+            (loc->y != this->map_and_rules->map.height - 2)) {
+          return -0x7E;
+        }
+      } else if (((loc->x < 1) ||
+                     (loc->x >= this->map_and_rules->map.width - 1) ||
+                     (loc->y < 1) ||
+                     (loc->y >= this->map_and_rules->map.height - summon_cost - 1)) &&
+          (loc->y != 1)) {
+        return -0x7E;
+      }
+
+    } else {
+      Location summon_area_loc;
+      uint8_t summon_area_size;
+      if (!this->get_creature_summon_area(client_id, &summon_area_loc, &summon_area_size)) {
+        if (team_id != 1) {
+          if ((loc->x > 0) && (loc->x < this->map_and_rules->map.width - 1)) {
+            if ((loc->y < this->map_and_rules->map.height - summon_cost - 1) &&
+                (loc->y > 0)) {
+              return 0;
+            }
+            if (loc->y == 1) {
+              return 0;
+            }
           }
-          if (loc->y == 1) {
-            return 0;
+        } else {
+          if ((loc->x > 0) &&
+              (loc->x < this->map_and_rules->map.width - 1)) {
+            if ((summon_cost + 1 <= loc->y) && (loc->y < this->map_and_rules->map.height - 1)) {
+              return 0;
+            }
+            if (loc->y == this->map_and_rules->map.height - 2) {
+              return 0;
+            }
           }
+        }
+        return -0x7E;
+      }
+
+      int32_t x_offset = 0, y_offset = 0;
+      this->offsets_for_direction(summon_area_loc, &x_offset, &y_offset);
+      if (x_offset == 0) {
+        if ((loc->x < 1) && (loc->x >= this->map_and_rules->map.width - 1)) {
+          return -0x7E;
         }
       } else {
-        if ((loc->x > 0) &&
-            (loc->x < this->map_and_rules->map.width - 1)) {
-          if ((summon_cost + 1 <= loc->y) && (loc->y < this->map_and_rules->map.height - 1)) {
-            return 0;
+        int16_t diff = max<int16_t>(summon_area_size - summon_cost, 0);
+        if (x_offset > 0) {
+          if (loc->x < summon_area_loc.x) {
+            return -0x7E;
           }
-          if (loc->y == this->map_and_rules->map.height - 2) {
-            return 0;
+          if (loc->x > summon_area_loc.x + diff) {
+            return -0x7E;
+          }
+        } else if (x_offset < 0) {
+          if ((loc->x > summon_area_loc.x) || (loc->x < summon_area_loc.x - diff)) {
+            return -0x7E;
           }
         }
       }
-      return -0x7E;
-    }
-
-    int32_t x_offset, y_offset;
-    this->offsets_for_direction(summon_area_loc, &x_offset, &y_offset);
-    if (x_offset == 0) {
-      if ((loc->x < 1) && (loc->x >= this->map_and_rules->map.width - 1)) {
-        return -0x7E;
-      }
-    } else {
-      int16_t diff = max<int16_t>(summon_area_size - summon_cost, 0);
-      if (x_offset > 0) {
-        if (loc->x < summon_area_loc.x) {
+      if (y_offset == 0) {
+        if ((loc->y < 1) && (loc->y >= this->map_and_rules->map.height - 1)) {
           return -0x7E;
         }
-        if (loc->x > summon_area_loc.x + diff) {
-          return -0x7E;
-        }
-      } else if (x_offset < 0) {
-        if ((loc->x > summon_area_loc.x) || (loc->x < summon_area_loc.x - diff)) {
-          return -0x7E;
-        }
-      }
-    }
-    if (y_offset == 0) {
-      if ((loc->y < 1) && (loc->y >= this->map_and_rules->map.height - 1)) {
-        return -0x7E;
-      }
-    } else {
-      int16_t diff = max<int16_t>(summon_area_size - summon_cost, 0);
-      if (y_offset > 0) {
-        if (loc->y < summon_area_loc.y) {
-          return -0x7E;
-        }
-        if (loc->y > summon_area_loc.y + diff) {
-          return -0x7E;
-        }
-      } else if (y_offset < 0) {
-        if ((loc->y > summon_area_loc.y) || (loc->y < summon_area_loc.y - diff)) {
-          return -0x7E;
+      } else {
+        int16_t diff = max<int16_t>(summon_area_size - summon_cost, 0);
+        if (y_offset > 0) {
+          if (loc->y < summon_area_loc.y) {
+            return -0x7E;
+          }
+          if (loc->y > summon_area_loc.y + diff) {
+            return -0x7E;
+          }
+        } else if (y_offset < 0) {
+          if ((loc->y > summon_area_loc.y) || (loc->y < summon_area_loc.y - diff)) {
+            return -0x7E;
+          }
         }
       }
     }
@@ -1973,21 +2059,28 @@ shared_ptr<const CardIndex::CardEntry> RulerServer::definition_for_card_id(uint3
 
 uint32_t RulerServer::get_card_id_with_effective_range(
     uint16_t card_ref, uint16_t card_id_override, TargetMode* out_target_mode) const {
+  auto log = this->server()->log_stack(phosg::string_printf("get_card_id_with_effective_range(@%04hX, #%04hX): ", card_ref, card_id_override));
+
   uint16_t card_id = (card_id_override == 0xFFFF)
       ? this->card_id_for_card_ref(card_ref)
       : card_id_override;
+  log.debug("card_id=#%04hX", card_id);
 
   if (card_id != 0xFFFF) {
     auto ce = this->definition_for_card_id(card_id);
     uint8_t client_id = client_id_for_card_ref(card_ref);
     if ((client_id != 0xFF) && ce) {
       TargetMode effective_target_mode = ce->def.target_mode;
+      log.debug("ce valid for #%04hX with effective target mode %s", card_id, name_for_target_mode(effective_target_mode));
 
       if (this->card_ref_or_sc_has_fixed_range(card_ref)) {
         // Undo the override that may have been passed in
-        auto ce = this->definition_for_card_id(this->card_id_for_card_ref(card_ref));
-        if (ce && (static_cast<uint8_t>(effective_target_mode) < 6)) {
-          effective_target_mode = ce->def.target_mode;
+        log.debug("@%04hX has FIXED_RANGE", card_ref);
+        card_id = this->card_id_for_card_ref(card_ref);
+        auto orig_ce = this->definition_for_card_id(card_id);
+        if (orig_ce && (static_cast<uint8_t>(effective_target_mode) < 6)) {
+          log.debug("ce valid for #%04hX with effective target mode %s; overriding to %s", card_id, name_for_target_mode(effective_target_mode), name_for_target_mode(orig_ce->def.target_mode));
+          effective_target_mode = orig_ce->def.target_mode;
         }
       }
 
@@ -1996,14 +2089,17 @@ uint32_t RulerServer::get_card_id_with_effective_range(
         auto eff = this->assist_server->get_active_assist_by_index(z);
         if (eff == AssistEffect::SIMPLE) {
           card_id = this->card_id_for_card_ref(card_ref);
+          log.debug("SIMPLE assist effect is active; using #%04hX for range", card_id);
         } else if (eff == AssistEffect::HEAVY_FOG) {
           card_id = 0xFFFE;
+          log.debug("HEAVY_FOG assist effect is active; limiting range to one tile in front");
         }
       }
 
       if (out_target_mode) {
         *out_target_mode = effective_target_mode;
       }
+      log.debug("results: card_id=#%04hX, target_mode=%s", card_id, name_for_target_mode(effective_target_mode));
     }
   }
 
@@ -2020,7 +2116,7 @@ uint8_t RulerServer::get_card_ref_max_hp(uint16_t card_ref) const {
     return 0;
   } else if (((ce->def.type == CardType::HUNTERS_SC) || (ce->def.type == CardType::ARKZ_SC)) &&
       (this->map_and_rules->rules.char_hp > 0) &&
-      !this->card_ref_is_boss_sc(card_ref)) {
+      (this->server()->options.is_nte() || !this->card_ref_is_boss_sc(card_ref))) {
     return this->map_and_rules->rules.char_hp;
   } else {
     return ce->def.hp.stat;
@@ -2169,7 +2265,7 @@ bool RulerServer::is_attack_valid(const ActionState& pa) {
     return false;
   }
 
-  if (attacker_card_status->card_flags & 2) {
+  if (!this->server()->options.is_nte() && (attacker_card_status->card_flags & 2)) {
     this->error_code3 = -0x60;
     return false;
   }
@@ -2206,7 +2302,7 @@ bool RulerServer::is_attack_valid(const ActionState& pa) {
 
   size_t conditional_card_count = 0;
   size_t z;
-  for (z = 0; z < 9; z++) {
+  for (z = 0; z < 8; z++) {
     uint16_t right_card_ref = pa.action_card_refs[z];
     if (right_card_ref == 0xFFFF) {
       break;
@@ -2285,7 +2381,9 @@ bool RulerServer::is_attack_or_defense_valid(const ActionState& pa) {
     return false;
   }
 
-  int16_t cost = this->compute_attack_or_defense_costs(pa, false, nullptr);
+  // NTE apparently does not check the action's cost here
+  bool is_nte = this->server()->options.is_nte();
+  int16_t cost = is_nte ? 0 : this->compute_attack_or_defense_costs(pa, false, nullptr);
 
   switch (this->get_pending_action_type(pa)) {
     case ActionType::ATTACK:
@@ -2381,8 +2479,9 @@ bool RulerServer::is_defense_valid(const ActionState& pa) {
     }
   }
 
-  if (this->find_condition_on_card_ref(pa.target_card_refs[0], ConditionType::HOLD) ||
-      this->find_condition_on_card_ref(pa.target_card_refs[0], ConditionType::CANNOT_DEFEND)) {
+  if (!this->server()->options.is_nte() &&
+      (this->find_condition_on_card_ref(pa.target_card_refs[0], ConditionType::HOLD) ||
+          this->find_condition_on_card_ref(pa.target_card_refs[0], ConditionType::CANNOT_DEFEND))) {
     this->error_code3 = -0x63;
     return false;
   }
@@ -2411,30 +2510,53 @@ size_t RulerServer::max_move_distance_for_card_ref(uint32_t card_ref) const {
     return 0;
   }
 
-  ssize_t ret = ce->def.mv.stat;
-
-  Condition cond;
-  if (this->find_condition_on_card_ref(card_ref, ConditionType::MV_BONUS, &cond, nullptr, true)) {
-    ret += cond.value;
-  }
-  if (this->find_condition_on_card_ref(card_ref, ConditionType::SET_MV, &cond, nullptr, true)) {
-    ret = cond.value;
-  }
-  ret = max<ssize_t>(0, ret);
-
-  size_t num_assists = this->assist_server->compute_num_assist_effects_for_client(client_id);
-  bool has_stamina_effect = false;
-  for (size_t z = 0; z < num_assists; z++) {
-    auto eff = this->assist_server->get_active_assist_by_index(z);
-    if (eff == AssistEffect::SNAIL_PACE) {
-      return 1;
+  if (this->server()->options.is_nte()) {
+    if (ce->def.type == CardType::ITEM) {
+      return ce->def.mv.stat;
     }
-    if (eff == AssistEffect::STAMINA) {
-      has_stamina_effect = true;
-    }
-  }
 
-  return (has_stamina_effect) ? 9 : min<ssize_t>(9, ret);
+    Condition cond;
+    if (this->find_condition_on_card_ref(card_ref, ConditionType::SET_MV, &cond)) {
+      return cond.value;
+    }
+
+    size_t num_assists = this->assist_server->compute_num_assist_effects_for_client(client_id);
+    bool has_stamina_effect = false;
+    for (size_t z = 0; z < num_assists; z = z + 1) {
+      auto assist = this->assist_server->get_active_assist_by_index(z);
+      if (assist == AssistEffect::SNAIL_PACE) {
+        return 1;
+      } else if (assist == AssistEffect::STAMINA) {
+        has_stamina_effect = true;
+      }
+    }
+    return has_stamina_effect ? 99 : ce->def.mv.stat;
+
+  } else {
+    ssize_t ret = ce->def.mv.stat;
+    Condition cond;
+    if (this->find_condition_on_card_ref(card_ref, ConditionType::MV_BONUS, &cond, nullptr, true)) {
+      ret += cond.value;
+    }
+    if (this->find_condition_on_card_ref(card_ref, ConditionType::SET_MV, &cond, nullptr, true)) {
+      ret = cond.value;
+    }
+    ret = max<ssize_t>(0, ret);
+
+    size_t num_assists = this->assist_server->compute_num_assist_effects_for_client(client_id);
+    bool has_stamina_effect = false;
+    for (size_t z = 0; z < num_assists; z++) {
+      auto eff = this->assist_server->get_active_assist_by_index(z);
+      if (eff == AssistEffect::SNAIL_PACE) {
+        return 1;
+      }
+      if (eff == AssistEffect::STAMINA) {
+        has_stamina_effect = true;
+      }
+    }
+
+    return has_stamina_effect ? 9 : min<ssize_t>(9, ret);
+  }
 }
 
 RulerServer::MovePath::MovePath()
@@ -2518,13 +2640,14 @@ void RulerServer::replace_D1_D2_rank_cards_with_Attack(
 }
 
 AttackMedium RulerServer::get_attack_medium(const ActionState& pa) const {
+  bool is_nte = this->server()->options.is_nte();
   for (size_t z = 0; z < 8; z++) {
     uint16_t card_ref = pa.action_card_refs[z];
     if (card_ref == 0xFFFF) {
       return AttackMedium::PHYSICAL;
     }
     auto ce = this->definition_for_card_ref(card_ref);
-    if (ce && card_class_is_tech_like(ce->def.card_class())) {
+    if (ce && card_class_is_tech_like(ce->def.card_class(), is_nte)) {
       return AttackMedium::TECH;
     }
   }
@@ -2545,9 +2668,11 @@ int32_t RulerServer::set_cost_for_card(uint8_t client_id, uint16_t card_ref) con
     return -0x7D;
   }
 
+  bool is_nte = this->server()->options.is_nte();
   auto short_statuses = this->short_statuses[client_id];
   int32_t ret = ce->def.self_cost;
-  if (short_statuses &&
+  if (!is_nte &&
+      short_statuses &&
       this->card_exists_by_status(short_statuses->at(0)) &&
       this->find_condition_on_card_ref(short_statuses->at(0).card_ref, ConditionType::UNKNOWN_69)) {
     ret = 0;
@@ -2580,9 +2705,8 @@ int32_t RulerServer::set_cost_for_card(uint8_t client_id, uint16_t card_ref) con
   for (size_t z = 0; z < num_assists; z++) {
     auto eff = this->assist_server->get_active_assist_by_index(z);
     if (eff == AssistEffect::LAND_PRICE) {
-      // Note: Original code had an extra addend (ret < 0 && (ret & 1) != 0),
-      // but ret cannot be negatve here, so we omit it.
-      ret += ret >> 1;
+      // In NTE, Land Price is apparently 2x rather than 1.5x
+      ret = is_nte ? (ret << 1) : (ret + (ret >> 1));
     } else if (eff == AssistEffect::DEFLATION) {
       ret = max<int32_t>(0, ret - 1);
     } else if (eff == AssistEffect::INFLATION) {
@@ -2665,6 +2789,26 @@ int32_t RulerServer::verify_deck(
   }
 
   return 0;
+}
+
+size_t RulerServer::count_targets_with_rampage_and_not_pierce_nte(const ActionState& as) const {
+  size_t ret = 0;
+  for (size_t z = 0; (z < as.target_card_refs.size()) && (as.target_card_refs[z] != 0xFFFF); z++) {
+    if (this->attack_action_has_rampage_and_not_pierce(as, as.target_card_refs[z])) {
+      ret++;
+    }
+  }
+  return ret;
+}
+
+size_t RulerServer::count_targets_with_pierce_and_not_rampage_nte(const ActionState& as) const {
+  size_t ret = 0;
+  for (size_t z = 0; (z < as.target_card_refs.size()) && (as.target_card_refs[z] != 0xFFFF); z++) {
+    if (this->attack_action_has_pierce_and_not_rampage(as, client_id_for_card_ref(as.target_card_refs[z]))) {
+      ret++;
+    }
+  }
+  return ret;
 }
 
 } // namespace Episode3

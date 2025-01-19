@@ -21,6 +21,8 @@ extern const std::unordered_set<uint32_t> v2_crypt_initial_client_commands;
 extern const std::unordered_set<uint32_t> v3_crypt_initial_client_commands;
 extern const std::unordered_set<std::string> bb_crypt_initial_client_commands;
 
+constexpr size_t V3_V4_QUEST_LOAD_MAX_CHUNKS_IN_FLIGHT = 4;
+
 // TODO: Many of these functions should take a Channel& instead of a
 // shared_ptr<Client>. Refactor functions appropriately.
 
@@ -31,6 +33,21 @@ extern const std::unordered_set<std::string> bb_crypt_initial_client_commands;
 //   independently optional - this can lead to bugs where a non-null data
 //   pointer is given but size is accidentally not given (e.g. if the type of
 //   data in the calling function is changed from string to void*).
+
+template <typename CmdT>
+void send_or_enqueue_command(std::shared_ptr<Client> c, uint16_t command, uint32_t flag, const CmdT& cmd) {
+  if (c->game_join_command_queue) {
+    c->log.info("Client not ready to receive game commands; adding to queue");
+    auto& q_cmd = c->game_join_command_queue->emplace_back();
+    q_cmd.command = command;
+    q_cmd.flag = flag;
+    // TODO: It'd be nice to avoid this copy. Maybe take in a pointer to cmd
+    // and move it into q_cmd somehow, so q_cmd can free it when needed?
+    q_cmd.data.assign(reinterpret_cast<const char*>(&cmd), sizeof(cmd));
+  } else {
+    send_command(c, command, flag, &cmd, sizeof(cmd));
+  }
+}
 
 void send_command(std::shared_ptr<Client> c, uint16_t command,
     uint32_t flag, const std::vector<std::pair<const void*, size_t>>& blocks);
@@ -119,10 +136,10 @@ enum SendServerInitFlag {
   USE_SECONDARY_MESSAGE = 0x02,
 };
 
-S_ServerInitWithAfterMessage_DC_PC_V3_02_17_91_9B<0xB4>
+S_ServerInitWithAfterMessageT_DC_PC_V3_02_17_91_9B<0xB4>
 prepare_server_init_contents_console(
     uint32_t server_key, uint32_t client_key, uint8_t flags);
-S_ServerInitWithAfterMessage_BB_03_9B<0xB4>
+S_ServerInitWithAfterMessageT_BB_03_9B<0xB4>
 prepare_server_init_contents_bb(
     const parray<uint8_t, 0x30>& server_key,
     const parray<uint8_t, 0x30>& client_key,
@@ -134,23 +151,35 @@ void empty_function_call_response_handler(uint32_t, uint32_t);
 
 void send_quest_buffer_overflow(std::shared_ptr<Client> c);
 void prepare_client_for_patches(std::shared_ptr<Client> c, std::function<void()> on_complete);
+std::string prepare_send_function_call_data(
+    std::shared_ptr<const CompiledFunctionCode> code,
+    const std::unordered_map<std::string, uint32_t>& label_writes,
+    const void* suffix_data,
+    size_t suffix_size,
+    uint32_t checksum_addr,
+    uint32_t checksum_size,
+    uint32_t override_relocations_offset,
+    bool use_encrypted_format);
 void send_function_call(
     Channel& ch,
     const Client::Config& client_config,
-    std::shared_ptr<CompiledFunctionCode> code,
+    std::shared_ptr<const CompiledFunctionCode> code,
     const std::unordered_map<std::string, uint32_t>& label_writes = {},
-    const std::string& suffix = "",
+    const void* suffix_data = nullptr,
+    size_t suffix_size = 0,
     uint32_t checksum_addr = 0,
     uint32_t checksum_size = 0,
     uint32_t override_relocations_offset = 0);
 void send_function_call(
     std::shared_ptr<Client> c,
-    std::shared_ptr<CompiledFunctionCode> code,
+    std::shared_ptr<const CompiledFunctionCode> code,
     const std::unordered_map<std::string, uint32_t>& label_writes = {},
-    const std::string& suffix = "",
+    const void* suffix_data = nullptr,
+    size_t suffix_size = 0,
     uint32_t checksum_addr = 0,
     uint32_t checksum_size = 0,
     uint32_t override_relocations_offset = 0);
+bool send_protected_command(std::shared_ptr<Client> c, const void* data, size_t size, bool echo_to_lobby);
 
 void send_reconnect(std::shared_ptr<Client> c, uint32_t address, uint16_t port);
 void send_pc_console_split_reconnect(
@@ -170,14 +199,10 @@ void send_stream_file_chunk_bb(std::shared_ptr<Client> c, uint32_t chunk_index);
 void send_approve_player_choice_bb(std::shared_ptr<Client> c);
 void send_complete_player_bb(std::shared_ptr<Client> c);
 
-void send_enter_directory_patch(std::shared_ptr<Client> c, const std::string& dir);
-void send_patch_file(std::shared_ptr<Client> c, std::shared_ptr<PatchFileIndex::File> f);
-
 void send_message_box(std::shared_ptr<Client> c, const std::string& text);
 void send_ep3_timed_message_box(Channel& ch, uint32_t frames, const std::string& text);
 void send_lobby_name(std::shared_ptr<Client> c, const std::string& text);
-void send_quest_info(std::shared_ptr<Client> c, const std::string& text,
-    bool is_download_quest);
+void send_quest_info(std::shared_ptr<Client> c, const std::string& text, uint8_t flag, bool is_download_quest);
 void send_lobby_message_box(std::shared_ptr<Client> c, const std::string& text, bool left_side_on_bb = false);
 void send_ship_info(std::shared_ptr<Client> c, const std::string& text);
 void send_ship_info(Channel& ch, const std::string& text);
@@ -185,6 +210,11 @@ void send_text_message(Channel& ch, const std::string& text);
 void send_text_message(std::shared_ptr<Client> c, const std::string& text);
 void send_text_message(std::shared_ptr<Lobby> l, const std::string& text);
 void send_text_message(std::shared_ptr<ServerState> s, const std::string& text);
+void send_scrolling_message_bb(std::shared_ptr<Client> c, const std::string& text);
+void send_text_or_scrolling_message(std::shared_ptr<Client> c, const std::string& text, const std::string& scrolling);
+void send_text_or_scrolling_message(
+    std::shared_ptr<Lobby> l, std::shared_ptr<Client> exclude_c, const std::string& text, const std::string& scrolling);
+void send_text_or_scrolling_message(std::shared_ptr<ServerState> s, const std::string& text, const std::string& scrolling);
 
 std::string prepare_chat_data(
     Version version,
@@ -213,7 +243,12 @@ void send_chat_message(
     char private_flags);
 void send_simple_mail(
     std::shared_ptr<Client> c,
-    uint32_t from_serial_number,
+    uint32_t from_guild_card_number,
+    const std::string& from_name,
+    const std::string& text);
+void send_simple_mail(
+    std::shared_ptr<ServerState> s,
+    uint32_t from_guild_card_number,
     const std::string& from_name,
     const std::string& text);
 
@@ -222,7 +257,7 @@ __attribute__((format(printf, 2, 3))) void send_text_message_printf(
     TargetT& t, const char* format, ...) {
   va_list va;
   va_start(va, format);
-  std::string buf = string_vprintf(format, va);
+  std::string buf = phosg::string_vprintf(format, va);
   va_end(va);
   return send_text_message(t, buf.c_str());
 }
@@ -268,15 +303,17 @@ void send_lobby_list(std::shared_ptr<Client> c);
 
 void send_player_records(std::shared_ptr<Client> c, std::shared_ptr<Lobby> l, std::shared_ptr<Client> joining_client = nullptr);
 void send_join_lobby(std::shared_ptr<Client> c, std::shared_ptr<Lobby> l);
+void send_update_lobby_data_bb(std::shared_ptr<Client> c);
 void send_player_join_notification(std::shared_ptr<Client> c, std::shared_ptr<Lobby> l, std::shared_ptr<Client> joining_client);
 void send_player_leave_notification(std::shared_ptr<Lobby> l, uint8_t leaving_client_id);
 void send_self_leave_notification(std::shared_ptr<Client> c);
-void send_get_player_info(std::shared_ptr<Client> c);
+void send_get_player_info(std::shared_ptr<Client> c, bool request_extended = false);
 
 void send_execute_item_trade(std::shared_ptr<Client> c, const std::vector<ItemData>& items);
 void send_execute_card_trade(std::shared_ptr<Client> c, const std::vector<std::pair<uint32_t, uint32_t>>& card_to_count);
 
 void send_arrow_update(std::shared_ptr<Lobby> l);
+void send_unblock_join(std::shared_ptr<Client> c);
 void send_resume_game(std::shared_ptr<Lobby> l, std::shared_ptr<Client> ready_client);
 
 enum PlayerStatsChange {
@@ -289,8 +326,8 @@ enum PlayerStatsChange {
 
 void send_player_stats_change(std::shared_ptr<Client> c, PlayerStatsChange stat, uint32_t amount);
 void send_player_stats_change(Channel& ch, uint16_t client_id, PlayerStatsChange stat, uint32_t amount);
-void send_remove_conditions(std::shared_ptr<Client> c);
-void send_remove_conditions(Channel& ch, uint16_t client_id);
+void send_remove_negative_conditions(std::shared_ptr<Client> c);
+void send_remove_negative_conditions(Channel& ch, uint16_t client_id);
 void send_warp(Channel& ch, uint8_t client_id, uint32_t floor, bool is_private);
 void send_warp(std::shared_ptr<Client> c, uint32_t floor, bool is_private);
 void send_warp(std::shared_ptr<Lobby> l, uint32_t floor, bool is_private);
@@ -298,16 +335,30 @@ void send_warp(std::shared_ptr<Lobby> l, uint32_t floor, bool is_private);
 void send_ep3_change_music(Channel& ch, uint32_t song);
 void send_revive_player(std::shared_ptr<Client> c);
 
+void send_game_join_sync_command(
+    std::shared_ptr<Client> c, const void* data, size_t size, uint8_t dc_nte_sc, uint8_t dc_11_2000_sc, uint8_t sc);
+void send_game_join_sync_command(
+    std::shared_ptr<Client> c, const std::string& data, uint8_t dc_nte_sc, uint8_t dc_11_2000_sc, uint8_t sc);
+void send_game_join_sync_command_compressed(
+    std::shared_ptr<Client> c,
+    const void* data,
+    size_t size,
+    size_t decompressed_size,
+    uint8_t dc_nte_sc,
+    uint8_t dc_11_2000_sc,
+    uint8_t sc);
 void send_game_item_state(std::shared_ptr<Client> c);
+void send_game_enemy_state(std::shared_ptr<Client> c);
+void send_game_object_state(std::shared_ptr<Client> c);
+void send_game_set_state(std::shared_ptr<Client> c);
 void send_game_flag_state(std::shared_ptr<Client> c);
+void send_game_player_state(std::shared_ptr<Client> to_c, std::shared_ptr<Client> from_c, bool apply_overrides);
 void send_drop_item_to_channel(std::shared_ptr<ServerState> s, Channel& ch, const ItemData& item,
-    bool from_enemy, uint8_t floor, float x, float z, uint16_t request_id);
-void send_drop_item_to_lobby(std::shared_ptr<Lobby> l, const ItemData& item,
-    bool from_enemy, uint8_t floor, float x, float z, uint16_t request_id);
+    uint8_t source_type, uint8_t floor, const VectorXZF& pos, uint16_t entity_index);
 void send_drop_stacked_item_to_channel(
-    std::shared_ptr<ServerState> s, Channel& ch, const ItemData& item, uint8_t floor, float x, float z);
+    std::shared_ptr<ServerState> s, Channel& ch, const ItemData& item, uint8_t floor, const VectorXZF& pos);
 void send_drop_stacked_item_to_lobby(
-    std::shared_ptr<Lobby> l, const ItemData& item, uint8_t floor, float x, float z);
+    std::shared_ptr<Lobby> l, const ItemData& item, uint8_t floor, const VectorXZF& pos);
 void send_pick_up_item_to_client(std::shared_ptr<Client> c, uint8_t client_id, uint32_t id, uint8_t floor);
 void send_create_inventory_item_to_client(std::shared_ptr<Client> c, uint8_t client_id, const ItemData& item);
 void send_create_inventory_item_to_lobby(std::shared_ptr<Client> c, uint8_t client_id, const ItemData& item, bool exclude_c = false);
@@ -321,8 +372,8 @@ void send_give_experience(std::shared_ptr<Client> c, uint32_t amount);
 void send_set_exp_multiplier(std::shared_ptr<Lobby> l);
 void send_rare_enemy_index_list(std::shared_ptr<Client> c, const std::vector<size_t>& indexes);
 
-void send_quest_function_call(Channel& ch, uint16_t function_id);
-void send_quest_function_call(std::shared_ptr<Client> c, uint16_t function_id);
+void send_quest_function_call(Channel& ch, uint16_t label);
+void send_quest_function_call(std::shared_ptr<Client> c, uint16_t label);
 
 void send_ep3_card_list_update(std::shared_ptr<Client> c);
 void send_ep3_media_update(

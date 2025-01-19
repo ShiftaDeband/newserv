@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include <mutex>
 #include <phosg/Random.hh>
 #include <phosg/Strings.hh>
 #include <phosg/Time.hh>
@@ -24,6 +25,7 @@ static const uint32_t primes1[] = {
     0x313, 0x31D, 0x329, 0x32B, 0x335, 0x337, 0x33B, 0x33D, 0x347, 0x355, 0x359,
     0x35B, 0x35F, 0x36D, 0x371, 0x373, 0x377, 0x38B, 0x38F, 0x397, 0x3A1, 0x3A9,
     0x3AD, 0x3B3, 0x3B9, 0x3C7, 0x3CB, 0x3D1, 0x3D7, 0x3DF, 0x3E5};
+
 static const uint32_t primes2[] = {
     0x3F1, 0x3F5, 0x3FB, 0x3FD, 0x407, 0x409, 0x40F, 0x419, 0x41B, 0x425, 0x427,
     0x42D, 0x43F, 0x443, 0x445, 0x449, 0x44F, 0x455, 0x45D, 0x463, 0x469, 0x47F,
@@ -135,6 +137,8 @@ static const uint32_t primes2[] = {
     0x2627, 0x2629, 0x2635, 0x263B, 0x263F, 0x264B, 0x2653, 0x2659, 0x2665,
     0x2669, 0x266F, 0x267B, 0x2681, 0x2683, 0x268F, 0x269B, 0x269F, 0x26AD,
     0x26B3, 0x26C3, 0x26C9, 0x26CB, 0x26D5, 0x26DD, 0x26EF, 0x26F5};
+static constexpr size_t num_primes2 = sizeof(primes2) / sizeof(primes2[0]);
+
 static const uint32_t primes3[] = {
     0x2717, 0x2719, 0x2735, 0x2737, 0x274D, 0x2753, 0x2755, 0x275F, 0x276B,
     0x276D, 0x2773, 0x2777, 0x277F, 0x2795, 0x279B, 0x279D, 0x27A7, 0x27AF,
@@ -1107,15 +1111,19 @@ static const uint32_t primes3[] = {
     0x18569, 0x1857B, 0x1857D, 0x18581, 0x18587, 0x18589, 0x18595, 0x185B1,
     0x185B7, 0x185CB, 0x185D1, 0x185E1, 0x185E9, 0x185EF, 0x185F5, 0x185F9,
     0x185FF, 0x18613, 0x1861F};
+static constexpr size_t num_primes3 = sizeof(primes3) / sizeof(primes3[0]);
 
 static bool check_prime3(uint64_t prime3) {
   static vector<bool> primes3_set;
+  static mutex primes3_init_mutex;
   if (primes3_set.empty()) {
-    size_t num_primes3 = sizeof(primes3) / sizeof(primes3[0]);
-    size_t primes3_set_size = primes3[num_primes3 - 1] - primes3[0] + 1;
-    primes3_set.resize(primes3_set_size, false);
-    for (size_t z = 0; z < num_primes3; z++) {
-      primes3_set[primes3[z] - primes3[0]] = true;
+    lock_guard g(primes3_init_mutex);
+    if (primes3_set.empty()) {
+      size_t primes3_set_size = primes3[num_primes3 - 1] - primes3[0] + 1;
+      primes3_set.resize(primes3_set_size, false);
+      for (size_t z = 0; z < num_primes3; z++) {
+        primes3_set[primes3[z] - primes3[0]] = true;
+      }
     }
   }
   uint64_t offset = prime3 - primes3[0];
@@ -1174,7 +1182,7 @@ static uint64_t decode_dc_serial_number_str(const string& s) {
     if (new_ch == '\0') {
       return INVALID_PRODUCT;
     }
-    serial_number = (serial_number << 4) | value_for_hex_char(new_ch);
+    serial_number = (serial_number << 4) | phosg::value_for_hex_char(new_ch);
   }
   return serial_number;
 }
@@ -1227,8 +1235,8 @@ bool dc_serial_number_is_valid_slow(const string& s, uint8_t domain, uint8_t sub
   }
 
   for (; offset1 < limit1; offset1++) {
-    for (size_t offset2 = 0; offset2 < sizeof(primes2) / sizeof(primes2[0]); offset2++) {
-      for (size_t offset3 = 0; offset3 < sizeof(primes3) / sizeof(primes3[0]); offset3++) {
+    for (size_t offset2 = 0; offset2 < num_primes2; offset2++) {
+      for (size_t offset3 = 0; offset3 < num_primes3; offset3++) {
         if (primes1[offset1] * primes2[offset2] * primes3[offset3] == serial_number) {
           return true;
         }
@@ -1251,7 +1259,7 @@ bool decoded_dc_serial_number_is_valid_fast(uint32_t serial_number, uint8_t doma
         continue;
       }
       uint64_t sub1 = sub0 / primes1[offset1];
-      for (size_t offset2 = 0; offset2 < sizeof(primes2) / sizeof(primes2[0]); offset2++) {
+      for (size_t offset2 = 0; offset2 < num_primes2; offset2++) {
         if (sub1 % primes2[offset2]) {
           continue;
         }
@@ -1291,12 +1299,12 @@ string generate_dc_serial_number(uint8_t domain, uint8_t subdomain) {
     throw runtime_error("invalid domain");
   }
 
-  size_t det1 = (subdomain == 0xFF) ? random_object<uint32_t>() : subdomain;
+  size_t det1 = (subdomain == 0xFF) ? phosg::random_object<uint32_t>() : subdomain;
   size_t index1 = offset1 + (det1 % (limit1 - offset1));
-  size_t index2 = random_object<uint32_t>() % (sizeof(primes2) / sizeof(primes2[0]));
-  size_t index3 = random_object<uint32_t>() % (sizeof(primes3) / sizeof(primes3[0]));
+  size_t index2 = phosg::random_object<uint32_t>() % num_primes2;
+  size_t index3 = phosg::random_object<uint32_t>() % num_primes3;
   uint32_t value = primes1[index1] * primes2[index2] * primes3[index3];
-  string s = string_printf("%08X", value);
+  string s = phosg::string_printf("%08X", value);
 
   string ret;
   for (char ch : s) {
@@ -1306,56 +1314,81 @@ string generate_dc_serial_number(uint8_t domain, uint8_t subdomain) {
 }
 
 unordered_map<uint32_t, string> generate_all_dc_serial_numbers(uint8_t domain, uint8_t subdomain) {
-  vector<uint8_t> domains;
-  if (domain == 0xFF) {
-    domains.emplace_back(0x00);
-    domains.emplace_back(0x01);
-    domains.emplace_back(0x02);
-  } else {
-    domains.emplace_back(domain);
+  DCSerialNumberIterator iter;
+
+  if (domain < 3) {
+    iter.domain = domain;
+    iter.end_domain = domain + 1;
+  } else if (domain != 0xFF) {
+    throw runtime_error("invalid domain");
   }
 
-  vector<uint8_t> subdomains;
-  if (subdomain == 0xFF) {
-    subdomains.emplace_back(0x00);
-    subdomains.emplace_back(0x01);
-    subdomains.emplace_back(0x02);
-  } else {
-    subdomains.emplace_back(subdomain);
+  if (subdomain < 3) {
+    iter.subdomain = subdomain;
+    iter.start_subdomain = subdomain;
+    iter.end_subdomain = subdomain + 1;
+  } else if (subdomain != 0xFF) {
+    throw runtime_error("invalid subdomain");
   }
 
+  uint32_t serial_number;
   unordered_map<uint32_t, string> ret;
-  for (uint8_t domain : domains) {
-    size_t offset1, limit1;
-    if (domain == 0) {
-      offset1 = 0x00;
-      limit1 = 0x03;
-    } else if (domain == 1) {
-      offset1 = 0x1E;
-      limit1 = 0x21;
-    } else if (domain == 2) {
-      offset1 = 0x3C;
-      limit1 = 0x3F;
-    } else {
-      throw runtime_error("invalid domain");
-    }
-
-    for (uint8_t subdomain : subdomains) {
-      size_t index1 = offset1 + (subdomain % (limit1 - offset1));
-      for (size_t index2 = 0; index2 < sizeof(primes2) / sizeof(primes2[0]); index2++) {
-        for (size_t index3 = 0; index3 < sizeof(primes3) / sizeof(primes3[0]); index3++) {
-          uint32_t value = primes1[index1] * primes2[index2] * primes3[index3];
-          ret[encode_dc_serial_number_int(value)].push_back(((domain << 2) & 3) | (subdomain & 3));
-        }
-        fprintf(stderr, "... domain=%hhu subdomain=%hhu index2=%zu results=%zu (0x%zX)\n", domain, subdomain, index2, ret.size(), ret.size());
-      }
+  while ((serial_number = iter.next()) != 0) {
+    ret[serial_number].push_back(((iter.domain << 2) & 3) | (iter.subdomain & 3));
+    if (iter.index3 == 0) {
+      fprintf(stderr, "... (it) domain=%hhu subdomain=%hhu index2=%hu results=%zu (0x%zX)\n", iter.domain, iter.subdomain, iter.index2, ret.size(), ret.size());
     }
   }
   return ret;
 }
 
+uint32_t DCSerialNumberIterator::next() {
+  if (!this->started) {
+    this->started = true;
+  } else if (!this->complete) {
+    this->index3++;
+    if (this->index3 >= num_primes3) {
+      this->index3 = 0;
+      this->index2++;
+      if (this->index2 >= num_primes2) {
+        this->index2 = 0;
+        this->subdomain++;
+        if (this->subdomain >= this->end_subdomain) {
+          this->subdomain = this->start_subdomain;
+          this->domain++;
+          if (this->domain >= this->end_domain) {
+            this->serial_number = 0;
+            this->complete = true;
+          }
+        }
+      }
+    }
+  }
+  if (!this->complete) {
+    size_t index1 = (30 * this->domain) + (this->subdomain % 3);
+    return encode_dc_serial_number_int(primes1[index1] * primes2[this->index2] * primes3[this->index3]);
+  } else {
+    return 0;
+  }
+}
+
+size_t DCSerialNumberIterator::total_count() const {
+  return (this->end_domain - this->start_domain) * (this->end_subdomain - this->start_subdomain) * num_primes2 * num_primes3;
+}
+
+size_t DCSerialNumberIterator::progress() const {
+  size_t domains_done = this->domain - this->start_domain;
+  size_t subdomains_per_domain = this->end_subdomain - this->start_subdomain;
+  size_t subdomains_done = this->subdomain - this->start_subdomain;
+  return (
+      (domains_done * subdomains_per_domain * num_primes2 * num_primes3) +
+      (subdomains_done * num_primes2 * num_primes3) +
+      (this->index2 * num_primes3) +
+      this->index3);
+}
+
 void dc_serial_number_speed_test(uint64_t seed) {
-  uint32_t effective_seed = (seed & 0xFFFFFFFF00000000) ? random_object<uint32_t>() : seed;
+  uint32_t effective_seed = (seed & 0xFFFFFFFF00000000) ? phosg::random_object<uint32_t>() : seed;
   fprintf(stderr, "Product speed test with seed=%08" PRIX32 "\n", effective_seed);
   PSOV2Encryption crypt(effective_seed);
   uint64_t time_slow = 0;
@@ -1363,15 +1396,15 @@ void dc_serial_number_speed_test(uint64_t seed) {
   size_t num_disagreements = 0;
   static constexpr size_t count = 0x1000;
   for (size_t z = 0; z < count; z++) {
-    string s = string_printf("%08X", crypt.next());
+    string s = phosg::string_printf("%08X", crypt.next());
 
-    uint64_t start = now();
+    uint64_t start = phosg::now();
     bool is_valid_fast = dc_serial_number_is_valid_fast(s, 1, 0xFF);
-    time_fast += now() - start;
+    time_fast += phosg::now() - start;
 
-    start = now();
+    start = phosg::now();
     bool is_valid_slow = dc_serial_number_is_valid_slow(s, 1, 0xFF);
-    time_slow += now() - start;
+    time_slow += phosg::now() - start;
 
     if (((z & 0xF) == 0) || is_valid_slow || is_valid_fast) {
       fprintf(stderr, "... %02zX: %s => %s %s%s\n", z, s.c_str(), is_valid_slow ? "SLOW" : "----", is_valid_fast ? "FAST" : "----", is_valid_slow != is_valid_fast ? " !!!" : "");
@@ -1385,4 +1418,75 @@ void dc_serial_number_speed_test(uint64_t seed) {
   fprintf(stderr, "Total time (fast): %" PRId64 " usecs (%" PRIu64 " per serial number)\n", time_fast, time_fast / count);
   fprintf(stderr, "Fast vs. slow speedup: %zux\n", static_cast<size_t>(time_slow / time_fast));
   fprintf(stderr, "Disagreements: %zu\n", num_disagreements);
+}
+
+string decrypt_dp_address_jpn(
+    const string& executable,
+    const string& values,
+    const string& indexes) {
+  phosg::StringReader values_r(values);
+  phosg::StringReader indexes_r(indexes);
+
+  size_t fixup_values_offset = values_r.pget_u32l(0x3FFC) - 0x8C004000;
+  size_t fixup_steps_offset = indexes_r.pget_u32l(0x3BFC) - 0x8C008400;
+  phosg::StringReader fixup_values_r = values_r.sub(fixup_values_offset);
+  phosg::StringReader fixup_steps_r = indexes_r.sub(fixup_steps_offset);
+
+  auto decrypted = decrypt_pr2_data<false>(executable);
+  size_t fixup_offset = 0;
+  while (fixup_steps_r.get_u8(false)) {
+    fixup_offset += (fixup_steps_r.get_u8() << 2);
+    fixup_steps_r.skip(1);
+    if (fixup_offset + 4 > decrypted.compressed_data.size()) {
+      throw runtime_error("fixup beyond end of compressed data");
+    }
+    *reinterpret_cast<le_uint32_t*>(decrypted.compressed_data.data() + fixup_offset) = fixup_values_r.get_u32l();
+  }
+
+  return prs_decompress(decrypted.compressed_data);
+}
+
+EncryptedDCv2Executables encrypt_dp_address_jpn(const string& executable, const string& indexes) {
+  EncryptedDCv2Executables ret;
+
+  string compressed = prs_compress(executable);
+  ret.executable = encrypt_pr2_data<false>(compressed, executable.size(), phosg::random_object<uint32_t>() & 0x7FFFFF7F);
+
+  phosg::StringReader indexes_r(indexes);
+  size_t fixup_steps_offset = indexes_r.pget_u32l(0x3BFC) - 0x8C008400;
+  ret.indexes = indexes;
+  ret.indexes.at(fixup_steps_offset) = 0;
+  return ret;
+}
+
+std::string crypt_dp_address_jpn_simple(const std::string& data, int64_t mask_key) {
+  if (data.size() & 3) {
+    throw runtime_error("size is not a multiple of 4");
+  }
+
+  phosg::StringReader r(data);
+  if (mask_key < 0) {
+    unordered_map<uint32_t, size_t> key_freq;
+    while (!r.eof()) {
+      key_freq[r.get_u32l()] += 1;
+    }
+    size_t max_v = 0;
+    for (const auto& it : key_freq) {
+      if (it.second > max_v) {
+        max_v = it.second;
+        mask_key = it.first;
+      }
+    }
+    if (mask_key < 0) {
+      throw runtime_error("cannot determine mask key");
+    }
+    phosg::log_info("Determined %08" PRIX64 " to be the most likely mask key", mask_key);
+    r.go(0);
+  }
+
+  phosg::StringWriter w;
+  while (!r.eof()) {
+    w.put_u32l(r.get_u32l() ^ mask_key);
+  }
+  return std::move(w.str());
 }

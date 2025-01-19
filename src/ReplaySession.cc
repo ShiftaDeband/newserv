@@ -6,7 +6,6 @@
 
 #include "Loggers.hh"
 #include "Server.hh"
-#include "Shell.hh"
 
 using namespace std;
 
@@ -20,13 +19,13 @@ ReplaySession::Event::Event(Type type, uint64_t client_id, size_t line_num)
 string ReplaySession::Event::str() const {
   string ret;
   if (this->type == Type::CONNECT) {
-    ret = string_printf("Event[%" PRIu64 ", CONNECT", this->client_id);
+    ret = phosg::string_printf("Event[%" PRIu64 ", CONNECT", this->client_id);
   } else if (this->type == Type::DISCONNECT) {
-    ret = string_printf("Event[%" PRIu64 ", DISCONNECT", this->client_id);
+    ret = phosg::string_printf("Event[%" PRIu64 ", DISCONNECT", this->client_id);
   } else if (this->type == Type::SEND) {
-    ret = string_printf("Event[%" PRIu64 ", SEND %04zX", this->client_id, this->data.size());
+    ret = phosg::string_printf("Event[%" PRIu64 ", SEND %04zX", this->client_id, this->data.size());
   } else if (this->type == Type::RECEIVE) {
-    ret = string_printf("Event[%" PRIu64 ", RECEIVE %04zX", this->client_id, this->data.size());
+    ret = phosg::string_printf("Event[%" PRIu64 ", RECEIVE %04zX", this->client_id, this->data.size());
   }
   if (this->allow_size_disparity) {
     ret += ", size disparity allowed";
@@ -34,7 +33,7 @@ string ReplaySession::Event::str() const {
   if (this->complete) {
     ret += ", done";
   }
-  ret += string_printf(", ev-line %zu]", this->line_num);
+  ret += phosg::string_printf(", ev-line %zu]", this->line_num);
   return ret;
 }
 
@@ -49,11 +48,10 @@ ReplaySession::Client::Client(
           &ReplaySession::dispatch_on_command_received,
           &ReplaySession::dispatch_on_error,
           session,
-          string_printf("R-%" PRIX64, this->id)) {}
+          phosg::string_printf("R-%" PRIX64, this->id)) {}
 
 string ReplaySession::Client::str() const {
-  return string_printf("Client[%" PRIu64 ", T-%hu, %s]",
-      this->id, this->port, name_for_enum(this->version));
+  return phosg::string_printf("Client[%" PRIu64 ", T-%hu, %s]", this->id, this->port, phosg::name_for_enum(this->version));
 }
 
 shared_ptr<ReplaySession::Event> ReplaySession::create_event(
@@ -89,14 +87,14 @@ void ReplaySession::check_for_password(shared_ptr<const Event> ev) const {
 
   auto check_pw = [&](const string& pw) {
     if (this->require_basic_credentials && !string_is_basic(pw)) {
-      print_data(stderr, ev->data, 0, nullptr, PrintDataFlags::PRINT_ASCII | PrintDataFlags::OFFSET_16_BITS);
-      throw runtime_error(string_printf("(ev-line %zu) sent password is incorrect", ev->line_num));
+      phosg::print_data(stderr, ev->data, 0, nullptr, phosg::PrintDataFlags::PRINT_ASCII | phosg::PrintDataFlags::OFFSET_16_BITS);
+      throw runtime_error(phosg::string_printf("(ev-line %zu) sent password is incorrect", ev->line_num));
     }
   };
   auto check_ak = [&](const string& ak) {
     if (this->require_basic_credentials && !ak.empty() && !string_is_basic(ak)) {
-      print_data(stderr, ev->data, 0, nullptr, PrintDataFlags::PRINT_ASCII | PrintDataFlags::OFFSET_16_BITS);
-      throw runtime_error(string_printf("(ev-line %zu) sent access key is incorrect", ev->line_num));
+      phosg::print_data(stderr, ev->data, 0, nullptr, phosg::PrintDataFlags::PRINT_ASCII | phosg::PrintDataFlags::OFFSET_16_BITS);
+      throw runtime_error(phosg::string_printf("(ev-line %zu) sent access key is incorrect", ev->line_num));
     }
   };
   auto check_either = [&](const string& s) {
@@ -147,7 +145,7 @@ void ReplaySession::check_for_password(shared_ptr<const Event> ev) const {
     }
 
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::GC_NTE:
@@ -190,7 +188,7 @@ void ReplaySession::check_for_password(shared_ptr<const Event> ev) const {
           check_ak(cmd.access_key2.decode());
         }
       } else if (header.command == 0xDB) {
-        const auto& cmd = check_size_t<C_VerifyLicense_V3_DB>(cmd_data, cmd_size);
+        const auto& cmd = check_size_t<C_VerifyAccount_V3_DB>(cmd_data, cmd_size);
         check_ak(cmd.access_key.decode());
         check_ak(cmd.access_key2.decode());
         check_pw(cmd.password.decode());
@@ -203,13 +201,13 @@ void ReplaySession::check_for_password(shared_ptr<const Event> ev) const {
       if (header.command == 0x04) {
         check_pw(check_size_t<C_LegacyLogin_BB_04>(cmd_data, cmd_size).password.decode());
       } else if (header.command == 0x93) {
-        check_pw(check_size_t<C_Login_BB_93>(cmd_data, cmd_size).password.decode());
+        check_pw(check_size_t<C_LoginBase_BB_93>(cmd_data, cmd_size, 0xFFFF).password.decode());
       } else if (header.command == 0x9C) {
         check_pw(check_size_t<C_Register_BB_9C>(cmd_data, cmd_size).password.decode());
       } else if (header.command == 0x9E) {
         check_pw(check_size_t<C_LoginExtended_BB_9E>(cmd_data, cmd_size).password.decode());
       } else if (header.command == 0xDB) {
-        check_pw(check_size_t<C_VerifyLicense_BB_DB>(cmd_data, cmd_size).password.decode());
+        check_pw(check_size_t<C_VerifyAccount_V3_DB>(cmd_data, cmd_size).password.decode());
       }
       break;
     }
@@ -239,7 +237,7 @@ void ReplaySession::apply_default_mask(shared_ptr<Event> ev) {
       break;
     }
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::PC_NTE:
@@ -288,23 +286,23 @@ void ReplaySession::apply_default_mask(shared_ptr<Event> ev) {
         case 0x64:
           if ((version == Version::PC_NTE) || (version == Version::PC_V2)) {
             auto& mask = check_size_t<S_JoinGame_PC_64>(mask_data, mask_size);
-            mask.variations.clear(0);
-            mask.rare_seed = 0;
+            mask.variations = Variations();
+            mask.random_seed = 0;
           } else if (version == Version::XB_V3) {
             auto& mask = check_size_t<S_JoinGame_XB_64>(mask_data, mask_size);
-            mask.variations.clear(0);
-            mask.rare_seed = 0;
-          } else if (version == Version::DC_NTE || version == Version::DC_V1_11_2000_PROTOTYPE) {
+            mask.variations = Variations();
+            mask.random_seed = 0;
+          } else if (version == Version::DC_NTE || version == Version::DC_11_2000) {
             auto& mask = check_size_t<S_JoinGame_DCNTE_64>(mask_data, mask_size);
-            mask.variations.clear(0);
+            mask.variations = Variations();
           } else {
-            auto& mask = check_size_t<S_JoinGame_DC_64>(mask_data, mask_size, sizeof(S_JoinGame_GC_Ep3_64));
-            mask.variations.clear(0);
-            mask.rare_seed = 0;
+            auto& mask = check_size_t<S_JoinGame_DC_64>(mask_data, mask_size, sizeof(S_JoinGame_Ep3_64));
+            mask.variations = Variations();
+            mask.random_seed = 0;
             for (size_t offset = sizeof(S_JoinGame_GC_64) +
-                     offsetof(S_JoinGame_GC_Ep3_64::Ep3PlayerEntry, disp.visual.name_color_checksum);
+                     offsetof(S_JoinGame_Ep3_64::Ep3PlayerEntry, disp.visual.name_color_checksum);
                  offset + 4 <= mask_size;
-                 offset += sizeof(S_JoinGame_GC_Ep3_64::Ep3PlayerEntry)) {
+                 offset += sizeof(S_JoinGame_Ep3_64::Ep3PlayerEntry)) {
               *reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(mask_data) + offset) = 0;
             }
           }
@@ -349,8 +347,8 @@ void ReplaySession::apply_default_mask(shared_ptr<Event> ev) {
           break;
         case 0xE8:
           if (is_gc(version)) {
-            auto& mask = check_size_t<S_JoinSpectatorTeam_GC_Ep3_E8>(mask_data, mask_size);
-            mask.rare_seed = 0;
+            auto& mask = check_size_t<S_JoinSpectatorTeam_Ep3_E8>(mask_data, mask_size);
+            mask.random_seed = 0;
             for (size_t z = 0; z < 4; z++) {
               mask.players[z].disp.visual.name_color_checksum = 0;
             }
@@ -365,9 +363,12 @@ void ReplaySession::apply_default_mask(shared_ptr<Event> ev) {
           }
           break;
         case 0xC9:
-          if (mask_size == 0xCC) {
-            auto& mask = check_size_t<G_ServerVersionStrings_GC_Ep3_6xB4x46>(
-                mask_data, mask_size);
+          if (mask_size == sizeof(G_ServerVersionStrings_Ep3NTE_6xB4x46)) {
+            auto& mask = check_size_t<G_ServerVersionStrings_Ep3NTE_6xB4x46>(mask_data, mask_size);
+            mask.version_signature.clear(0);
+            mask.date_str1.clear(0);
+          } else if (mask_size == sizeof(G_ServerVersionStrings_Ep3_6xB4x46)) {
+            auto& mask = check_size_t<G_ServerVersionStrings_Ep3_6xB4x46>(mask_data, mask_size);
             mask.version_signature.clear(0);
             mask.date_str1.clear(0);
             mask.date_str2.clear(0);
@@ -375,17 +376,38 @@ void ReplaySession::apply_default_mask(shared_ptr<Event> ev) {
           break;
         case 0x6C:
           if (is_gc(version) && mask_size >= 0x14) {
-            const auto& cmd = check_size_t<G_MapList_GC_Ep3_6xB6x40>(cmd_data, cmd_size, 0xFFFF);
+            const auto& cmd = check_size_t<G_MapList_Ep3_6xB6x40>(cmd_data, cmd_size, 0xFFFF);
             if ((cmd.header.header.basic_header.subcommand == 0xB6) &&
                 (cmd.header.subsubcommand == 0x40)) {
               check_size_t<PSOCommandHeaderDCV3>(ev->mask, 0xFFFF).size = 0;
-              auto& mask = check_size_t<G_MapList_GC_Ep3_6xB6x40>(mask_data, mask_size, 0xFFFF);
+              auto& mask = check_size_t<G_MapList_Ep3_6xB6x40>(mask_data, mask_size, 0xFFFF);
               mask.header.header.size = 0;
               mask.compressed_data_size = 0;
               ev->allow_size_disparity = true;
-              for (size_t z = sizeof(PSOCommandHeaderDCV3) + sizeof(G_MapList_GC_Ep3_6xB6x40); z < ev->mask.size(); z++) {
+              for (size_t z = sizeof(PSOCommandHeaderDCV3) + sizeof(G_MapList_Ep3_6xB6x40); z < ev->mask.size(); z++) {
                 ev->mask[z] = 0;
               }
+            }
+          }
+          break;
+        case 0x6D:
+          if (version == Version::DC_NTE) {
+            const auto& header = check_size_t<G_UnusedHeader>(cmd_data, cmd_size, 0xFFFF);
+            if (header.subcommand == 0x60) {
+              auto& mask = check_size_t<G_SyncPlayerDispAndInventory_DCNTE_6x70>(mask_data, mask_size, 0xFFFF);
+              mask.visual.name_color_checksum = 0;
+            }
+          } else if (version == Version::DC_11_2000) {
+            const auto& header = check_size_t<G_UnusedHeader>(cmd_data, cmd_size, 0xFFFF);
+            if (header.subcommand == 0x67) {
+              auto& mask = check_size_t<G_SyncPlayerDispAndInventory_DC112000_6x70>(mask_data, mask_size, 0xFFFF);
+              mask.visual.name_color_checksum = 0;
+            }
+          } else if (!is_pre_v1(version)) {
+            const auto& header = check_size_t<G_UnusedHeader>(cmd_data, cmd_size, 0xFFFF);
+            if (header.subcommand == 0x70) {
+              auto& mask = check_size_t<G_SyncPlayerDispAndInventory_DC_PC_6x70>(mask_data, mask_size, 0xFFFF);
+              mask.base.visual.name_color_checksum = 0;
             }
           }
           break;
@@ -408,8 +430,8 @@ void ReplaySession::apply_default_mask(shared_ptr<Event> ev) {
         }
         case 0x0064: {
           auto& mask = check_size_t<S_JoinGame_BB_64>(mask_data, mask_size);
-          mask.variations.clear(0);
-          mask.rare_seed = 0;
+          mask.variations = Variations();
+          mask.random_seed = 0;
           break;
         }
         case 0x00B1: {
@@ -420,7 +442,7 @@ void ReplaySession::apply_default_mask(shared_ptr<Event> ev) {
         }
         case 0x00E6: {
           auto& mask = check_size_t<S_ClientInit_BB_00E6>(mask_data, mask_size);
-          mask.team_id = 0;
+          mask.security_token = 0;
           break;
         }
       }
@@ -449,11 +471,8 @@ ReplaySession::ReplaySession(
   size_t num_events = 0;
   while (!feof(input_log)) {
     line_num++;
-    string line = fgets(input_log);
-    if (starts_with(line, Shell::PROMPT)) {
-      line = line.substr(Shell::PROMPT.size());
-    }
-    if (ends_with(line, "\n")) {
+    string line = phosg::fgets(input_log);
+    if (phosg::ends_with(line, "\n")) {
       line.resize(line.size() - 1);
     }
     if (line.empty()) {
@@ -461,12 +480,11 @@ ReplaySession::ReplaySession(
     }
 
     if (parsing_command.get()) {
-      string expected_start = string_printf("%04zX |", parsing_command->data.size());
-      if (starts_with(line, expected_start)) {
+      string expected_start = phosg::string_printf("%04zX |", parsing_command->data.size());
+      if (phosg::starts_with(line, expected_start)) {
         // Parse out the hex part of the hex/ASCII dump
         string mask_bytes;
-        string data_bytes = parse_data_string(
-            line.substr(expected_start.size(), 16 * 3 + 1), &mask_bytes);
+        string data_bytes = phosg::parse_data_string(line.substr(expected_start.size(), 16 * 3 + 1), &mask_bytes);
         parsing_command->data += data_bytes;
         parsing_command->mask += mask_bytes;
         continue;
@@ -480,30 +498,30 @@ ReplaySession::ReplaySession(
       }
     }
 
-    if (starts_with(line, "I ")) {
+    if (phosg::starts_with(line, "I ")) {
       // I <pid/ts> - [Server] Client connected: C-%X on fd %d via %d (T-%hu-%s-%s-%s)
       // I <pid/ts> - [Server] Client connected: C-%X on virtual connection %p via T-%hu-VI
       size_t offset = line.find(" - [Server] Client connected: C-");
       if (offset != string::npos) {
-        auto tokens = split(line, ' ');
+        auto tokens = phosg::split(line, ' ');
         if (tokens.size() != 15) {
-          throw runtime_error(string_printf("(ev-line %zu) client connection message has incorrect token count", line_num));
+          throw runtime_error(phosg::string_printf("(ev-line %zu) client connection message has incorrect token count", line_num));
         }
-        if (!starts_with(tokens[8], "C-")) {
-          throw runtime_error(string_printf("(ev-line %zu) client connection message missing client ID token", line_num));
+        if (!phosg::starts_with(tokens[8], "C-")) {
+          throw runtime_error(phosg::string_printf("(ev-line %zu) client connection message missing client ID token", line_num));
         }
-        auto listen_tokens = split(tokens[14], '-');
+        auto listen_tokens = phosg::split(tokens[14], '-');
         if (listen_tokens.size() < 4) {
-          throw runtime_error(string_printf("(ev-line %zu) client connection message listening socket token format is incorrect", line_num));
+          throw runtime_error(phosg::string_printf("(ev-line %zu) client connection message listening socket token format is incorrect", line_num));
         }
 
         auto c = make_shared<Client>(
             this,
             stoull(tokens[8].substr(2), nullptr, 16),
             stoul(listen_tokens[1], nullptr, 10),
-            enum_for_name<Version>(listen_tokens[2].c_str()));
+            phosg::enum_for_name<Version>(listen_tokens[2].c_str()));
         if (!this->clients.emplace(c->id, c).second) {
-          throw runtime_error(string_printf("(ev-line %zu) duplicate client ID in input log", line_num));
+          throw runtime_error(phosg::string_printf("(ev-line %zu) duplicate client ID in input log", line_num));
         }
         this->create_event(Event::Type::CONNECT, c, line_num);
         num_events++;
@@ -513,23 +531,23 @@ ReplaySession::ReplaySession(
       // I <pid/ts> - [Server] Disconnecting C-%X on fd %d
       offset = line.find(" - [Server] Client disconnected: C-");
       if (offset != string::npos) {
-        auto tokens = split(line, ' ');
+        auto tokens = phosg::split(line, ' ');
         if (tokens.size() < 9) {
-          throw runtime_error(string_printf("(ev-line %zu) client disconnection message has incorrect token count", line_num));
+          throw runtime_error(phosg::string_printf("(ev-line %zu) client disconnection message has incorrect token count", line_num));
         }
-        if (!starts_with(tokens[8], "C-")) {
-          throw runtime_error(string_printf("(ev-line %zu) client disconnection message missing client ID token", line_num));
+        if (!phosg::starts_with(tokens[8], "C-")) {
+          throw runtime_error(phosg::string_printf("(ev-line %zu) client disconnection message missing client ID token", line_num));
         }
         uint64_t client_id = stoul(tokens[8].substr(2), nullptr, 16);
         try {
           auto& c = this->clients.at(client_id);
           if (c->disconnect_event.get()) {
-            throw runtime_error(string_printf("(ev-line %zu) client has multiple disconnect events", line_num));
+            throw runtime_error(phosg::string_printf("(ev-line %zu) client has multiple disconnect events", line_num));
           }
           c->disconnect_event = this->create_event(Event::Type::DISCONNECT, c, line_num);
           num_events++;
         } catch (const out_of_range&) {
-          throw runtime_error(string_printf("(ev-line %zu) unknown disconnecting client ID in input log", line_num));
+          throw runtime_error(phosg::string_printf("(ev-line %zu) unknown disconnecting client ID in input log", line_num));
         }
         continue;
       }
@@ -541,9 +559,9 @@ ReplaySession::ReplaySession(
         offset = line.find(" - [Commands] Received from C-");
       }
       if (offset != string::npos) {
-        auto tokens = split(line, ' ');
+        auto tokens = phosg::split(line, ' ');
         if (tokens.size() < 10) {
-          throw runtime_error(string_printf("(ev-line %zu) command header line too short", line_num));
+          throw runtime_error(phosg::string_printf("(ev-line %zu) command header line too short", line_num));
         }
         bool from_client = (tokens[6] == "Received");
         uint64_t client_id = stoull(tokens[8].substr(2), nullptr, 16);
@@ -554,7 +572,7 @@ ReplaySession::ReplaySession(
               line_num);
           num_events++;
         } catch (const out_of_range&) {
-          throw runtime_error(string_printf("(ev-line %zu) input log contains command for missing client", line_num));
+          throw runtime_error(phosg::string_printf("(ev-line %zu) input log contains command for missing client", line_num));
         }
         continue;
       }
@@ -585,7 +603,7 @@ void ReplaySession::update_timeout_event() {
         event_new(this->base.get(), -1, EV_TIMEOUT, this->dispatch_on_timeout, this),
         event_free);
   }
-  struct timeval tv = usecs_to_timeval(3000000);
+  struct timeval tv = phosg::usecs_to_timeval(3000000);
   event_add(this->timeout_ev.get(), &tv);
 }
 
@@ -604,13 +622,13 @@ void ReplaySession::execute_pending_events() {
       switch (this->first_event->type) {
         case Event::Type::CONNECT: {
           if (c->channel.connected()) {
-            throw runtime_error(string_printf("(ev-line %zu) connect event on already-connected client", this->first_event->line_num));
+            throw runtime_error(phosg::string_printf("(ev-line %zu) connect event on already-connected client", this->first_event->line_num));
           }
 
           struct bufferevent* bevs[2];
           bufferevent_pair_new(this->base.get(), 0, bevs);
 
-          c->channel.set_bufferevent(bevs[0]);
+          c->channel.set_bufferevent(bevs[0], 0);
           this->channel_to_client.emplace(&c->channel, c);
 
           shared_ptr<const PortConfiguration> port_config;
@@ -618,17 +636,17 @@ void ReplaySession::execute_pending_events() {
             port_config = this->state->number_to_port_config.at(c->port);
           } catch (const out_of_range&) {
             bufferevent_free(bevs[1]);
-            throw runtime_error(string_printf("(ev-line %zu) client connected to port missing from configuration", this->first_event->line_num));
+            throw runtime_error(phosg::string_printf("(ev-line %zu) client connected to port missing from configuration", this->first_event->line_num));
           }
 
           if (port_config->behavior == ServerBehavior::PROXY_SERVER) {
             // TODO: We should support this at some point in the future
-            throw runtime_error(string_printf("(ev-line %zu) client connected to proxy server", this->first_event->line_num));
+            throw runtime_error(phosg::string_printf("(ev-line %zu) client connected to proxy server", this->first_event->line_num));
           } else if (this->state->game_server.get()) {
-            this->state->game_server->connect_client(bevs[1], 0x20202020,
+            this->state->game_server->connect_virtual_client(bevs[1], 0, 0x20202020,
                 1025, c->port, port_config->version, port_config->behavior);
           } else {
-            throw runtime_error(string_printf("(ev-line %zu) no server available for connection", this->first_event->line_num));
+            throw runtime_error(phosg::string_printf("(ev-line %zu) no server available for connection", this->first_event->line_num));
             bufferevent_free(bevs[1]);
           }
           break;
@@ -639,7 +657,7 @@ void ReplaySession::execute_pending_events() {
           break;
         case Event::Type::SEND:
           if (!c->channel.connected()) {
-            throw runtime_error(string_printf("(ev-line %zu) send event attempted on unconnected client", this->first_event->line_num));
+            throw runtime_error(phosg::string_printf("(ev-line %zu) send event attempted on unconnected client", this->first_event->line_num));
           }
           c->channel.send(this->first_event->data);
           this->commands_sent++;
@@ -686,7 +704,7 @@ void ReplaySession::dispatch_on_error(Channel& ch, short events) {
 void ReplaySession::on_command_received(
     shared_ptr<Client> c, uint16_t command, uint32_t flag, string& data) {
 
-  // TODO: Use the iovec form of print_data here instead of
+  // TODO: Use the iovec form of phosg::print_data here instead of
   // prepend_command_header (which copies the string)
   string full_command = prepend_command_header(
       c->version, c->channel.crypt_in.get(), command, flag, data);
@@ -694,25 +712,25 @@ void ReplaySession::on_command_received(
   this->bytes_received += full_command.size();
 
   if (c->receive_events.empty()) {
-    print_data(stderr, full_command, 0, nullptr, PrintDataFlags::PRINT_ASCII | PrintDataFlags::OFFSET_16_BITS);
+    phosg::print_data(stderr, full_command, 0, nullptr, phosg::PrintDataFlags::PRINT_ASCII | phosg::PrintDataFlags::OFFSET_16_BITS);
     throw runtime_error("received unexpected command for client");
   }
 
   auto& ev = c->receive_events.front();
   if ((full_command.size() != ev->data.size()) && !ev->allow_size_disparity) {
     replay_log.error("Expected command:");
-    print_data(stderr, ev->data, 0, nullptr, PrintDataFlags::PRINT_ASCII | PrintDataFlags::OFFSET_16_BITS);
+    phosg::print_data(stderr, ev->data, 0, nullptr, phosg::PrintDataFlags::PRINT_ASCII | phosg::PrintDataFlags::OFFSET_16_BITS);
     replay_log.error("Received command:");
-    print_data(stderr, full_command, 0, nullptr, PrintDataFlags::PRINT_ASCII | PrintDataFlags::OFFSET_16_BITS);
-    throw runtime_error(string_printf("(ev-line %zu) received command sizes do not match", ev->line_num));
+    phosg::print_data(stderr, full_command, 0, nullptr, phosg::PrintDataFlags::PRINT_ASCII | phosg::PrintDataFlags::OFFSET_16_BITS);
+    throw runtime_error(phosg::string_printf("(ev-line %zu) received command sizes do not match", ev->line_num));
   }
   for (size_t x = 0; x < min<size_t>(full_command.size(), ev->data.size()); x++) {
     if ((full_command[x] & ev->mask[x]) != (ev->data[x] & ev->mask[x])) {
       replay_log.error("Expected command:");
-      print_data(stderr, ev->data, 0, nullptr, PrintDataFlags::PRINT_ASCII | PrintDataFlags::OFFSET_16_BITS);
+      phosg::print_data(stderr, ev->data, 0, nullptr, phosg::PrintDataFlags::PRINT_ASCII | phosg::PrintDataFlags::OFFSET_16_BITS);
       replay_log.error("Received command:");
-      print_data(stderr, full_command, 0, ev->data.data(), PrintDataFlags::PRINT_ASCII | PrintDataFlags::OFFSET_16_BITS);
-      throw runtime_error(string_printf("(ev-line %zu) received command data does not match expected data", ev->line_num));
+      phosg::print_data(stderr, full_command, 0, ev->data.data(), phosg::PrintDataFlags::PRINT_ASCII | phosg::PrintDataFlags::OFFSET_16_BITS);
+      throw runtime_error(phosg::string_printf("(ev-line %zu) received command data does not match expected data", ev->line_num));
     }
   }
 
@@ -730,7 +748,7 @@ void ReplaySession::on_command_received(
       }
       break;
     case Version::DC_NTE:
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
     case Version::PC_NTE:
@@ -772,15 +790,15 @@ void ReplaySession::on_command_received(
 
 void ReplaySession::on_error(shared_ptr<Client> c, short events) {
   if (events & BEV_EVENT_ERROR) {
-    throw runtime_error(string_printf("C-%" PRIX64 " caused stream error", c->id));
+    throw runtime_error(phosg::string_printf("C-%" PRIX64 " caused stream error", c->id));
   }
   if (events & BEV_EVENT_EOF) {
     if (!c->disconnect_event.get()) {
-      throw runtime_error(string_printf(
+      throw runtime_error(phosg::string_printf(
           "C-%" PRIX64 " disconnected, but has no disconnect event", c->id));
     }
     if (!c->receive_events.empty()) {
-      throw runtime_error(string_printf(
+      throw runtime_error(phosg::string_printf(
           "C-%" PRIX64 " disconnected, but has pending receive events", c->id));
     }
     c->disconnect_event->complete = true;

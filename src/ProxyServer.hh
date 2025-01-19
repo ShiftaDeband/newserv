@@ -26,18 +26,18 @@ public:
       std::shared_ptr<ServerState> state);
   virtual ~ProxyServer() = default;
 
-  void listen(uint16_t port, Version version, const struct sockaddr_storage* default_destination = nullptr);
+  void listen(const std::string& addr, uint16_t port, Version version, const struct sockaddr_storage* default_destination = nullptr);
 
-  void connect_client(struct bufferevent* bev, uint16_t server_port);
+  void connect_virtual_client(struct bufferevent* bev, uint64_t virtual_network_id, uint16_t server_port);
 
   struct LinkedSession : std::enable_shared_from_this<LinkedSession> {
     std::weak_ptr<ProxyServer> server;
     uint64_t id;
-    PrefixedLogger log;
+    phosg::PrefixedLogger log;
 
     std::unique_ptr<struct event, void (*)(struct event*)> timeout_event;
 
-    std::shared_ptr<License> license;
+    std::shared_ptr<Login> login;
 
     Channel client_channel;
     Channel server_channel;
@@ -58,7 +58,8 @@ public:
 
     uint32_t sub_version;
     std::string character_name;
-    std::string hardware_id; // Only used for DC sessions
+    std::string serial_number2; // Only used for DC sessions
+    uint64_t hardware_id;
     std::string login_command_bb;
     XBNetworkLocation xb_netloc;
     parray<le_uint32_t, 3> xb_9E_unknown_a1a;
@@ -70,9 +71,18 @@ public:
     Client::Config config;
     // A null handler in here means to forward the response to the remote server
     std::deque<std::function<void(uint32_t return_value, uint32_t checksum)>> function_call_return_handler_queue;
-    G_SwitchStateChanged_6x05 last_switch_enabled_command;
     ItemData next_drop_item;
     uint32_t next_item_id;
+
+    enum class DropMode {
+      DISABLED = 0,
+      PASSTHROUGH,
+      INTERCEPT,
+    };
+    DropMode drop_mode;
+    std::shared_ptr<std::string> quest_dat_data;
+    std::shared_ptr<ItemCreator> item_creator;
+    std::shared_ptr<MapState> map_state;
 
     struct LobbyPlayer {
       uint32_t guild_card_number = 0;
@@ -86,11 +96,15 @@ public:
     size_t lobby_client_id;
     size_t leader_client_id;
     uint16_t floor;
-    float x;
-    float z;
+    VectorXZF pos;
     bool is_in_game;
     bool is_in_quest;
-    uint8_t difficulty;
+    uint8_t lobby_event;
+    uint8_t lobby_difficulty;
+    uint8_t lobby_section_id;
+    GameMode lobby_mode;
+    Episode lobby_episode;
+    uint32_t lobby_random_seed;
     uint64_t client_ping_start_time = 0;
     uint64_t server_ping_start_time = 0;
 
@@ -100,16 +114,14 @@ public:
       std::string basename;
       std::string output_filename;
       bool is_download;
-      size_t remaining_bytes;
-      std::deque<std::string> blocks;
+      size_t total_size;
+      std::string data;
 
       SavingFile(
           const std::string& basename,
           const std::string& output_filename,
-          size_t remaining_bytes,
+          size_t total_size,
           bool is_download);
-
-      void write() const;
     };
     std::unordered_map<std::string, SavingFile> saving_files;
 
@@ -123,13 +135,13 @@ public:
         std::shared_ptr<ProxyServer> server,
         uint16_t local_port,
         Version version,
-        std::shared_ptr<License> license,
+        std::shared_ptr<Login> login,
         const Client::Config& config);
     LinkedSession(
         std::shared_ptr<ProxyServer> server,
         uint16_t local_port,
         Version version,
-        std::shared_ptr<License> license,
+        std::shared_ptr<Login> login,
         const struct sockaddr_storage& next_destination);
     LinkedSession(
         std::shared_ptr<ProxyServer> server,
@@ -147,6 +159,11 @@ public:
     inline uint8_t language() const {
       return this->client_channel.language;
     }
+    inline uint32_t effective_sub_version() const {
+      return this->config.check_flag(Client::Flag::PROXY_VIRTUAL_CLIENT)
+          ? default_sub_version_for_version(this->version())
+          : this->sub_version;
+    }
     void set_version(Version v);
 
     void resume(
@@ -154,7 +171,8 @@ public:
         std::shared_ptr<PSOBBMultiKeyDetectorEncryption> detector_crypt,
         uint32_t sub_version,
         const std::string& character_name,
-        const std::string& hardware_id,
+        const std::string& serial_number2,
+        uint64_t hardware_id,
         const XBNetworkLocation& xb_netloc,
         const parray<le_uint32_t, 3>& xb_9E_unknown_a1a);
     void resume(
@@ -173,22 +191,27 @@ public:
     static void on_error(Channel& ch, short events);
     void on_timeout();
 
+    void update_channel_names();
+
     void clear_lobby_players(size_t num_slots);
+
+    void set_drop_mode(DropMode new_mode);
 
     void send_to_game_server(const char* error_message = nullptr);
     void disconnect();
     bool is_connected() const;
   };
 
-  std::shared_ptr<LinkedSession> get_session();
-  std::shared_ptr<LinkedSession> get_session_by_name(const std::string& name);
-  std::shared_ptr<LinkedSession> create_licensed_session(
-      std::shared_ptr<License> l,
+  std::shared_ptr<LinkedSession> get_session() const;
+  std::shared_ptr<LinkedSession> get_session_by_name(const std::string& name) const;
+  const std::unordered_map<uint64_t, std::shared_ptr<LinkedSession>>& all_sessions() const;
+
+  std::shared_ptr<LinkedSession> create_logged_in_session(
+      std::shared_ptr<Login> login,
       uint16_t local_port,
       Version version,
       const Client::Config& config);
   void delete_session(uint64_t id);
-  void delete_session(struct bufferevent* bev);
 
   size_t num_sessions() const;
 
@@ -198,15 +221,16 @@ private:
   struct ListeningSocket {
     ProxyServer* server;
 
-    PrefixedLogger log;
+    phosg::PrefixedLogger log;
     uint16_t port;
-    scoped_fd fd;
+    phosg::scoped_fd fd;
     std::unique_ptr<struct evconnlistener, void (*)(struct evconnlistener*)> listener;
     Version version;
     struct sockaddr_storage default_destination;
 
     ListeningSocket(
         ProxyServer* server,
+        const std::string& addr,
         uint16_t port,
         Version version,
         const struct sockaddr_storage* default_destination);
@@ -220,8 +244,9 @@ private:
 
   struct UnlinkedSession {
     std::weak_ptr<ProxyServer> server;
+    uint64_t id;
 
-    PrefixedLogger log;
+    phosg::PrefixedLogger log;
     Channel channel;
     uint16_t local_port;
     struct sockaddr_storage next_destination;
@@ -232,16 +257,23 @@ private:
     // just local variables inside on_input because XB requires two commands to
     // get started (9E and 9F), so we need to store this state somewhere between
     // those commands.
-    std::shared_ptr<License> license;
+    std::shared_ptr<Login> login;
     uint32_t sub_version = 0;
     std::string character_name;
     Client::Config config;
     std::string login_command_bb;
-    std::string hardware_id;
+    std::string serial_number2;
+    uint64_t hardware_id;
     XBNetworkLocation xb_netloc;
     parray<le_uint32_t, 3> xb_9E_unknown_a1a;
 
-    UnlinkedSession(std::shared_ptr<ProxyServer> server, struct bufferevent* bev, uint16_t port, Version version);
+    UnlinkedSession(
+        std::shared_ptr<ProxyServer> server,
+        uint64_t id,
+        struct bufferevent* bev,
+        uint64_t virtual_network_id,
+        uint16_t port,
+        Version version);
 
     std::shared_ptr<ProxyServer> require_server() const;
     std::shared_ptr<ServerState> require_server_state() const;
@@ -249,6 +281,8 @@ private:
     inline Version version() const {
       return this->channel.version;
     }
+
+    void set_login(std::shared_ptr<Login> login);
 
     void receive_and_process_commands();
 
@@ -260,17 +294,23 @@ private:
   std::shared_ptr<struct event> destroy_sessions_ev;
   std::shared_ptr<ServerState> state;
   std::map<int, std::shared_ptr<ListeningSocket>> listeners;
-  std::unordered_map<struct bufferevent*, std::shared_ptr<UnlinkedSession>> bev_to_unlinked_session;
+  std::unordered_map<uint64_t, std::shared_ptr<UnlinkedSession>> id_to_unlinked_session;
   std::unordered_set<std::shared_ptr<UnlinkedSession>> unlinked_sessions_to_destroy;
-  std::unordered_map<uint64_t, std::shared_ptr<LinkedSession>> id_to_session;
-  uint64_t next_unlicensed_session_id;
+  std::unordered_map<uint64_t, std::shared_ptr<LinkedSession>> id_to_linked_session;
+  uint64_t next_unlinked_session_id;
+  uint64_t next_logged_out_session_id;
 
   static void dispatch_destroy_sessions(evutil_socket_t, short, void* ctx);
   void destroy_sessions();
 
   void on_client_connect(
       struct bufferevent* bev,
+      uint64_t virtual_network_id,
       uint16_t listen_port,
       Version version,
       const struct sockaddr_storage* default_destination);
+
+  static constexpr uint64_t FIRST_UNLINKED_SESSION_ID = 0x0000000000000001;
+  static constexpr uint64_t FIRST_LINKED_LOGGED_OUT_SESSION_ID = 0x0000000080000000;
+  static constexpr uint64_t FIRST_LINKED_LOGGED_IN_SESSION_ID = 0x00000000FFFFFFFF;
 };

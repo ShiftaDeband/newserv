@@ -5,27 +5,24 @@
 #include <phosg/Random.hh>
 
 #include "BattleParamsIndex.hh"
+#include "CommonFileFormats.hh"
 #include "ItemData.hh"
 #include "StaticGameData.hh"
 
 using namespace std;
 
 string RareItemSet::ExpandedDrop::str() const {
-  auto frac = reduce_fraction<uint64_t>(this->probability, 0x100000000);
-  return string_printf(
-      "(%08" PRIX32 " => %" PRIu64 "/%" PRIu64 ") %02hhX%02hhX%02hhX",
-      this->probability, frac.first, frac.second, this->item_code[0], this->item_code[1], this->item_code[2]);
+  auto frac = phosg::reduce_fraction<uint64_t>(this->probability, 0x100000000);
+  auto hex = this->data.hex();
+  return phosg::string_printf(
+      "(%08" PRIX32 " => %" PRIu64 "/%" PRIu64 ") %s",
+      this->probability, frac.first, frac.second, hex.c_str());
 }
 
-string RareItemSet::ExpandedDrop::str(Version version, shared_ptr<const ItemNameIndex> name_index) const {
-  ItemData item;
-  item.data1[0] = this->item_code[0];
-  item.data1[1] = this->item_code[1];
-  item.data1[2] = this->item_code[2];
-
+string RareItemSet::ExpandedDrop::str(shared_ptr<const ItemNameIndex> name_index) const {
   string ret = this->str();
   ret += " (";
-  ret += name_index->describe_item(version, item);
+  ret += name_index->describe_item(this->data);
   ret += ")";
   return ret;
 }
@@ -78,31 +75,37 @@ uint8_t RareItemSet::compress_rate(uint32_t probability) {
 }
 
 RareItemSet::ParsedRELData::PackedDrop::PackedDrop(const ExpandedDrop& exp)
-    : probability(RareItemSet::compress_rate(exp.probability)),
-      item_code(exp.item_code) {}
-
-RareItemSet::ExpandedDrop RareItemSet::ParsedRELData::PackedDrop::expand() const {
-  return ExpandedDrop{
-      .probability = RareItemSet::expand_rate(this->probability),
-      .item_code = this->item_code,
-  };
+    : probability(RareItemSet::compress_rate(exp.probability)) {
+  if (!exp.data.can_be_encoded_in_rel_rare_table()) {
+    throw runtime_error("item " + exp.data.short_hex() + " has extended attributes and cannot be encoded in a REL file");
+  }
+  this->item_code[0] = exp.data.data1[0];
+  this->item_code[1] = exp.data.data1[1];
+  this->item_code[2] = exp.data.data1[2];
 }
 
-template <bool IsBigEndian>
-void RareItemSet::ParsedRELData::parse_t(StringReader r, bool is_v1) {
-  using U32T = typename std::conditional<IsBigEndian, be_uint32_t, le_uint32_t>::type;
+RareItemSet::ExpandedDrop RareItemSet::ParsedRELData::PackedDrop::expand() const {
+  ExpandedDrop ret;
+  ret.probability = RareItemSet::expand_rate(this->probability);
+  ret.data.data1[0] = this->item_code[0];
+  ret.data.data1[1] = this->item_code[1];
+  ret.data.data1[2] = this->item_code[2];
+  return ret;
+}
 
-  uint32_t root_offset = r.pget<U32T>(r.size() - 0x10);
-  const auto& root = r.pget<Offsets<IsBigEndian>>(root_offset);
+template <bool BE>
+void RareItemSet::ParsedRELData::parse_t(phosg::StringReader r, bool is_v1) {
+  const auto& footer = r.pget<RELFileFooterT<BE>>(r.size() - sizeof(RELFileFooterT<BE>));
+  const auto& root = r.pget<OffsetsT<BE>>(footer.root_offset);
 
-  StringReader monsters_r = r.sub(root.monster_rares_offset);
+  phosg::StringReader monsters_r = r.sub(root.monster_rares_offset);
   for (size_t z = 0; z < (is_v1 ? 0x33 : 0x65); z++) {
     const auto& d = monsters_r.get<PackedDrop>();
     this->monster_rares.emplace_back(d.expand());
   }
 
-  StringReader box_areas_r = r.sub(root.box_areas_offset, root.box_count * sizeof(uint8_t));
-  StringReader box_drops_r = r.sub(root.box_rares_offset, root.box_count * sizeof(PackedDrop));
+  phosg::StringReader box_areas_r = r.sub(root.box_areas_offset, root.box_count * sizeof(uint8_t));
+  phosg::StringReader box_drops_r = r.sub(root.box_rares_offset, root.box_count * sizeof(PackedDrop));
   for (size_t z = 0; z < root.box_count; z++) {
     uint8_t area = box_areas_r.get_u8();
     const auto& drop = box_drops_r.get<PackedDrop>();
@@ -114,17 +117,14 @@ void RareItemSet::ParsedRELData::parse_t(StringReader r, bool is_v1) {
   }
 }
 
-template <bool IsBigEndian>
+template <bool BE>
 std::string RareItemSet::ParsedRELData::serialize_t(bool is_v1) const {
-  using U32T = typename std::conditional<IsBigEndian, be_uint32_t, le_uint32_t>::type;
-  using U16T = typename std::conditional<IsBigEndian, be_uint16_t, le_uint16_t>::type;
-
   static const PackedDrop empty_drop;
 
-  Offsets<IsBigEndian> root;
+  OffsetsT<BE> root;
   root.box_count = this->box_rares.size();
 
-  StringWriter w;
+  phosg::StringWriter w;
   root.monster_rares_offset = w.size();
   for (const auto& drop : this->monster_rares) {
     w.put(PackedDrop(drop));
@@ -136,9 +136,15 @@ std::string RareItemSet::ParsedRELData::serialize_t(bool is_v1) const {
   for (const auto& drop : this->box_rares) {
     w.put_u8(drop.area);
   }
+  for (size_t z = this->box_rares.size(); z < 30; z++) {
+    w.put_u8(0xFF);
+  }
   root.box_rares_offset = w.size();
   for (const auto& drop : this->box_rares) {
     w.put(PackedDrop(drop.drop));
+  }
+  for (size_t z = this->box_rares.size(); z < 30; z++) {
+    w.put_u32l(0x00000000);
   }
   while (w.size() & 3) {
     w.put_u8(0);
@@ -149,24 +155,23 @@ std::string RareItemSet::ParsedRELData::serialize_t(bool is_v1) const {
     w.put_u8(0);
   }
   uint32_t relocations_offset = w.size();
-  w.put<U16T>(root_offset >> 2);
-  w.put<U16T>(2);
-  w.put<U16T>(1);
+  w.put<U16T<BE>>(root_offset >> 2);
+  w.put<U16T<BE>>(2);
+  w.put<U16T<BE>>(1);
   while (w.size() & 0x1F) {
     w.put_u8(0);
   }
-  w.put<U32T>(relocations_offset);
-  w.put<U32T>(3); // num_relocations
-  w.put<U32T>(1); // TODO: What is this used for?
-  w.put<U32T>(0);
-  w.put<U32T>(root_offset);
-  w.put<U32T>(0);
-  w.put<U32T>(0);
-  w.put<U32T>(0);
+
+  RELFileFooterT<BE> footer;
+  footer.relocations_offset = relocations_offset;
+  footer.num_relocations = 3;
+  footer.unused1[0] = 1; // TODO: What is this used for?
+  footer.root_offset = root_offset;
+  w.put<RELFileFooterT<BE>>(footer);
   return std::move(w.str());
 }
 
-RareItemSet::ParsedRELData::ParsedRELData(StringReader r, bool big_endian, bool is_v1) {
+RareItemSet::ParsedRELData::ParsedRELData(phosg::StringReader r, bool big_endian, bool is_v1) {
   if (big_endian) {
     this->parse_t<true>(r, is_v1);
   } else {
@@ -178,10 +183,9 @@ RareItemSet::ParsedRELData::ParsedRELData(const SpecCollection& collection) {
   for (const auto& specs : collection.rt_index_to_specs) {
     ExpandedDrop effective_spec;
     for (const auto& spec : specs) {
-      if (effective_spec.item_code.is_filled_with(0)) {
+      if (effective_spec.data.empty()) {
         effective_spec = spec;
-      } else if ((effective_spec.probability != spec.probability) ||
-          (effective_spec.item_code != spec.item_code)) {
+      } else if ((effective_spec.probability != spec.probability) || (effective_spec.data != spec.data)) {
         throw runtime_error("monster spec cannot be converted to ItemRT format");
       }
     }
@@ -210,7 +214,7 @@ RareItemSet::SpecCollection RareItemSet::ParsedRELData::as_collection() const {
   SpecCollection ret;
   for (size_t z = 0; z < this->monster_rares.size(); z++) {
     const auto& drop = this->monster_rares[z];
-    if (drop.item_code.is_filled_with(0)) {
+    if (drop.data.empty()) {
       continue;
     }
     if (z >= ret.rt_index_to_specs.size()) {
@@ -219,7 +223,7 @@ RareItemSet::SpecCollection RareItemSet::ParsedRELData::as_collection() const {
     ret.rt_index_to_specs[z].emplace_back(drop);
   }
   for (const auto& drop : this->box_rares) {
-    if (drop.drop.item_code.is_filled_with(0)) {
+    if (drop.drop.data.empty()) {
       continue;
     }
     if (drop.area >= ret.box_area_to_specs.size()) {
@@ -249,7 +253,7 @@ RareItemSet::RareItemSet(const AFSArchive& afs, bool is_v1) {
 }
 
 string RareItemSet::gsl_entry_name_for_table(GameMode mode, Episode episode, uint8_t difficulty, uint8_t section_id) {
-  return string_printf("ItemRT%s%s%c%1hhu.rel",
+  return phosg::string_printf("ItemRT%s%s%c%1hhu.rel",
       ((mode == GameMode::CHALLENGE) ? "c" : ""),
       ((episode == Episode::EP2) ? "l" : ""),
       tolower(abbreviation_for_difficulty(difficulty)), // One of "nhvu"
@@ -279,7 +283,7 @@ RareItemSet::RareItemSet(const GSLArchive& gsl, bool is_big_endian) {
 
 RareItemSet::RareItemSet(const string& rel_data, bool is_big_endian) {
   // Tables are 0x280 bytes in size in this format, laid out sequentially
-  StringReader r(rel_data);
+  phosg::StringReader r(rel_data);
   array<Episode, 3> episodes = {Episode::EP1, Episode::EP2, Episode::EP4};
   for (size_t ep_index = 0; ep_index < episodes.size(); ep_index++) {
     for (size_t difficulty = 0; difficulty < 4; difficulty++) {
@@ -297,7 +301,7 @@ RareItemSet::RareItemSet(const string& rel_data, bool is_big_endian) {
   }
 }
 
-RareItemSet::RareItemSet(const JSON& json, Version version, shared_ptr<const ItemNameIndex> name_index) {
+RareItemSet::RareItemSet(const phosg::JSON& json, shared_ptr<const ItemNameIndex> name_index) {
   for (const auto& mode_it : json.as_dict()) {
     static const unordered_map<string, GameMode> mode_keys(
         {{"Normal", GameMode::NORMAL}, {"Battle", GameMode::BATTLE}, {"Challenge", GameMode::CHALLENGE}, {"Solo", GameMode::SOLO}});
@@ -319,14 +323,14 @@ RareItemSet::RareItemSet(const JSON& json, Version version, shared_ptr<const Ite
           auto& collection = this->collections[this->key_for_params(mode, episode, difficulty, section_id)];
           for (const auto& item_it : section_id_it.second->as_dict()) {
             vector<ExpandedDrop>* target;
-            if (starts_with(item_it.first, "Box-")) {
+            if (phosg::starts_with(item_it.first, "Box-")) {
               uint8_t area = floor_for_name(item_it.first.substr(4));
               if (collection.box_area_to_specs.size() <= area) {
                 collection.box_area_to_specs.resize(area + 1);
               }
               target = &collection.box_area_to_specs[area];
             } else {
-              size_t index = rare_table_index_for_enemy_type(enum_for_name<EnemyType>(item_it.first.c_str()));
+              size_t index = rare_table_index_for_enemy_type(phosg::enum_for_name<EnemyType>(item_it.first.c_str()));
               if (collection.rt_index_to_specs.size() <= index) {
                 collection.rt_index_to_specs.resize(index + 1);
               }
@@ -340,7 +344,7 @@ RareItemSet::RareItemSet(const JSON& json, Version version, shared_ptr<const Ite
               if (prob_desc.is_int()) {
                 d.probability = prob_desc.as_int();
               } else if (prob_desc.is_string()) {
-                auto tokens = split(prob_desc.as_string(), '/');
+                auto tokens = phosg::split(prob_desc.as_string(), '/');
                 if (tokens.size() != 2) {
                   throw runtime_error("invalid probability specification");
                 }
@@ -356,17 +360,14 @@ RareItemSet::RareItemSet(const JSON& json, Version version, shared_ptr<const Ite
               auto item_desc = spec_json->at(1);
               if (item_desc.is_int()) {
                 uint32_t item_code = item_desc.as_int();
-                d.item_code[0] = (item_code >> 16) & 0xFF;
-                d.item_code[1] = (item_code >> 8) & 0xFF;
-                d.item_code[2] = item_code & 0xFF;
+                d.data.data1[0] = (item_code >> 16) & 0xFF;
+                d.data.data1[1] = (item_code >> 8) & 0xFF;
+                d.data.data1[2] = item_code & 0xFF;
               } else if (item_desc.is_string()) {
                 if (!name_index) {
                   throw runtime_error("item name index is not available");
                 }
-                ItemData data = name_index->parse_item_description(version, item_desc.as_string());
-                d.item_code[0] = data.data1[0];
-                d.item_code[1] = data.data1[1];
-                d.item_code[2] = data.data1[2];
+                d.data = name_index->parse_item_description(item_desc.as_string());
               } else {
                 throw runtime_error("invalid item description type");
               }
@@ -421,18 +422,18 @@ std::string RareItemSet::serialize_gsl(bool big_endian) const {
   return GSLArchive::generate(files, big_endian);
 }
 
-std::string RareItemSet::serialize_json(Version version, shared_ptr<const ItemNameIndex> name_index) const {
-  auto modes_dict = JSON::dict();
+phosg::JSON RareItemSet::json(shared_ptr<const ItemNameIndex> name_index) const {
+  auto modes_dict = phosg::JSON::dict();
   static const array<GameMode, 4> modes = {GameMode::NORMAL, GameMode::BATTLE, GameMode::CHALLENGE, GameMode::SOLO};
   for (const auto& mode : modes) {
-    auto episodes_dict = JSON::dict();
+    auto episodes_dict = phosg::JSON::dict();
     static const array<Episode, 3> episodes = {Episode::EP1, Episode::EP2, Episode::EP4};
     for (const auto& episode : episodes) {
-      auto difficulty_dict = JSON::dict();
+      auto difficulty_dict = phosg::JSON::dict();
       for (uint8_t difficulty = 0; difficulty < 4; difficulty++) {
-        auto section_id_dict = JSON::dict();
+        auto section_id_dict = phosg::JSON::dict();
         for (uint8_t section_id = 0; section_id < 10; section_id++) {
-          auto collection_dict = JSON::dict();
+          auto collection_dict = phosg::JSON::dict();
           for (size_t rt_index = 0; rt_index < 0x80; rt_index++) {
             const auto& enemy_types = enemy_types_for_rare_table_index(episode, rt_index);
             if (enemy_types.empty()) {
@@ -440,52 +441,51 @@ std::string RareItemSet::serialize_json(Version version, shared_ptr<const ItemNa
             }
 
             for (const auto& spec : this->get_enemy_specs(GameMode::NORMAL, episode, difficulty, section_id, rt_index)) {
-              uint32_t primary_identifier = (spec.item_code[0] << 16) | (spec.item_code[1] << 8) | spec.item_code[2];
-              if (primary_identifier == 0) {
+              if (spec.data.empty()) {
                 continue;
               }
-
-              auto frac = reduce_fraction<uint64_t>(spec.probability, 0x100000000);
-              auto spec_json = JSON::list({string_printf("%" PRIu64 "/%" PRIu64, frac.first, frac.second), primary_identifier});
+              auto frac = phosg::reduce_fraction<uint64_t>(spec.probability, 0x100000000);
+              auto spec_json = phosg::JSON::list({phosg::string_printf("%" PRIu64 "/%" PRIu64, frac.first, frac.second)});
+              if (spec.data.can_be_encoded_in_rel_rare_table()) {
+                spec_json.emplace_back((spec.data.data1[0] << 16) | (spec.data.data1[1] << 8) | spec.data.data1[2]);
+              } else {
+                spec_json.emplace_back(spec.data.short_hex());
+              }
               if (name_index) {
-                ItemData data;
-                data.data1[0] = spec.item_code[0];
-                data.data1[1] = spec.item_code[1];
-                data.data1[2] = spec.item_code[2];
-                spec_json.emplace_back(name_index->describe_item(version, data));
+                spec_json.emplace_back(name_index->describe_item(spec.data));
               }
               for (const auto& enemy_type : enemy_types) {
                 if (enemy_type_valid_for_episode(episode, enemy_type)) {
-                  JSON this_spec_json = spec_json;
-                  collection_dict.emplace(name_for_enum(enemy_type), JSON::list()).first->second->emplace_back(std::move(this_spec_json));
+                  phosg::JSON this_spec_json = spec_json;
+                  collection_dict.emplace(phosg::name_for_enum(enemy_type), phosg::JSON::list()).first->second->emplace_back(std::move(this_spec_json));
                 }
               }
             }
           }
 
           for (size_t area = 0; area < 0x12; area++) {
-            auto area_list = JSON::list();
+            auto area_list = phosg::JSON::list();
 
             for (const auto& spec : this->get_box_specs(GameMode::NORMAL, episode, difficulty, section_id, area)) {
-              uint32_t primary_identifier = (spec.item_code[0] << 16) | (spec.item_code[1] << 8) | spec.item_code[2];
-              if (primary_identifier == 0) {
+              if (spec.data.empty()) {
                 continue;
               }
-
-              auto frac = reduce_fraction<uint64_t>(spec.probability, 0x100000000);
-              area_list.emplace_back(JSON::list({string_printf("%" PRIu64 "/%" PRIu64, frac.first, frac.second), std::move(primary_identifier)}));
-              if (name_index) {
-                ItemData data;
-                data.data1[0] = spec.item_code[0];
-                data.data1[1] = spec.item_code[1];
-                data.data1[2] = spec.item_code[2];
-                area_list.back().emplace_back(name_index->describe_item(version, data));
+              auto frac = phosg::reduce_fraction<uint64_t>(spec.probability, 0x100000000);
+              auto spec_json = phosg::JSON::list({phosg::string_printf("%" PRIu64 "/%" PRIu64, frac.first, frac.second)});
+              if (spec.data.can_be_encoded_in_rel_rare_table()) {
+                spec_json.emplace_back((spec.data.data1[0] << 16) | (spec.data.data1[1] << 8) | spec.data.data1[2]);
+              } else {
+                spec_json.emplace_back(spec.data.short_hex());
               }
+              if (name_index) {
+                spec_json.emplace_back(name_index->describe_item(spec.data));
+              }
+              area_list.emplace_back(std::move(spec_json));
             }
 
             if (!area_list.empty()) {
               collection_dict.emplace(
-                  string_printf("Box-%s", name_for_floor(episode, area)),
+                  phosg::string_printf("Box-%s", name_for_floor(episode, area)),
                   std::move(area_list));
             }
           }
@@ -501,12 +501,26 @@ std::string RareItemSet::serialize_json(Version version, shared_ptr<const ItemNa
     modes_dict.emplace(name_for_mode(mode), std::move(episodes_dict));
   }
 
-  return modes_dict.serialize(JSON::SerializeOption::FORMAT | JSON::SerializeOption::HEX_INTEGERS | JSON::SerializeOption::SORT_DICT_KEYS);
+  return modes_dict;
+}
+
+void RareItemSet::multiply_all_rates(double factor) {
+  auto multiply_rates_vec = +[](vector<vector<ExpandedDrop>>& vec, double factor) -> void {
+    for (auto& vec_it : vec) {
+      for (auto& z_it : vec_it) {
+        uint64_t new_probability = z_it.probability * factor;
+        z_it.probability = min<uint64_t>(new_probability, 0xFFFFFFFF);
+      }
+    }
+  };
+  for (auto& coll_it : this->collections) {
+    multiply_rates_vec(coll_it.second.rt_index_to_specs, factor);
+    multiply_rates_vec(coll_it.second.box_area_to_specs, factor);
+  }
 }
 
 void RareItemSet::print_collection(
     FILE* stream,
-    Version version,
     GameMode mode,
     Episode episode,
     uint8_t difficulty,
@@ -530,7 +544,7 @@ void RareItemSet::print_collection(
     string enemy_types_str;
     const auto& enemy_types = enemy_types_for_rare_table_index(episode, z);
     for (EnemyType enemy_type : enemy_types) {
-      enemy_types_str += name_for_enum(enemy_type);
+      enemy_types_str += phosg::name_for_enum(enemy_type);
       enemy_types_str.push_back(',');
     }
     if (!enemy_types_str.empty()) {
@@ -538,7 +552,7 @@ void RareItemSet::print_collection(
     }
 
     for (const auto& spec : collection->rt_index_to_specs[z]) {
-      string s = name_index ? spec.str(version, name_index) : spec.str();
+      string s = name_index ? spec.str(name_index) : spec.str();
       fprintf(stream, "    %02zX: %s (%s)\n", z, s.c_str(), enemy_types_str.c_str());
     }
   }
@@ -546,14 +560,13 @@ void RareItemSet::print_collection(
   fprintf(stream, "  Box rares:\n");
   for (size_t area = 0; area < collection->box_area_to_specs.size(); area++) {
     for (const auto& spec : collection->box_area_to_specs[area]) {
-      string s = name_index ? spec.str(version, name_index) : spec.str();
+      string s = name_index ? spec.str(name_index) : spec.str();
       fprintf(stream, "    (area %02zX) %s\n", area, s.c_str());
     }
   }
 }
 
-void RareItemSet::print_all_collections(
-    FILE* stream, Version version, std::shared_ptr<const ItemNameIndex> name_index) const {
+void RareItemSet::print_all_collections(FILE* stream, std::shared_ptr<const ItemNameIndex> name_index) const {
   static const array<GameMode, 4> modes = {GameMode::NORMAL, GameMode::BATTLE, GameMode::CHALLENGE, GameMode::SOLO};
   static const array<Episode, 3> episodes = {Episode::EP1, Episode::EP2, Episode::EP4};
   for (GameMode mode : modes) {
@@ -561,7 +574,7 @@ void RareItemSet::print_all_collections(
       for (uint8_t difficulty = 0; difficulty < 4; difficulty++) {
         for (uint8_t section_id = 0; section_id < 10; section_id++) {
           try {
-            this->print_collection(stream, version, mode, episode, difficulty, section_id, name_index);
+            this->print_collection(stream, mode, episode, difficulty, section_id, name_index);
           } catch (const out_of_range& e) {
           }
         }

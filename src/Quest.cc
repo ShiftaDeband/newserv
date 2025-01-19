@@ -21,7 +21,7 @@
 
 using namespace std;
 
-QuestCategoryIndex::Category::Category(uint32_t category_id, const JSON& json)
+QuestCategoryIndex::Category::Category(uint32_t category_id, const phosg::JSON& json)
     : category_id(category_id) {
   this->enabled_flags = json.get_int(0);
   this->directory_name = json.get_string(1);
@@ -29,7 +29,7 @@ QuestCategoryIndex::Category::Category(uint32_t category_id, const JSON& json)
   this->description = json.get_string(3);
 }
 
-QuestCategoryIndex::QuestCategoryIndex(const JSON& json) {
+QuestCategoryIndex::QuestCategoryIndex(const phosg::JSON& json) {
   uint32_t next_category_id = 1;
   for (const auto& it : json.as_list()) {
     this->categories.emplace_back(make_shared<Category>(next_category_id++, *it));
@@ -42,29 +42,26 @@ shared_ptr<const QuestCategoryIndex::Category> QuestCategoryIndex::at(uint32_t c
 
 // GCI decoding logic
 
-template <bool IsBigEndian>
-struct PSOMemCardDLQFileEncryptedHeader {
-  using U32T = typename std::conditional<IsBigEndian, be_uint32_t, le_uint32_t>::type;
-
-  U32T round2_seed;
+template <bool BE>
+struct PSOMemCardDLQFileEncryptedHeaderT {
+  U32T<BE> round2_seed;
   // To compute checksum, set checksum to zero, then compute the CRC32 of the
   // entire data section, including this header struct (but not the unencrypted
   // header struct).
-  U32T checksum;
+  U32T<BE> checksum;
   le_uint32_t decompressed_size;
   le_uint32_t round3_seed;
   // Data follows here.
-} __attribute__((packed));
+} __packed__;
+using PSOVMSDLQFileEncryptedHeader = PSOMemCardDLQFileEncryptedHeaderT<false>;
+using PSOGCIDLQFileEncryptedHeader = PSOMemCardDLQFileEncryptedHeaderT<true>;
+check_struct_size(PSOVMSDLQFileEncryptedHeader, 0x10);
+check_struct_size(PSOGCIDLQFileEncryptedHeader, 0x10);
 
-struct PSOVMSDLQFileEncryptedHeader : PSOMemCardDLQFileEncryptedHeader<false> {
-} __attribute__((packed));
-struct PSOGCIDLQFileEncryptedHeader : PSOMemCardDLQFileEncryptedHeader<true> {
-} __attribute__((packed));
-
-template <bool IsBigEndian>
+template <bool BE>
 string decrypt_download_quest_data_section(
     const void* data_section, size_t size, uint32_t seed, bool skip_checksum = false, bool is_ep3_trial = false) {
-  string decrypted = decrypt_data_section<IsBigEndian>(data_section, size, seed);
+  string decrypted = decrypt_data_section<BE>(data_section, size, seed);
 
   size_t orig_size = decrypted.size();
   decrypted.resize((decrypted.size() + 3) & (~3));
@@ -73,14 +70,14 @@ string decrypt_download_quest_data_section(
   // not at the beginning. Presumably they did this because the system,
   // character, and Guild Card files are a constant size, but download quest
   // files can vary in size.
-  using HeaderT = PSOMemCardDLQFileEncryptedHeader<IsBigEndian>;
+  using HeaderT = PSOMemCardDLQFileEncryptedHeaderT<BE>;
   auto* header = reinterpret_cast<HeaderT*>(decrypted.data());
   PSOV2Encryption round2_crypt(header->round2_seed);
-  round2_crypt.encrypt_t<IsBigEndian>(
+  round2_crypt.encrypt_t<BE>(
       decrypted.data() + 4, (decrypted.size() - 4));
 
   if (is_ep3_trial) {
-    StringReader r(decrypted);
+    phosg::StringReader r(decrypted);
     r.skip(16);
     if (r.readx(15) != "SONICTEAM,SEGA.") {
       throw runtime_error("Episode 3 GCI file is not a quest");
@@ -94,7 +91,7 @@ string decrypt_download_quest_data_section(
     size_t decompressed_size = prs_decompress_size(
         r.getv(r.remaining(), false), r.remaining(), sizeof(Episode3::MapDefinitionTrial), true);
     if (decompressed_size < sizeof(Episode3::MapDefinitionTrial)) {
-      throw runtime_error(string_printf(
+      throw runtime_error(phosg::string_printf(
           "decompressed size (%zu) does not match expected size (%zu)",
           decompressed_size, sizeof(Episode3::MapDefinitionTrial)));
     }
@@ -102,17 +99,17 @@ string decrypt_download_quest_data_section(
 
   } else {
     if (header->decompressed_size & 0xFFF00000) {
-      throw runtime_error(string_printf(
+      throw runtime_error(phosg::string_printf(
           "decompressed_size too large (%08" PRIX32 ")", header->decompressed_size.load()));
     }
 
     if (!skip_checksum) {
       uint32_t expected_crc = header->checksum;
       header->checksum = 0;
-      uint32_t actual_crc = crc32(decrypted.data(), orig_size);
+      uint32_t actual_crc = phosg::crc32(decrypted.data(), orig_size);
       header->checksum = expected_crc;
-      if (expected_crc != actual_crc && expected_crc != bswap32(actual_crc)) {
-        throw runtime_error(string_printf(
+      if (expected_crc != actual_crc && expected_crc != phosg::bswap32(actual_crc)) {
+        throw runtime_error(phosg::string_printf(
             "incorrect decrypted data section checksum: expected %08" PRIX32 "; received %08" PRIX32,
             expected_crc, actual_crc));
       }
@@ -133,7 +130,7 @@ string decrypt_download_quest_data_section(
     size_t expected_decompressed_size = header->decompressed_size.load();
     if ((decompressed_size != expected_decompressed_size) &&
         (decompressed_size != expected_decompressed_size - 8)) {
-      throw runtime_error(string_printf(
+      throw runtime_error(phosg::string_printf(
           "decompressed size (%zu) does not match expected size (%zu)",
           decompressed_size, expected_decompressed_size));
     }
@@ -143,7 +140,7 @@ string decrypt_download_quest_data_section(
 }
 
 string decrypt_vms_v1_data_section(const void* data_section, size_t size) {
-  StringReader r(data_section, size);
+  phosg::StringReader r(data_section, size);
   uint32_t expected_decompressed_size = r.get_u32l();
   uint32_t seed = r.get_u32l();
 
@@ -156,7 +153,7 @@ string decrypt_vms_v1_data_section(const void* data_section, size_t size) {
 
   size_t actual_decompressed_size = prs_decompress_size(data);
   if (actual_decompressed_size != expected_decompressed_size) {
-    throw runtime_error(string_printf(
+    throw runtime_error(phosg::string_printf(
         "decompressed size (%zu) does not match size in header (%" PRId32 ")",
         actual_decompressed_size, expected_decompressed_size));
   }
@@ -164,14 +161,14 @@ string decrypt_vms_v1_data_section(const void* data_section, size_t size) {
   return data;
 }
 
-template <bool IsBigEndian>
+template <bool BE>
 string find_seed_and_decrypt_download_quest_data_section(
     const void* data_section, size_t size, bool skip_checksum, bool is_ep3_trial, size_t num_threads) {
   mutex result_lock;
   string result;
-  uint64_t result_seed = parallel_range<uint64_t>([&](uint64_t seed, size_t) {
+  uint64_t result_seed = phosg::parallel_range_blocks<uint64_t>([&](uint64_t seed, size_t) {
     try {
-      string ret = decrypt_download_quest_data_section<IsBigEndian>(
+      string ret = decrypt_download_quest_data_section<BE>(
           data_section, size, seed, skip_checksum, is_ep3_trial);
       lock_guard<mutex> g(result_lock);
       result = std::move(ret);
@@ -180,7 +177,7 @@ string find_seed_and_decrypt_download_quest_data_section(
       return false;
     }
   },
-      0, 0x100000000, num_threads);
+      0, 0x100000000, 0x1000, num_threads);
 
   if (!result.empty() && (result_seed < 0x100000000)) {
     static_game_data_log.info("Found seed %08" PRIX64, result_seed);
@@ -193,7 +190,7 @@ string find_seed_and_decrypt_download_quest_data_section(
 struct PSODownloadQuestHeader {
   le_uint32_t size;
   le_uint32_t encryption_seed;
-} __attribute__((packed));
+} __packed_ws__(PSODownloadQuestHeader, 8);
 
 VersionedQuest::VersionedQuest(
     uint32_t quest_number,
@@ -202,23 +199,32 @@ VersionedQuest::VersionedQuest(
     uint8_t language,
     std::shared_ptr<const std::string> bin_contents,
     std::shared_ptr<const std::string> dat_contents,
+    std::shared_ptr<const MapFile> map_file,
     std::shared_ptr<const std::string> pvr_contents,
     std::shared_ptr<const BattleRules> battle_rules,
     ssize_t challenge_template_index,
-    std::shared_ptr<const QuestAvailabilityExpression> available_expression,
-    std::shared_ptr<const QuestAvailabilityExpression> enabled_expression)
+    uint8_t description_flag,
+    std::shared_ptr<const IntegralExpression> available_expression,
+    std::shared_ptr<const IntegralExpression> enabled_expression,
+    bool allow_start_from_chat_command,
+    bool force_joinable,
+    int16_t lock_status_register)
     : quest_number(quest_number),
       category_id(category_id),
       episode(Episode::NONE),
-      joinable(false),
+      allow_start_from_chat_command(allow_start_from_chat_command),
+      joinable(force_joinable),
+      lock_status_register(lock_status_register),
       version(version),
       language(language),
       is_dlq_encoded(false),
       bin_contents(bin_contents),
       dat_contents(dat_contents),
+      map_file(map_file),
       pvr_contents(pvr_contents),
       battle_rules(battle_rules),
       challenge_template_index(challenge_template_index),
+      description_flag(description_flag),
       available_expression(available_expression),
       enabled_expression(enabled_expression) {
 
@@ -230,23 +236,21 @@ VersionedQuest::VersionedQuest(
         throw invalid_argument("file is too small for header");
       }
       auto* header = reinterpret_cast<const PSOQuestHeaderDCNTE*>(bin_decompressed.data());
-      this->joinable = false;
       this->episode = Episode::EP1;
       if (this->quest_number == 0xFFFFFFFF) {
-        this->quest_number = fnv1a32(header, sizeof(header)) & 0xFFFF;
+        this->quest_number = phosg::fnv1a32(header, sizeof(header)) & 0xFFFF;
       }
       this->name = header->name.decode(this->language);
       break;
     }
 
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2: {
       if (bin_decompressed.size() < sizeof(PSOQuestHeaderDC)) {
         throw invalid_argument("file is too small for header");
       }
       auto* header = reinterpret_cast<const PSOQuestHeaderDC*>(bin_decompressed.data());
-      this->joinable = false;
       this->episode = Episode::EP1;
       if (this->quest_number == 0xFFFFFFFF) {
         this->quest_number = header->quest_number;
@@ -263,7 +267,6 @@ VersionedQuest::VersionedQuest(
         throw invalid_argument("file is too small for header");
       }
       auto* header = reinterpret_cast<const PSOQuestHeaderPC*>(bin_decompressed.data());
-      this->joinable = false;
       this->episode = Episode::EP1;
       if (this->quest_number == 0xFFFFFFFF) {
         this->quest_number = header->quest_number;
@@ -286,7 +289,6 @@ VersionedQuest::VersionedQuest(
         throw invalid_argument("file is incorrect size");
       }
       auto* map = reinterpret_cast<const Episode3::MapDefinition*>(bin_decompressed.data());
-      this->joinable = false;
       this->episode = Episode::EP3;
       if (this->quest_number == 0xFFFFFFFF) {
         this->quest_number = map->map_number;
@@ -304,7 +306,6 @@ VersionedQuest::VersionedQuest(
         throw invalid_argument("file is too small for header");
       }
       auto* header = reinterpret_cast<const PSOQuestHeaderGC*>(bin_decompressed.data());
-      this->joinable = false;
       this->episode = find_quest_episode_from_script(bin_decompressed.data(), bin_decompressed.size(), this->version);
       if (this->quest_number == 0xFFFFFFFF) {
         this->quest_number = header->quest_number;
@@ -320,7 +321,7 @@ VersionedQuest::VersionedQuest(
         throw invalid_argument("file is too small for header");
       }
       auto* header = reinterpret_cast<const PSOQuestHeaderBB*>(bin_decompressed.data());
-      this->joinable = header->joinable;
+      this->joinable |= header->joinable;
       this->episode = find_quest_episode_from_script(bin_decompressed.data(), bin_decompressed.size(), this->version);
       if (this->quest_number == 0xFFFFFFFF) {
         this->quest_number = header->quest_number;
@@ -338,9 +339,9 @@ VersionedQuest::VersionedQuest(
 
 string VersionedQuest::bin_filename() const {
   if (this->episode == Episode::EP3) {
-    return string_printf("m%06" PRIu32 "p_e.bin", this->quest_number);
+    return phosg::string_printf("m%06" PRIu32 "p_e.bin", this->quest_number);
   } else {
-    return string_printf("quest%" PRIu32 ".bin", this->quest_number);
+    return phosg::string_printf("quest%" PRIu32 ".bin", this->quest_number);
   }
 }
 
@@ -348,7 +349,15 @@ string VersionedQuest::dat_filename() const {
   if (this->episode == Episode::EP3) {
     throw logic_error("Episode 3 quests do not have .dat files");
   } else {
-    return string_printf("quest%" PRIu32 ".dat", this->quest_number);
+    return phosg::string_printf("quest%" PRIu32 ".dat", this->quest_number);
+  }
+}
+
+string VersionedQuest::pvr_filename() const {
+  if (this->episode == Episode::EP3) {
+    throw logic_error("Episode 3 quests do not have .pvr files");
+  } else {
+    return phosg::string_printf("quest%" PRIu32 ".pvr", this->quest_number);
   }
 }
 
@@ -356,18 +365,18 @@ string VersionedQuest::xb_filename() const {
   if (this->episode == Episode::EP3) {
     throw logic_error("Episode 3 quests do not have Xbox filenames");
   } else {
-    return string_printf("quest%" PRIu32 "_%c.dat", this->quest_number, tolower(char_for_language_code(this->language)));
+    return phosg::string_printf("quest%" PRIu32 "_%c.dat", this->quest_number, tolower(char_for_language_code(this->language)));
   }
 }
 
 string VersionedQuest::encode_qst() const {
   unordered_map<string, shared_ptr<const string>> files;
-  files.emplace(string_printf("quest%" PRIu32 ".bin", this->quest_number), this->bin_contents);
-  files.emplace(string_printf("quest%" PRIu32 ".dat", this->quest_number), this->dat_contents);
+  files.emplace(phosg::string_printf("quest%" PRIu32 ".bin", this->quest_number), this->bin_contents);
+  files.emplace(phosg::string_printf("quest%" PRIu32 ".dat", this->quest_number), this->dat_contents);
   if (this->pvr_contents) {
-    files.emplace(string_printf("quest%" PRIu32 ".pvr", this->quest_number), this->pvr_contents);
+    files.emplace(phosg::string_printf("quest%" PRIu32 ".pvr", this->quest_number), this->pvr_contents);
   }
-  string xb_filename = string_printf("quest%" PRIu32 "_%c.dat", quest_number, tolower(char_for_language_code(language)));
+  string xb_filename = phosg::string_printf("quest%" PRIu32 "_%c.dat", quest_number, tolower(char_for_language_code(language)));
   return encode_qst_file(files, this->name, this->quest_number, xb_filename, this->version, this->is_dlq_encoded);
 }
 
@@ -375,13 +384,52 @@ Quest::Quest(shared_ptr<const VersionedQuest> initial_version)
     : quest_number(initial_version->quest_number),
       category_id(initial_version->category_id),
       episode(initial_version->episode),
+      allow_start_from_chat_command(initial_version->allow_start_from_chat_command),
       joinable(initial_version->joinable),
+      lock_status_register(initial_version->lock_status_register),
       name(initial_version->name),
+      supermap(nullptr),
       battle_rules(initial_version->battle_rules),
       challenge_template_index(initial_version->challenge_template_index),
+      description_flag(initial_version->description_flag),
       available_expression(initial_version->available_expression),
       enabled_expression(initial_version->enabled_expression) {
-  this->versions.emplace(this->versions_key(initial_version->version, initial_version->language), initial_version);
+  this->add_version(initial_version);
+}
+
+phosg::JSON Quest::json() const {
+  auto versions_json = phosg::JSON::list();
+  for (const auto& [_, vq] : this->versions) {
+    versions_json.emplace_back(phosg::JSON::dict({
+        {"Version", phosg::name_for_enum(vq->version)},
+        {"Language", name_for_language_code(vq->language)},
+        {"ShortDescription", vq->short_description},
+        {"LongDescription", vq->long_description},
+        {"BINFileSize", vq->bin_contents ? vq->bin_contents->size() : phosg::JSON(nullptr)},
+        {"DATFileSize", vq->dat_contents ? vq->dat_contents->size() : phosg::JSON(nullptr)},
+        {"PVRFileSize", vq->pvr_contents ? vq->pvr_contents->size() : phosg::JSON(nullptr)},
+    }));
+  }
+
+  auto battle_rules_json = this->battle_rules ? this->battle_rules->json() : nullptr;
+  auto challenge_template_index_json = (this->challenge_template_index >= 0)
+      ? this->challenge_template_index
+      : phosg::JSON(nullptr);
+  return phosg::JSON::dict({
+      {"Number", this->quest_number},
+      {"CategoryID", this->category_id},
+      {"Episode", name_for_episode(this->episode)},
+      {"AllowStartFromChatCommand", this->allow_start_from_chat_command},
+      {"Joinable", this->joinable},
+      {"LockStatusRegister", (this->lock_status_register >= 0) ? this->lock_status_register : phosg::JSON(nullptr)},
+      {"Name", this->name},
+      {"BattleRules", std::move(battle_rules_json)},
+      {"ChallengeTemplateIndex", std::move(challenge_template_index_json)},
+      {"DescriptionFlag", this->description_flag},
+      {"AvailableExpression", this->available_expression ? this->available_expression->str() : phosg::JSON(nullptr)},
+      {"EnabledExpression", this->available_expression ? this->available_expression->str() : phosg::JSON(nullptr)},
+      {"Versions", std::move(versions_json)},
+  });
 }
 
 uint32_t Quest::versions_key(Version v, uint8_t language) {
@@ -398,8 +446,14 @@ void Quest::add_version(shared_ptr<const VersionedQuest> vq) {
   if (this->episode != vq->episode) {
     throw runtime_error("quest version is in a different episode");
   }
+  if (this->allow_start_from_chat_command != vq->allow_start_from_chat_command) {
+    throw runtime_error("quest version has a different allow_start_from_chat_command state");
+  }
   if (this->joinable != vq->joinable) {
     throw runtime_error("quest version has a different joinability state");
+  }
+  if (this->lock_status_register != vq->lock_status_register) {
+    throw runtime_error("quest version has a different lock status register");
   }
   if (!this->battle_rules != !vq->battle_rules) {
     throw runtime_error("quest version has a different battle rules presence state");
@@ -409,6 +463,9 @@ void Quest::add_version(shared_ptr<const VersionedQuest> vq) {
   }
   if (this->challenge_template_index != vq->challenge_template_index) {
     throw runtime_error("quest version has different challenge template index");
+  }
+  if (this->description_flag != vq->description_flag) {
+    throw runtime_error("quest version has different description flag");
   }
   if (!this->available_expression != !vq->available_expression) {
     throw runtime_error("quest version has available expression but root quest does not, or vice versa");
@@ -424,6 +481,44 @@ void Quest::add_version(shared_ptr<const VersionedQuest> vq) {
   }
 
   this->versions.emplace(this->versions_key(vq->version, vq->language), vq);
+}
+
+std::shared_ptr<const SuperMap> Quest::get_supermap(int64_t random_seed) const {
+  if (this->supermap) {
+    return this->supermap;
+  }
+
+  bool save_to_cache = true;
+  bool any_map_file_present = false;
+  array<shared_ptr<const MapFile>, NUM_VERSIONS> map_files;
+  for (Version v : ALL_ARPG_SEMANTIC_VERSIONS) {
+    auto vq = this->version(v, 1);
+    if (vq && vq->map_file) {
+      auto map_file = vq->map_file;
+      if (map_file->has_random_sections()) {
+        if (random_seed < 0) {
+          return nullptr;
+        }
+        save_to_cache = false;
+        map_file = map_file->materialize_random_sections(random_seed);
+      }
+      map_files.at(static_cast<size_t>(v)) = map_file;
+      any_map_file_present = true;
+    }
+  }
+
+  if (!any_map_file_present) {
+    return nullptr;
+  }
+
+  auto supermap = make_shared<SuperMap>(this->episode, map_files);
+  if (save_to_cache) {
+    this->supermap = supermap;
+  }
+  static_game_data_log.info("Constructed %s supermap for quest %" PRIu32 " (%s)",
+      save_to_cache ? "cacheable" : "temporary", this->quest_number, this->name.c_str());
+
+  return supermap;
 }
 
 bool Quest::has_version(Version v, uint8_t language) const {
@@ -442,11 +537,13 @@ shared_ptr<const VersionedQuest> Quest::version(Version v, uint8_t language) con
     return this->versions.at(this->versions_key(v, language));
   } catch (const out_of_range&) {
   }
+
   // Return the English version, if it exists
   try {
     return this->versions.at(this->versions_key(v, 1));
   } catch (const out_of_range&) {
   }
+
   // Return the first language, if it exists
   auto it = this->versions.lower_bound(this->versions_key(v, 0));
   if ((it == this->versions.end()) || ((it->first & 0xFF00) != this->versions_key(v, 0))) {
@@ -457,17 +554,22 @@ shared_ptr<const VersionedQuest> Quest::version(Version v, uint8_t language) con
 
 QuestIndex::QuestIndex(
     const string& directory,
-    std::shared_ptr<const QuestCategoryIndex> category_index,
+    shared_ptr<const QuestCategoryIndex> category_index,
     bool is_ep3)
     : directory(directory),
       category_index(category_index) {
 
   struct FileData {
-    std::string filename;
+    string filename;
     shared_ptr<const string> data;
   };
+  struct DATFileData {
+    string filename;
+    shared_ptr<const string> data;
+    shared_ptr<const MapFile> map_file;
+  };
   map<string, FileData> bin_files;
-  map<string, FileData> dat_files;
+  map<string, DATFileData> dat_files;
   map<string, FileData> pvr_files;
   map<string, FileData> json_files;
   map<string, uint32_t> categories;
@@ -478,7 +580,7 @@ QuestIndex::QuestIndex(
       continue;
     }
 
-    auto add_file = [&](map<string, FileData>& files, const string& basename, const string& filename, string&& value) {
+    auto add_file = [&](map<string, FileData>& files, const string& basename, const string& filename, string&& value, bool check_chunk_size) {
       if (categories.emplace(basename, cat->category_id).first->second != cat->category_id) {
         throw runtime_error("file " + basename + " exists in multiple categories");
       }
@@ -486,74 +588,100 @@ QuestIndex::QuestIndex(
       if (!files.emplace(basename, FileData{filename, data_ptr}).second) {
         throw runtime_error("file " + basename + " already exists");
       }
+      // There is a bug in the client that prevents quests from loading properly
+      // if any file's size is a multiple of 0x400. See the comments on the 13
+      // command in CommandFormats.hh for more details.
+      if (check_chunk_size && !(data_ptr->size() & 0x3FF)) {
+        data_ptr->push_back(0x00);
+      }
+    };
+
+    auto add_dat_file = [&](const string& basename, const string& filename, string&& value) {
+      if (categories.emplace(basename, cat->category_id).first->second != cat->category_id) {
+        throw runtime_error("file " + basename + " exists in multiple categories");
+      }
+      auto data_ptr = make_shared<string>(std::move(value));
+      auto map_file = make_shared<MapFile>(make_shared<string>(prs_decompress(*data_ptr)));
+      if (!dat_files.emplace(basename, DATFileData{filename, data_ptr, map_file}).second) {
+        throw runtime_error("file " + basename + " already exists");
+      }
+      // There is a bug in the client that prevents quests from loading properly
+      // if any file's size is a multiple of 0x400. See the comments on the 13
+      // command in CommandFormats.hh for more details.
+      if (!(data_ptr->size() & 0x3FF)) {
+        data_ptr->push_back(0x00);
+      }
     };
 
     string cat_path = directory + "/" + cat->directory_name;
-    if (!isdir(cat_path)) {
+    if (!phosg::isdir(cat_path)) {
       static_game_data_log.warning("Quest category directory %s is missing; skipping it", cat_path.c_str());
       continue;
     }
-    for (string filename : list_directory_sorted(cat_path)) {
+    for (string filename : phosg::list_directory_sorted(cat_path)) {
+      if (filename == ".DS_Store") {
+        continue;
+      }
+
       string file_path = cat_path + "/" + filename;
       try {
         string orig_filename = filename;
         string file_data;
-        if (ends_with(filename, ".gci")) {
-          file_data = decode_gci_data(load_file(file_path));
+        if (phosg::ends_with(filename, ".gci")) {
+          file_data = decode_gci_data(phosg::load_file(file_path));
           filename.resize(filename.size() - 4);
-        } else if (ends_with(filename, ".vms")) {
-          file_data = decode_vms_data(load_file(file_path));
+        } else if (phosg::ends_with(filename, ".vms")) {
+          file_data = decode_vms_data(phosg::load_file(file_path));
           filename.resize(filename.size() - 4);
-        } else if (ends_with(filename, ".dlq")) {
-          file_data = decode_dlq_data(load_file(file_path));
+        } else if (phosg::ends_with(filename, ".dlq")) {
+          file_data = decode_dlq_data(phosg::load_file(file_path));
           filename.resize(filename.size() - 4);
-        } else if (ends_with(filename, ".txt")) {
-          file_data = assemble_quest_script(load_file(file_path));
+        } else if (phosg::ends_with(filename, ".txt")) {
+          string include_dir = phosg::dirname(file_path);
+          file_data = assemble_quest_script(phosg::load_file(file_path), include_dir);
           filename.resize(filename.size() - 4);
-          if (ends_with(filename, ".bin")) {
+          if (phosg::ends_with(filename, ".bin")) {
             filename.push_back('d');
           }
         } else {
-          file_data = load_file(file_path);
+          file_data = phosg::load_file(file_path);
         }
 
         size_t dot_pos = filename.rfind('.');
         string file_basename;
         string extension;
         if (dot_pos != string::npos) {
-          file_basename = tolower(filename.substr(0, dot_pos));
-          extension = tolower(filename.substr(dot_pos + 1));
+          file_basename = phosg::tolower(filename.substr(0, dot_pos));
+          extension = phosg::tolower(filename.substr(dot_pos + 1));
         } else {
-          file_basename = tolower(filename);
+          file_basename = phosg::tolower(filename);
         }
 
         if (extension == "json") {
-          add_file(json_files, file_basename, orig_filename, std::move(file_data));
+          add_file(json_files, file_basename, orig_filename, std::move(file_data), false);
         } else if (extension == "bin" || extension == "mnm") {
-          add_file(bin_files, file_basename, orig_filename, std::move(file_data));
+          add_file(bin_files, file_basename, orig_filename, std::move(file_data), true);
         } else if (extension == "bind" || extension == "mnmd") {
-          add_file(bin_files, file_basename, orig_filename, prs_compress_optimal(file_data));
+          add_file(bin_files, file_basename, orig_filename, prs_compress_optimal(file_data), true);
         } else if (extension == "dat") {
-          add_file(dat_files, file_basename, orig_filename, std::move(file_data));
+          add_dat_file(file_basename, orig_filename, std::move(file_data));
         } else if (extension == "datd") {
-          add_file(dat_files, file_basename, orig_filename, prs_compress_optimal(file_data));
+          add_dat_file(file_basename, orig_filename, prs_compress_optimal(file_data));
         } else if (extension == "pvr") {
-          add_file(pvr_files, file_basename, orig_filename, std::move(file_data));
+          add_file(pvr_files, file_basename, orig_filename, std::move(file_data), true);
         } else if (extension == "qst") {
           auto files = decode_qst_data(file_data);
           for (auto& it : files) {
-            if (ends_with(it.first, ".bin")) {
-              add_file(bin_files, file_basename, orig_filename, std::move(it.second));
-            } else if (ends_with(it.first, ".dat")) {
-              add_file(dat_files, file_basename, orig_filename, std::move(it.second));
-            } else if (ends_with(it.first, ".pvr")) {
-              add_file(pvr_files, file_basename, orig_filename, std::move(it.second));
+            if (phosg::ends_with(it.first, ".bin")) {
+              add_file(bin_files, file_basename, orig_filename, std::move(it.second), true);
+            } else if (phosg::ends_with(it.first, ".dat")) {
+              add_dat_file(file_basename, orig_filename, std::move(it.second));
+            } else if (phosg::ends_with(it.first, ".pvr")) {
+              add_file(pvr_files, file_basename, orig_filename, std::move(it.second), true);
             } else {
               throw runtime_error("qst file contains unsupported file type: " + it.first);
             }
           }
-        } else {
-          static_game_data_log.warning("(%s) Skipping file (unsupported format)", filename.c_str());
         }
 
       } catch (const exception& e) {
@@ -580,7 +708,7 @@ QuestIndex::QuestIndex(
       // parse the remaining fields.
       string quest_number_token, version_token, language_token;
       {
-        vector<string> filename_tokens = split(basename, '-');
+        vector<string> filename_tokens = phosg::split(basename, '-');
         if (filename_tokens.size() != 3) {
           throw invalid_argument("incorrect filename format");
         }
@@ -600,7 +728,7 @@ QuestIndex::QuestIndex(
       // Get the version from the second token
       static const unordered_map<string, Version> name_to_version({
           {"dn", Version::DC_NTE},
-          {"dp", Version::DC_V1_11_2000_PROTOTYPE},
+          {"dp", Version::DC_11_2000},
           {"d1", Version::DC_V1},
           {"dc", Version::DC_V2},
           {"pcn", Version::PC_NTE},
@@ -621,7 +749,7 @@ QuestIndex::QuestIndex(
       uint8_t language = language_code_for_char(language_token[0]);
 
       // Find the corresponding dat and pvr files
-      const FileData* dat_filedata = nullptr;
+      const DATFileData* dat_filedata = nullptr;
       const FileData* pvr_filedata = nullptr;
       if (!::is_ep3(version)) {
         // Look for dat and pvr files with the same basename as the bin file; if
@@ -647,12 +775,16 @@ QuestIndex::QuestIndex(
         }
       }
 
-      // Load the quest's metadata JSON file, if it exists
+      // Load the quest's metadata phosg::JSON file, if it exists
       const FileData* json_filedata = nullptr;
       shared_ptr<BattleRules> battle_rules;
       ssize_t challenge_template_index = -1;
-      shared_ptr<const QuestAvailabilityExpression> available_expression;
-      shared_ptr<const QuestAvailabilityExpression> enabled_expression;
+      uint8_t description_flag = 0;
+      shared_ptr<const IntegralExpression> available_expression;
+      shared_ptr<const IntegralExpression> enabled_expression;
+      bool allow_start_from_chat_command = false;
+      bool force_joinable = false;
+      int16_t lock_status_register = -1;
       try {
         json_filedata = &json_files.at(basename);
       } catch (const out_of_range&) {
@@ -666,7 +798,7 @@ QuestIndex::QuestIndex(
         }
       }
       if (json_filedata) {
-        auto metadata_json = JSON::parse(*json_filedata->data);
+        auto metadata_json = phosg::JSON::parse(*json_filedata->data);
         try {
           battle_rules = make_shared<BattleRules>(metadata_json.at("BattleRules"));
         } catch (const out_of_range&) {
@@ -676,11 +808,27 @@ QuestIndex::QuestIndex(
         } catch (const out_of_range&) {
         }
         try {
-          available_expression = make_shared<QuestAvailabilityExpression>(metadata_json.get_string("AvailableIf"));
+          description_flag = metadata_json.at("DescriptionFlag").as_int();
         } catch (const out_of_range&) {
         }
         try {
-          enabled_expression = make_shared<QuestAvailabilityExpression>(metadata_json.get_string("EnabledIf"));
+          available_expression = make_shared<IntegralExpression>(metadata_json.get_string("AvailableIf"));
+        } catch (const out_of_range&) {
+        }
+        try {
+          enabled_expression = make_shared<IntegralExpression>(metadata_json.get_string("EnabledIf"));
+        } catch (const out_of_range&) {
+        }
+        try {
+          allow_start_from_chat_command = metadata_json.get_bool("AllowStartFromChatCommand");
+        } catch (const out_of_range&) {
+        }
+        try {
+          force_joinable = metadata_json.get_bool("Joinable");
+        } catch (const out_of_range&) {
+        }
+        try {
+          lock_status_register = metadata_json.get_int("LockStatusRegister");
         } catch (const out_of_range&) {
         }
       }
@@ -692,39 +840,45 @@ QuestIndex::QuestIndex(
           language,
           bin_filedata->data,
           dat_filedata ? dat_filedata->data : nullptr,
+          dat_filedata ? dat_filedata->map_file : nullptr,
           pvr_filedata ? pvr_filedata->data : nullptr,
           battle_rules,
           challenge_template_index,
+          description_flag,
           available_expression,
-          enabled_expression);
+          enabled_expression,
+          allow_start_from_chat_command,
+          force_joinable,
+          lock_status_register);
 
       auto category_name = this->category_index->at(vq->category_id)->name;
       string filenames_str = bin_filedata->filename;
       if (dat_filedata) {
-        filenames_str += string_printf("/%s", dat_filedata->filename.c_str());
+        filenames_str += phosg::string_printf("/%s", dat_filedata->filename.c_str());
       }
       if (pvr_filedata) {
-        filenames_str += string_printf("/%s", pvr_filedata->filename.c_str());
+        filenames_str += phosg::string_printf("/%s", pvr_filedata->filename.c_str());
       }
       if (json_filedata) {
-        filenames_str += string_printf("/%s", json_filedata->filename.c_str());
+        filenames_str += phosg::string_printf("/%s", json_filedata->filename.c_str());
       }
       auto q_it = this->quests_by_number.find(vq->quest_number);
       if (q_it != this->quests_by_number.end()) {
         q_it->second->add_version(vq);
         static_game_data_log.info("(%s) Added %s %c version of quest %" PRIu32 " (%s)",
             filenames_str.c_str(),
-            name_for_enum(vq->version),
+            phosg::name_for_enum(vq->version),
             char_for_language_code(vq->language),
             vq->quest_number,
             vq->name.c_str());
       } else {
         auto q = make_shared<Quest>(vq);
         this->quests_by_number.emplace(vq->quest_number, q);
+        this->quests_by_name.emplace(vq->name, q);
         this->quests_by_category_id_and_number[q->category_id].emplace(vq->quest_number, q);
         static_game_data_log.info("(%s) Created %s %c quest %" PRIu32 " (%s) (%s, %s (%" PRIu32 "), %s)",
             filenames_str.c_str(),
-            name_for_enum(vq->version),
+            phosg::name_for_enum(vq->version),
             char_for_language_code(vq->language),
             vq->quest_number,
             vq->name.c_str(),
@@ -737,6 +891,39 @@ QuestIndex::QuestIndex(
       static_game_data_log.warning("(%s) Failed to index quest file: (%s)", basename.c_str(), e.what());
     }
   }
+
+  // Create supermaps for all quests that need them (all non-Ep3 quests)
+  for (const auto& it : this->quests_by_number) {
+    it.second->get_supermap(-1);
+  }
+}
+
+phosg::JSON QuestIndex::json() const {
+  auto categories_json = phosg::JSON::dict();
+  for (const auto& cat : this->category_index->categories) {
+    auto dict = phosg::JSON::dict({
+        {"CategoryID", cat->category_id},
+        {"Flags", cat->enabled_flags},
+        {"DirectoryName", cat->directory_name},
+        {"Name", cat->name},
+        {"Description", cat->description},
+    });
+    categories_json.emplace(cat->name, std::move(dict));
+  }
+
+  auto quests_json = phosg::JSON::list();
+  for (const auto& [_, q] : this->quests_by_number) {
+    quests_json.emplace_back(q->json());
+  }
+
+  return phosg::JSON::dict({
+      {"Directory", this->directory},
+      {"Categories", std::move(categories_json)},
+      {"Quests", std::move(quests_json)},
+  });
+  // std::map<uint32_t, std::shared_ptr<Quest>> quests_by_number;
+  // std::map<std::string, std::shared_ptr<Quest>> quests_by_name;
+  // std::map<uint32_t, std::map<uint32_t, std::shared_ptr<Quest>>> quests_by_category_id_and_number;
 }
 
 shared_ptr<const Quest> QuestIndex::get(uint32_t quest_number) const {
@@ -747,19 +934,22 @@ shared_ptr<const Quest> QuestIndex::get(uint32_t quest_number) const {
   }
 }
 
+shared_ptr<const Quest> QuestIndex::get(const std::string& name) const {
+  try {
+    return this->quests_by_name.at(name);
+  } catch (const out_of_range&) {
+    return nullptr;
+  }
+}
+
 vector<shared_ptr<const QuestCategoryIndex::Category>> QuestIndex::categories(
     QuestMenuType menu_type,
     Episode episode,
-    Version version,
+    uint16_t version_flags,
     IncludeCondition include_condition) const {
-  // The episode filter should apply in normal or solo mode
-  if ((menu_type != QuestMenuType::NORMAL) && (menu_type != QuestMenuType::SOLO)) {
-    episode = Episode::NONE;
-  }
-
   vector<shared_ptr<const QuestCategoryIndex::Category>> ret;
   for (const auto& cat : this->category_index->categories) {
-    if (cat->check_flag(menu_type) && !this->filter(menu_type, episode, version, cat->category_id, include_condition, 1).empty()) {
+    if (cat->check_flag(menu_type) && !this->filter(episode, version_flags, cat->category_id, include_condition, 1).empty()) {
       ret.emplace_back(cat);
     }
   }
@@ -767,15 +957,13 @@ vector<shared_ptr<const QuestCategoryIndex::Category>> QuestIndex::categories(
 }
 
 vector<pair<QuestIndex::IncludeState, shared_ptr<const Quest>>> QuestIndex::filter(
-    QuestMenuType menu_type,
     Episode episode,
-    Version version,
+    uint16_t version_flags,
     uint32_t category_id,
     IncludeCondition include_condition,
     size_t limit) const {
-  if ((menu_type != QuestMenuType::NORMAL) && (menu_type != QuestMenuType::SOLO)) {
-    episode = Episode::NONE;
-  }
+  auto cat = this->category_index->at(category_id);
+  Episode effective_episode = cat->enable_episode_filter() ? episode : Episode::NONE;
 
   vector<pair<IncludeState, shared_ptr<const Quest>>> ret;
   auto category_it = this->quests_by_category_id_and_number.find(category_id);
@@ -783,16 +971,26 @@ vector<pair<QuestIndex::IncludeState, shared_ptr<const Quest>>> QuestIndex::filt
     return ret;
   }
   for (auto it : category_it->second) {
-    if (((episode == Episode::NONE) || (it.second->episode == episode)) &&
-        it.second->has_version_any_language(version)) {
-      IncludeState state = include_condition ? include_condition(it.second) : IncludeState::AVAILABLE;
-      if (state == IncludeState::HIDDEN) {
-        continue;
-      }
-      ret.emplace_back(make_pair(state, it.second));
-      if (limit && (ret.size() >= limit)) {
+    if ((effective_episode != Episode::NONE) && (it.second->episode != effective_episode)) {
+      continue;
+    }
+    bool all_required_versions_present = true;
+    for (size_t v_s = 0; v_s < NUM_VERSIONS; v_s++) {
+      if ((version_flags & (1 << v_s)) && !it.second->has_version_any_language(static_cast<Version>(v_s))) {
+        all_required_versions_present = false;
         break;
       }
+    }
+    if (!all_required_versions_present) {
+      continue;
+    }
+    IncludeState state = include_condition ? include_condition(it.second) : IncludeState::AVAILABLE;
+    if (state == IncludeState::HIDDEN) {
+      continue;
+    }
+    ret.emplace_back(make_pair(state, it.second));
+    if (limit && (ret.size() >= limit)) {
+      break;
     }
   }
   return ret;
@@ -804,7 +1002,7 @@ string encode_download_quest_data(const string& compressed_data, size_t decompre
   // header (PSODownloadQuestHeader) is prepended to the encrypted data.
 
   if (encryption_seed == 0) {
-    encryption_seed = random_object<uint32_t>();
+    encryption_seed = phosg::random_object<uint32_t>();
   }
   if (decompressed_size == 0) {
     decompressed_size = prs_decompress_size(compressed_data);
@@ -852,7 +1050,7 @@ shared_ptr<VersionedQuest> VersionedQuest::create_download_quest(uint8_t overrid
       // There's no known language field in this version, so we don't write
       // anything here
       break;
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
       if (decompressed_bin.size() < sizeof(PSOQuestHeaderDC)) {
@@ -894,9 +1092,7 @@ shared_ptr<VersionedQuest> VersionedQuest::create_download_quest(uint8_t overrid
   auto dlq = make_shared<VersionedQuest>(*this);
   dlq->bin_contents = make_shared<string>(encode_download_quest_data(compressed_bin, decompressed_bin.size()));
   dlq->dat_contents = make_shared<string>(encode_download_quest_data(*this->dat_contents));
-  if (this->pvr_contents) {
-    dlq->pvr_contents = make_shared<string>(encode_download_quest_data(*this->pvr_contents));
-  }
+  dlq->pvr_contents = this->pvr_contents;
   dlq->is_dlq_encoded = true;
   return dlq;
 }
@@ -906,7 +1102,7 @@ string decode_gci_data(
     ssize_t find_seed_num_threads,
     int64_t known_seed,
     bool skip_checksum) {
-  StringReader r(data);
+  phosg::StringReader r(data);
   const auto& header = r.get<PSOGCIFileHeader>();
   header.check();
 
@@ -942,7 +1138,7 @@ string decode_gci_data(
 
       size_t expected_decompressed_bytes = dlq_header.decompressed_size - 8;
       if (decompressed_bytes < expected_decompressed_bytes) {
-        throw runtime_error(string_printf(
+        throw runtime_error(phosg::string_printf(
             "GCI decompressed data is smaller than expected size (have 0x%zX bytes, expected 0x%zX bytes)",
             decompressed_bytes, expected_decompressed_bytes));
       }
@@ -951,7 +1147,7 @@ string decode_gci_data(
     }
 
   } else if (header.is_ep3()) {
-    if (header.is_trial()) {
+    if (header.is_nte()) {
       if (known_seed >= 0) {
         return decrypt_download_quest_data_section<true>(
             r.getv(header.data_size), header.data_size, known_seed, true, true);
@@ -991,7 +1187,7 @@ string decode_gci_data(
 
       size_t decompressed_size = prs_decompress_size(decrypted);
       if (decompressed_size != sizeof(Episode3::MapDefinition)) {
-        throw runtime_error(string_printf(
+        throw runtime_error(phosg::string_printf(
             "decompressed quest is 0x%zX bytes; expected 0x%zX bytes",
             decompressed_size, sizeof(Episode3::MapDefinition)));
       }
@@ -1008,7 +1204,7 @@ string decode_vms_data(
     ssize_t find_seed_num_threads,
     int64_t known_seed,
     bool skip_checksum) {
-  StringReader r(data);
+  phosg::StringReader r(data);
   const auto& header = r.get<PSOVMSFileHeader>();
   if (!header.checksum_correct()) {
     throw runtime_error("VMS file unencrypted header checksum is incorrect");
@@ -1038,7 +1234,7 @@ string decode_vms_data(
 }
 
 string decode_dlq_data(const string& data) {
-  StringReader r(data);
+  phosg::StringReader r(data);
   uint32_t decompressed_size = r.get_u32l();
   uint32_t key = r.get_u32l();
 
@@ -1062,7 +1258,7 @@ string decode_dlq_data(const string& data) {
 
 template <typename HeaderT, typename OpenFileT>
 static unordered_map<string, string> decode_qst_data_t(const string& data) {
-  StringReader r(data);
+  phosg::StringReader r(data);
 
   unordered_map<string, string> files;
   unordered_map<string, size_t> file_remaining_bytes;
@@ -1138,7 +1334,7 @@ static unordered_map<string, string> decode_qst_data_t(const string& data) {
 
   for (const auto& it : file_remaining_bytes) {
     if (it.second) {
-      throw runtime_error(string_printf("expected %zu (0x%zX) more bytes for file %s", it.second, it.second, it.first.c_str()));
+      throw runtime_error(phosg::string_printf("expected %zu (0x%zX) more bytes for file %s", it.second, it.second, it.first.c_str()));
     }
   }
 
@@ -1159,7 +1355,7 @@ unordered_map<string, string> decode_qst_data(const string& data) {
   // - PC:    3C 00 44 ?? or 3C 00 A6 ??
   // - DC/GC: 44 ?? 3C 00 or A6 ?? 3C 00
   // - XB:    44 ?? 54 00 or A6 ?? 54 00
-  StringReader r(data);
+  phosg::StringReader r(data);
   uint32_t signature = r.get_u32b();
   if ((signature == 0x58004400) || (signature == 0x5800A600)) {
     return decode_qst_data_t<PSOCommandHeaderBB, S_OpenFile_BB_44_A6>(data);
@@ -1170,7 +1366,7 @@ unordered_map<string, string> decode_qst_data(const string& data) {
     // the filename was shifted over by one byte. To detect this, we check if
     // the V3 type field has a reasonable value, and if not, we assume the file
     // is for PSO DC.
-    if (r.pget_u32l(sizeof(PSOCommandHeaderDCV3) + offsetof(S_OpenFile_PC_GC_44_A6, type)) > 3) {
+    if (r.pget_u16l(sizeof(PSOCommandHeaderDCV3) + offsetof(S_OpenFile_PC_GC_44_A6, type)) > 3) {
       return decode_qst_data_t<PSOCommandHeaderDCV3, S_OpenFile_DC_44_A6>(data);
     } else {
       return decode_qst_data_t<PSOCommandHeaderDCV3, S_OpenFile_PC_GC_44_A6>(data);
@@ -1183,7 +1379,7 @@ unordered_map<string, string> decode_qst_data(const string& data) {
 }
 
 template <typename HeaderT>
-void add_command_header(StringWriter& w, uint8_t command, uint8_t flag, uint16_t size) {
+void add_command_header(phosg::StringWriter& w, uint8_t command, uint8_t flag, uint16_t size) {
   HeaderT header;
   header.command = command;
   header.flag = flag;
@@ -1193,7 +1389,7 @@ void add_command_header(StringWriter& w, uint8_t command, uint8_t flag, uint16_t
 
 template <typename HeaderT, typename CmdT>
 void add_open_file_command_t(
-    StringWriter& w,
+    phosg::StringWriter& w,
     const std::string& name,
     const std::string& filename,
     const std::string&,
@@ -1213,7 +1409,7 @@ void add_open_file_command_t(
 
 template <>
 void add_open_file_command_t<PSOCommandHeaderDCV3, S_OpenFile_XB_44_A6>(
-    StringWriter& w,
+    phosg::StringWriter& w,
     const std::string& name,
     const std::string& filename,
     const std::string& xb_filename,
@@ -1233,7 +1429,7 @@ void add_open_file_command_t<PSOCommandHeaderDCV3, S_OpenFile_XB_44_A6>(
 
 template <typename HeaderT>
 void add_write_file_commands_t(
-    StringWriter& w,
+    phosg::StringWriter& w,
     const string& filename,
     const string& data,
     bool is_download,
@@ -1262,13 +1458,13 @@ string encode_qst_file(
     const string& xb_filename,
     Version version,
     bool is_dlq_encoded) {
-  StringWriter w;
+  phosg::StringWriter w;
 
   // Some tools expect both open file commands at the beginning, hence this
   // unfortunate abstraction-breaking.
   switch (version) {
     case Version::DC_NTE: // DC NTE doesn't support quests, but we support encoding QST files anyway
-    case Version::DC_V1_11_2000_PROTOTYPE:
+    case Version::DC_11_2000:
     case Version::DC_V1:
     case Version::DC_V2:
       for (const auto& it : files) {

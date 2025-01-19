@@ -24,7 +24,7 @@ public:
     /* 04 */ le_int16_t ata_bonus;
     /* 06 */ le_uint16_t unknown_a4;
     /* 08 */ le_float distance_x;
-    /* 0C */ le_float angle_x;
+    /* 0C */ le_uint32_t angle_x; // Out of 0x10000 (high 16 bits are unused)
     /* 10 */ le_float distance_y;
     /* 14 */ le_uint16_t unknown_a8;
     /* 16 */ le_uint16_t unknown_a9;
@@ -36,7 +36,7 @@ public:
     /* 28 */ le_uint32_t unknown_a15;
     /* 2C */ le_uint32_t unknown_a16;
     /* 30 */
-  } __attribute__((packed));
+  } __packed_ws__(AttackData, 0x30);
 
   struct ResistData {
     /* 00 */ le_int16_t evp_bonus;
@@ -51,7 +51,7 @@ public:
     /* 18 */ le_uint32_t unknown_a9;
     /* 1C */ le_int32_t dfp_bonus;
     /* 20 */
-  } __attribute__((packed));
+  } __packed_ws__(ResistData, 0x20);
 
   struct MovementData {
     /* 00 */ le_float idle_move_speed;
@@ -67,7 +67,7 @@ public:
     /* 28 */ le_uint32_t unknown_a7;
     /* 2C */ le_uint32_t unknown_a8;
     /* 30 */
-  } __attribute__((packed));
+  } __packed_ws__(MovementData, 0x30);
 
   struct Table {
     /* 0000 */ parray<parray<PlayerStats, 0x60>, 4> stats;
@@ -77,7 +77,7 @@ public:
     /* F600 */
 
     void print(FILE* stream) const;
-  } __attribute__((packed));
+  } __packed_ws__(Table, 0xF600);
 
   BattleParamsIndex(
       std::shared_ptr<const std::string> data_on_ep1, // BattleParamEntry_on.dat
@@ -92,7 +92,7 @@ public:
 private:
   struct File {
     std::shared_ptr<const std::string> data;
-    const Table* table;
+    const Table* table = nullptr;
   };
 
   // Indexed as [online/offline][episode]

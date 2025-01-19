@@ -10,7 +10,7 @@
 using namespace std;
 
 template <>
-const char* name_for_enum<EnemyType>(EnemyType type) {
+const char* phosg::name_for_enum<EnemyType>(EnemyType type) {
   switch (type) {
     case EnemyType::UNKNOWN:
       return "UNKNOWN";
@@ -38,6 +38,8 @@ const char* name_for_enum<EnemyType>(EnemyType type) {
       return "BOOTA";
     case EnemyType::BULCLAW:
       return "BULCLAW";
+    case EnemyType::BULK:
+      return "BULK";
     case EnemyType::CANADINE:
       return "CANADINE";
     case EnemyType::CANADINE_GROUP:
@@ -272,7 +274,7 @@ const char* name_for_enum<EnemyType>(EnemyType type) {
 }
 
 template <>
-EnemyType enum_for_name<EnemyType>(const char* name) {
+EnemyType phosg::enum_for_name<EnemyType>(const char* name) {
   static const unordered_map<string, EnemyType> names({
       {"UNKNOWN", EnemyType::UNKNOWN},
       {"NONE", EnemyType::NONE},
@@ -287,6 +289,7 @@ EnemyType enum_for_name<EnemyType>(const char* name) {
       {"BOOMA", EnemyType::BOOMA},
       {"BOOTA", EnemyType::BOOTA},
       {"BULCLAW", EnemyType::BULCLAW},
+      {"BULK", EnemyType::BULK},
       {"CANADINE", EnemyType::CANADINE},
       {"CANADINE_GROUP", EnemyType::CANADINE_GROUP},
       {"CANANE", EnemyType::CANANE},
@@ -409,150 +412,152 @@ bool enemy_type_valid_for_episode(Episode episode, EnemyType enemy_type) {
   switch (episode) {
     case Episode::EP1:
       switch (enemy_type) {
-        case EnemyType::MOTHMANT:
-        case EnemyType::MONEST:
-        case EnemyType::SAVAGE_WOLF:
-        case EnemyType::BARBAROUS_WOLF:
-        case EnemyType::POISON_LILY:
-        case EnemyType::NAR_LILY:
-        case EnemyType::SINOW_BEAT:
-        case EnemyType::CANADINE:
-        case EnemyType::CANADINE_GROUP:
-        case EnemyType::CANANE:
-        case EnemyType::CHAOS_SORCERER:
-        case EnemyType::CHAOS_BRINGER:
-        case EnemyType::DARK_BELRA:
-        case EnemyType::DE_ROL_LE:
-        case EnemyType::DRAGON:
-        case EnemyType::SINOW_GOLD:
-        case EnemyType::RAG_RAPPY:
         case EnemyType::AL_RAPPY:
-        case EnemyType::NANO_DRAGON:
-        case EnemyType::DUBCHIC:
-        case EnemyType::GILLCHIC:
-        case EnemyType::GARANZ:
-        case EnemyType::DARK_GUNNER:
+        case EnemyType::BARBAROUS_WOLF:
+        case EnemyType::BOOMA:
         case EnemyType::BULCLAW:
+        case EnemyType::BULK:
+        case EnemyType::CANADINE_GROUP:
+        case EnemyType::CANADINE:
+        case EnemyType::CANANE:
+        case EnemyType::CHAOS_BRINGER:
+        case EnemyType::CHAOS_SORCERER:
         case EnemyType::CLAW:
-        case EnemyType::VOL_OPT_2:
-        case EnemyType::POUILLY_SLIME:
-        case EnemyType::POFUILLY_SLIME:
-        case EnemyType::PAN_ARMS:
-        case EnemyType::HIDOOM:
-        case EnemyType::MIGIUM:
-        case EnemyType::DARVANT:
-        case EnemyType::DARVANT_ULTIMATE:
+        case EnemyType::DARK_BELRA:
         case EnemyType::DARK_FALZ_1:
         case EnemyType::DARK_FALZ_2:
         case EnemyType::DARK_FALZ_3:
-        case EnemyType::HILDEBEAR:
-        case EnemyType::HILDEBLUE:
-        case EnemyType::BOOMA:
-        case EnemyType::GOBOOMA:
-        case EnemyType::GIGOBOOMA:
-        case EnemyType::GRASS_ASSASSIN:
-        case EnemyType::EVIL_SHARK:
-        case EnemyType::PAL_SHARK:
-        case EnemyType::GUIL_SHARK:
+        case EnemyType::DARK_GUNNER:
+        case EnemyType::DARVANT_ULTIMATE:
+        case EnemyType::DARVANT:
+        case EnemyType::DE_ROL_LE:
+        case EnemyType::DEATH_GUNNER:
         case EnemyType::DELSABER:
         case EnemyType::DIMENIAN:
+        case EnemyType::DRAGON:
+        case EnemyType::DUBCHIC:
+        case EnemyType::EVIL_SHARK:
+        case EnemyType::GARANZ:
+        case EnemyType::GIGOBOOMA:
+        case EnemyType::GILLCHIC:
+        case EnemyType::GOBOOMA:
+        case EnemyType::GRASS_ASSASSIN:
+        case EnemyType::GUIL_SHARK:
+        case EnemyType::HIDOOM:
+        case EnemyType::HILDEBEAR:
+        case EnemyType::HILDEBLUE:
         case EnemyType::LA_DIMENIAN:
+        case EnemyType::MIGIUM:
+        case EnemyType::MONEST:
+        case EnemyType::MOTHMANT:
+        case EnemyType::NANO_DRAGON:
+        case EnemyType::NAR_LILY:
+        case EnemyType::PAL_SHARK:
+        case EnemyType::PAN_ARMS:
+        case EnemyType::POFUILLY_SLIME:
+        case EnemyType::POISON_LILY:
+        case EnemyType::POUILLY_SLIME:
+        case EnemyType::RAG_RAPPY:
+        case EnemyType::SAVAGE_WOLF:
+        case EnemyType::SINOW_BEAT:
+        case EnemyType::SINOW_GOLD:
         case EnemyType::SO_DIMENIAN:
+        case EnemyType::VOL_OPT_2:
           return true;
         default:
           return false;
       }
     case Episode::EP2:
       switch (enemy_type) {
-        case EnemyType::MOTHMANT:
-        case EnemyType::MONEST:
-        case EnemyType::SAVAGE_WOLF:
-        case EnemyType::BARBAROUS_WOLF:
-        case EnemyType::POISON_LILY:
-        case EnemyType::NAR_LILY:
-        case EnemyType::SINOW_BERILL:
-        case EnemyType::GEE:
-        case EnemyType::CHAOS_SORCERER:
-        case EnemyType::DELBITER:
-        case EnemyType::DARK_BELRA:
         case EnemyType::BARBA_RAY:
-        case EnemyType::GOL_DRAGON:
-        case EnemyType::SINOW_SPIGELL:
-        case EnemyType::RAG_RAPPY:
-        case EnemyType::LOVE_RAPPY:
-        case EnemyType::SAINT_RAPPY:
-        case EnemyType::EGG_RAPPY:
-        case EnemyType::HALLO_RAPPY:
-        case EnemyType::GI_GUE:
-        case EnemyType::DUBCHIC:
-        case EnemyType::GILLCHIC:
-        case EnemyType::GARANZ:
-        case EnemyType::GAL_GRYPHON:
-        case EnemyType::EPSILON:
+        case EnemyType::BARBAROUS_WOLF:
+        case EnemyType::CHAOS_SORCERER:
+        case EnemyType::DARK_BELRA:
         case EnemyType::DEL_LILY:
-        case EnemyType::ILL_GILL:
-        case EnemyType::OLGA_FLOW_1:
-        case EnemyType::OLGA_FLOW_2:
-        case EnemyType::GAEL:
+        case EnemyType::DELBITER:
         case EnemyType::DELDEPTH:
-        case EnemyType::PAN_ARMS:
-        case EnemyType::HIDOOM:
-        case EnemyType::MIGIUM:
-        case EnemyType::MERICAROL:
-        case EnemyType::UL_GIBBON:
-        case EnemyType::ZOL_GIBBON:
-        case EnemyType::GIBBLES:
-        case EnemyType::MORFOS:
-        case EnemyType::RECOBOX:
-        case EnemyType::RECON:
-        case EnemyType::SINOW_ZOA:
-        case EnemyType::SINOW_ZELE:
-        case EnemyType::MERIKLE:
-        case EnemyType::MERICUS:
-        case EnemyType::HILDEBEAR:
-        case EnemyType::HILDEBLUE:
-        case EnemyType::MERILLIA:
-        case EnemyType::MERILTAS:
-        case EnemyType::GRASS_ASSASSIN:
-        case EnemyType::DOLMOLM:
-        case EnemyType::DOLMDARL:
         case EnemyType::DELSABER:
         case EnemyType::DIMENIAN:
+        case EnemyType::DOLMDARL:
+        case EnemyType::DOLMOLM:
+        case EnemyType::DUBCHIC:
+        case EnemyType::EGG_RAPPY:
+        case EnemyType::EPSILON:
+        case EnemyType::GAEL:
+        case EnemyType::GAL_GRYPHON:
+        case EnemyType::GARANZ:
+        case EnemyType::GEE:
+        case EnemyType::GI_GUE:
+        case EnemyType::GIBBLES:
+        case EnemyType::GILLCHIC:
+        case EnemyType::GOL_DRAGON:
+        case EnemyType::GRASS_ASSASSIN:
+        case EnemyType::HALLO_RAPPY:
+        case EnemyType::HIDOOM:
+        case EnemyType::HILDEBEAR:
+        case EnemyType::HILDEBLUE:
+        case EnemyType::ILL_GILL:
         case EnemyType::LA_DIMENIAN:
+        case EnemyType::LOVE_RAPPY:
+        case EnemyType::MERICAROL:
+        case EnemyType::MERICUS:
+        case EnemyType::MERIKLE:
+        case EnemyType::MERILLIA:
+        case EnemyType::MERILTAS:
+        case EnemyType::MIGIUM:
+        case EnemyType::MONEST:
+        case EnemyType::MORFOS:
+        case EnemyType::MOTHMANT:
+        case EnemyType::NAR_LILY:
+        case EnemyType::OLGA_FLOW_1:
+        case EnemyType::OLGA_FLOW_2:
+        case EnemyType::PAN_ARMS:
+        case EnemyType::POISON_LILY:
+        case EnemyType::RAG_RAPPY:
+        case EnemyType::RECOBOX:
+        case EnemyType::RECON:
+        case EnemyType::SAINT_RAPPY:
+        case EnemyType::SAVAGE_WOLF:
+        case EnemyType::SINOW_BERILL:
+        case EnemyType::SINOW_SPIGELL:
+        case EnemyType::SINOW_ZELE:
+        case EnemyType::SINOW_ZOA:
         case EnemyType::SO_DIMENIAN:
+        case EnemyType::UL_GIBBON:
+        case EnemyType::ZOL_GIBBON:
           return true;
         default:
           return false;
       }
     case Episode::EP4:
       switch (enemy_type) {
-        case EnemyType::BOOTA:
-        case EnemyType::ZE_BOOTA:
-        case EnemyType::BA_BOOTA:
-        case EnemyType::SAND_RAPPY:
-        case EnemyType::DEL_RAPPY:
-        case EnemyType::ZU:
-        case EnemyType::PAZUZU:
         case EnemyType::ASTARK:
-        case EnemyType::SATELLITE_LIZARD:
-        case EnemyType::YOWIE:
-        case EnemyType::DORPHON:
-        case EnemyType::DORPHON_ECLAIR:
-        case EnemyType::GORAN:
-        case EnemyType::PYRO_GORAN:
-        case EnemyType::GORAN_DETONATOR:
-        case EnemyType::SAND_RAPPY_ALT:
+        case EnemyType::BA_BOOTA:
+        case EnemyType::BOOTA:
         case EnemyType::DEL_RAPPY_ALT:
+        case EnemyType::DEL_RAPPY:
+        case EnemyType::DORPHON_ECLAIR:
+        case EnemyType::DORPHON:
+        case EnemyType::GIRTABLULU:
+        case EnemyType::GORAN_DETONATOR:
+        case EnemyType::GORAN:
+        case EnemyType::KONDRIEU:
         case EnemyType::MERISSA_A:
         case EnemyType::MERISSA_AA:
-        case EnemyType::ZU_ALT:
         case EnemyType::PAZUZU_ALT:
-        case EnemyType::SATELLITE_LIZARD_ALT:
-        case EnemyType::YOWIE_ALT:
-        case EnemyType::GIRTABLULU:
+        case EnemyType::PAZUZU:
+        case EnemyType::PYRO_GORAN:
         case EnemyType::SAINT_MILLION:
+        case EnemyType::SAND_RAPPY_ALT:
+        case EnemyType::SAND_RAPPY:
+        case EnemyType::SATELLITE_LIZARD_ALT:
+        case EnemyType::SATELLITE_LIZARD:
         case EnemyType::SHAMBERTIN:
-        case EnemyType::KONDRIEU:
+        case EnemyType::YOWIE_ALT:
+        case EnemyType::YOWIE:
+        case EnemyType::ZE_BOOTA:
+        case EnemyType::ZU_ALT:
+        case EnemyType::ZU:
           return true;
         default:
           return false;
@@ -611,8 +616,10 @@ uint8_t battle_param_index_for_enemy_type(Episode episode, EnemyType enemy_type)
         case EnemyType::GARANZ:
           return 0x1D;
         case EnemyType::DARK_GUNNER:
+        case EnemyType::DEATH_GUNNER:
           return 0x1E;
         case EnemyType::BULCLAW:
+        case EnemyType::BULK:
           return 0x1F;
         case EnemyType::CLAW:
           return 0x20;
@@ -665,7 +672,8 @@ uint8_t battle_param_index_for_enemy_type(Episode episode, EnemyType enemy_type)
         case EnemyType::SO_DIMENIAN:
           return 0x55;
         default:
-          throw runtime_error(string_printf("%s does not have battle parameters in Episode 1", name_for_enum(enemy_type)));
+          throw out_of_range(phosg::string_printf(
+              "%s does not have battle parameters in Episode 1", phosg::name_for_enum(enemy_type)));
       }
       break;
     case Episode::EP2:
@@ -780,7 +788,8 @@ uint8_t battle_param_index_for_enemy_type(Episode episode, EnemyType enemy_type)
         case EnemyType::SO_DIMENIAN:
           return 0x55;
         default:
-          throw runtime_error(string_printf("%s does not have battle parameters in Episode 2", name_for_enum(enemy_type)));
+          throw out_of_range(phosg::string_printf(
+              "%s does not have battle parameters in Episode 2", phosg::name_for_enum(enemy_type)));
       }
       break;
     case Episode::EP4:
@@ -834,11 +843,14 @@ uint8_t battle_param_index_for_enemy_type(Episode episode, EnemyType enemy_type)
         case EnemyType::GIRTABLULU:
           return 0x1F;
         case EnemyType::SAINT_MILLION:
-        case EnemyType::SHAMBERTIN:
-        case EnemyType::KONDRIEU:
           return 0x22;
+        case EnemyType::SHAMBERTIN:
+          return 0x26;
+        case EnemyType::KONDRIEU:
+          return 0x2A;
         default:
-          throw runtime_error(string_printf("%s does not have battle parameters in Episode 4", name_for_enum(enemy_type)));
+          throw out_of_range(phosg::string_printf(
+              "%s does not have battle parameters in Episode 4", phosg::name_for_enum(enemy_type)));
       }
       break;
     default:
@@ -863,6 +875,8 @@ uint8_t rare_table_index_for_enemy_type(EnemyType enemy_type) {
       return 0x09;
     case EnemyType::BOOTA:
       return 0x4D;
+    case EnemyType::BULK:
+      return 0x27;
     case EnemyType::BULCLAW:
       return 0x28;
     case EnemyType::CANADINE:
@@ -884,6 +898,8 @@ uint8_t rare_table_index_for_enemy_type(EnemyType enemy_type) {
       return 0x2F;
     case EnemyType::DARK_GUNNER:
       return 0x22;
+    case EnemyType::DEATH_GUNNER:
+      return 0x23;
     case EnemyType::DE_ROL_LE:
       return 0x2D;
     case EnemyType::DEL_LILY:
@@ -1059,7 +1075,7 @@ uint8_t rare_table_index_for_enemy_type(EnemyType enemy_type) {
     case EnemyType::ZU_ALT:
       return 0x4A;
     default:
-      throw runtime_error(string_printf("%s does not have a rare table entry", name_for_enum(enemy_type)));
+      throw runtime_error(phosg::string_printf("%s does not have a rare table entry", phosg::name_for_enum(enemy_type)));
   }
 }
 
@@ -1092,5 +1108,64 @@ const vector<EnemyType>& enemy_types_for_rare_table_index(Episode episode, uint8
   } catch (const out_of_range&) {
     static const vector<EnemyType> empty_vec;
     return empty_vec;
+  }
+}
+
+bool enemy_type_is_rare(EnemyType type) {
+  return ((type == EnemyType::HILDEBLUE) ||
+      (type == EnemyType::AL_RAPPY) ||
+      (type == EnemyType::NAR_LILY) ||
+      (type == EnemyType::POUILLY_SLIME) ||
+      (type == EnemyType::MERISSA_AA) ||
+      (type == EnemyType::PAZUZU_ALT) ||
+      (type == EnemyType::DORPHON_ECLAIR) ||
+      (type == EnemyType::KONDRIEU));
+}
+
+EnemyType rare_type_for_enemy_type(EnemyType base_type, Episode episode, uint8_t event, uint8_t floor) {
+  switch (base_type) {
+    case EnemyType::HILDEBEAR:
+      return EnemyType::HILDEBLUE;
+    case EnemyType::RAG_RAPPY:
+      switch (episode) {
+        case Episode::EP1:
+          return EnemyType::AL_RAPPY;
+        case Episode::EP2:
+          switch (event) {
+            case 0x01: // rappy_type 1
+              return EnemyType::SAINT_RAPPY;
+            case 0x04: // rappy_type 2
+              return EnemyType::EGG_RAPPY;
+            case 0x05: // rappy_type 3
+              return EnemyType::HALLO_RAPPY;
+            default:
+              return EnemyType::LOVE_RAPPY;
+          }
+        case Episode::EP4:
+          return (floor > 0x05) ? EnemyType::DEL_RAPPY_ALT : EnemyType::DEL_RAPPY;
+        default:
+          throw logic_error("invalid episode");
+      }
+    case EnemyType::POISON_LILY:
+      return EnemyType::NAR_LILY;
+    case EnemyType::POFUILLY_SLIME:
+      return EnemyType::POUILLY_SLIME;
+    case EnemyType::SAND_RAPPY:
+      return EnemyType::DEL_RAPPY;
+    case EnemyType::SAND_RAPPY_ALT:
+      return EnemyType::DEL_RAPPY_ALT;
+    case EnemyType::MERISSA_A:
+      return EnemyType::MERISSA_AA;
+    case EnemyType::ZU:
+      return EnemyType::PAZUZU;
+    case EnemyType::ZU_ALT:
+      return EnemyType::PAZUZU_ALT;
+    case EnemyType::DORPHON:
+      return EnemyType::DORPHON_ECLAIR;
+    case EnemyType::SAINT_MILLION:
+    case EnemyType::SHAMBERTIN:
+      return EnemyType::KONDRIEU;
+    default:
+      return base_type;
   }
 }

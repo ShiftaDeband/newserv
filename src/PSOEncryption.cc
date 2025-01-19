@@ -37,44 +37,40 @@ uint32_t PSOLFGEncryption::next(bool advance) {
   return ret;
 }
 
-template <bool IsBigEndian>
+template <bool BE>
 void PSOLFGEncryption::encrypt_t(void* vdata, size_t size, bool advance) {
-  using U32T = typename std::conditional<IsBigEndian, be_uint32_t, le_uint32_t>::type;
-
   if (!advance && (size != 4)) {
     throw logic_error("cannot peek-encrypt/decrypt with size > 4");
   }
 
   size_t uint32_count = size >> 2;
   size_t extra_bytes = size & 3;
-  U32T* data = reinterpret_cast<U32T*>(vdata);
+  U32T<BE>* data = reinterpret_cast<U32T<BE>*>(vdata);
   for (size_t x = 0; x < uint32_count; x++) {
     data[x] ^= this->next(advance);
   }
   if (extra_bytes) {
-    U32T last = 0;
+    U32T<BE> last = 0;
     memcpy(&last, &data[uint32_count], extra_bytes);
     last ^= this->next(advance);
     memcpy(&data[uint32_count], &last, extra_bytes);
   }
 }
 
-template <bool IsBigEndian>
+template <bool BE>
 void PSOLFGEncryption::encrypt_minus_t(void* vdata, size_t size, bool advance) {
-  using U32T = typename std::conditional<IsBigEndian, be_uint32_t, le_uint32_t>::type;
-
   if (!advance && (size != 4)) {
     throw logic_error("cannot peek-encrypt/decrypt with size > 4");
   }
 
   size_t uint32_count = size >> 2;
   size_t extra_bytes = size & 3;
-  U32T* data = reinterpret_cast<U32T*>(vdata);
+  U32T<BE>* data = reinterpret_cast<U32T<BE>*>(vdata);
   for (size_t x = 0; x < uint32_count; x++) {
     data[x] = this->next(advance) - data[x];
   }
   if (extra_bytes) {
-    U32T last = 0;
+    U32T<BE> last = 0;
     memcpy(&last, &data[uint32_count], extra_bytes);
     last = this->next(advance) - last;
     memcpy(&data[uint32_count], &last, extra_bytes);
@@ -117,22 +113,14 @@ void PSOLFGEncryption::encrypt_both_endian(
 }
 
 PSOV2Encryption::PSOV2Encryption(uint32_t seed)
-    : PSOLFGEncryption(seed, this->STREAM_LENGTH + 1, this->STREAM_LENGTH) {
-  uint32_t esi, ebx, edi, eax, edx, var1;
-  esi = 1;
-  ebx = this->initial_seed;
-  edi = 0x15;
-  this->stream[56] = ebx;
-  this->stream[55] = ebx;
-  while (edi <= 0x46E) {
-    eax = edi;
-    var1 = eax / 55;
-    edx = eax - (var1 * 55);
-    ebx = ebx - esi;
-    edi = edi + 0x15;
-    this->stream[edx] = esi;
-    esi = ebx;
-    ebx = this->stream[edx];
+    : PSOLFGEncryption(seed, STREAM_LENGTH + 1, STREAM_LENGTH) {
+  uint32_t a = 1, b = this->initial_seed;
+  this->stream[0x37] = b;
+  for (uint16_t virtual_index = 0x15; virtual_index <= 0x36 * 0x15; virtual_index += 0x15) {
+    this->stream[virtual_index % 0x37] = a;
+    uint32_t c = b - a;
+    b = a;
+    a = c;
   }
   for (size_t x = 0; x < 5; x++) {
     this->update_stream();
@@ -141,26 +129,11 @@ PSOV2Encryption::PSOV2Encryption(uint32_t seed)
 }
 
 void PSOV2Encryption::update_stream() {
-  uint32_t esi, edi, eax, ebp, edx;
-  edi = 1;
-  edx = 0x18;
-  eax = edi;
-  while (edx > 0) {
-    esi = this->stream[eax + 0x1F];
-    ebp = this->stream[eax] - esi;
-    this->stream[eax] = ebp;
-    eax++;
-    edx--;
+  for (size_t z = 1; z < 0x19; z++) {
+    this->stream[z] -= this->stream[z + 0x1F];
   }
-  edi = 0x19;
-  edx = 0x1F;
-  eax = edi;
-  while (edx > 0) {
-    esi = this->stream[eax - 0x18];
-    ebp = this->stream[eax] - esi;
-    this->stream[eax] = ebp;
-    eax++;
-    edx--;
+  for (size_t z = 0x19; z < 0x38; z++) {
+    this->stream[z] -= this->stream[z - 0x18];
   }
   this->offset = 1;
   this->cycles++;
@@ -171,7 +144,7 @@ PSOEncryption::Type PSOV2Encryption::type() const {
 }
 
 PSOV3Encryption::PSOV3Encryption(uint32_t seed)
-    : PSOLFGEncryption(seed, this->STREAM_LENGTH, this->STREAM_LENGTH) {
+    : PSOLFGEncryption(seed, STREAM_LENGTH, STREAM_LENGTH) {
   uint32_t x, y, basekey, source1, source2, source3;
   basekey = 0;
 
@@ -194,7 +167,7 @@ PSOV3Encryption::PSOV3Encryption(uint32_t seed)
   source1 = 0;
   source2 = 1;
   source3 = this->offset - 1;
-  while (this->offset != this->STREAM_LENGTH) {
+  while (this->offset != STREAM_LENGTH) {
     this->stream[this->offset++] = (this->stream[source3++] ^ (((this->stream[source1++] << 23) & 0xFF800000) ^ ((this->stream[source2++] >> 9) & 0x007FFFFF)));
   }
 
@@ -205,19 +178,13 @@ PSOV3Encryption::PSOV3Encryption(uint32_t seed)
 }
 
 void PSOV3Encryption::update_stream() {
-  uint32_t r5, r6, r7;
-  r5 = 0;
-  r6 = 489;
-  r7 = 0;
-
-  while (r6 != this->STREAM_LENGTH) {
-    this->stream[r5++] ^= this->stream[r6++];
+  static constexpr size_t PHASE2_OFFSET = STREAM_LENGTH - 489;
+  for (size_t z = 489; z < STREAM_LENGTH; z++) {
+    this->stream[z - 489] ^= this->stream[z];
   }
-
-  while (r5 != this->STREAM_LENGTH) {
-    this->stream[r5++] ^= this->stream[r7++];
+  for (size_t z = PHASE2_OFFSET; z < STREAM_LENGTH; z++) {
+    this->stream[z] ^= this->stream[z - PHASE2_OFFSET];
   }
-
   this->offset = 0;
   this->cycles++;
 }
@@ -728,11 +695,11 @@ void PSOV2OrV3DetectorEncryption::encrypt(void* data, size_t size, bool advance)
     bool v2_match = this->v2_matches.count(decrypted_v2);
     bool v3_match = this->v3_matches.count(decrypted_v3);
     if (!v2_match && !v3_match) {
-      throw runtime_error(string_printf(
+      throw runtime_error(phosg::string_printf(
           "unable to determine crypt version (input=%08" PRIX32 ", v2=%08" PRIX32 ", v3=%08" PRIX32 ")",
           encrypted.load(), decrypted_v2.load(), decrypted_v3.load()));
     } else if (v2_match && v3_match) {
-      throw runtime_error(string_printf(
+      throw runtime_error(phosg::string_printf(
           "ambiguous crypt version (v2=%08" PRIX32 ", v3=%08" PRIX32 ")",
           decrypted_v2.load(), decrypted_v3.load()));
     } else if (v2_match) {
@@ -910,9 +877,9 @@ uint32_t encrypt_challenge_time(uint16_t value) {
   vector<uint8_t> available_bits({0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15});
 
   uint16_t mask = 0;
-  uint8_t num_one_bits = (random_object<uint8_t>() % 9) + 4; // Range [4, 12]
+  uint8_t num_one_bits = (phosg::random_object<uint8_t>() % 9) + 4; // Range [4, 12]
   for (; num_one_bits; num_one_bits--) {
-    uint8_t index = random_object<uint8_t>() % available_bits.size();
+    uint8_t index = phosg::random_object<uint8_t>() % available_bits.size();
     auto it = available_bits.begin() + index;
     mask |= (1 << *it);
     available_bits.erase(it);

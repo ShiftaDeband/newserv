@@ -8,8 +8,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include "IntegralExpression.hh"
+#include "Map.hh"
 #include "PlayerSubordinates.hh"
-#include "QuestAvailabilityExpression.hh"
 #include "QuestScript.hh"
 #include "StaticGameData.hh"
 #include "TeamIndex.hh"
@@ -31,48 +32,59 @@ enum class QuestMenuType {
   GOVERNMENT = 4,
   DOWNLOAD = 5,
   EP3_DOWNLOAD = 6,
+  // 7 can't be used as a menu type (it enables the per-episode filter)
 };
 
 struct QuestCategoryIndex {
   struct Category {
     uint32_t category_id;
-    uint8_t enabled_flags;
+    uint16_t enabled_flags;
     std::string directory_name;
     std::string name;
     std::string description;
 
-    explicit Category(uint32_t category_id, const JSON& json);
+    explicit Category(uint32_t category_id, const phosg::JSON& json);
 
     [[nodiscard]] inline bool check_flag(QuestMenuType menu_type) const {
       return this->enabled_flags & (1 << static_cast<uint8_t>(menu_type));
+    }
+    [[nodiscard]] inline bool enable_episode_filter() const {
+      return this->enabled_flags & 0x080;
+    }
+    [[nodiscard]] inline bool use_ep2_icon() const {
+      return this->enabled_flags & 0x100;
     }
   };
 
   std::vector<std::shared_ptr<Category>> categories;
 
-  explicit QuestCategoryIndex(const JSON& json);
+  explicit QuestCategoryIndex(const phosg::JSON& json);
 
   std::shared_ptr<const Category> at(uint32_t category_id) const;
 };
 
 struct VersionedQuest {
-  uint32_t quest_number;
-  uint32_t category_id;
-  Episode episode;
-  bool joinable;
+  uint32_t quest_number = 0;
+  uint32_t category_id = 0;
+  Episode episode = Episode::NONE;
+  bool allow_start_from_chat_command = false;
+  bool joinable = false;
+  int16_t lock_status_register = -1;
   std::string name;
-  Version version;
-  uint8_t language;
-  bool is_dlq_encoded;
+  Version version = Version::UNKNOWN;
+  uint8_t language = 1;
+  bool is_dlq_encoded = false;
   std::string short_description;
   std::string long_description;
   std::shared_ptr<const std::string> bin_contents;
   std::shared_ptr<const std::string> dat_contents;
+  std::shared_ptr<const MapFile> map_file;
   std::shared_ptr<const std::string> pvr_contents;
   std::shared_ptr<const BattleRules> battle_rules;
-  ssize_t challenge_template_index;
-  std::shared_ptr<const QuestAvailabilityExpression> available_expression;
-  std::shared_ptr<const QuestAvailabilityExpression> enabled_expression;
+  ssize_t challenge_template_index = -1;
+  uint8_t description_flag = 0;
+  std::shared_ptr<const IntegralExpression> available_expression;
+  std::shared_ptr<const IntegralExpression> enabled_expression;
 
   VersionedQuest(
       uint32_t quest_number,
@@ -81,22 +93,42 @@ struct VersionedQuest {
       uint8_t language,
       std::shared_ptr<const std::string> bin_contents,
       std::shared_ptr<const std::string> dat_contents,
+      std::shared_ptr<const MapFile> map_file,
       std::shared_ptr<const std::string> pvr_contents,
       std::shared_ptr<const BattleRules> battle_rules = nullptr,
       ssize_t challenge_template_index = -1,
-      std::shared_ptr<const QuestAvailabilityExpression> available_expression = nullptr,
-      std::shared_ptr<const QuestAvailabilityExpression> enabled_expression = nullptr);
+      uint8_t description_flag = 0,
+      std::shared_ptr<const IntegralExpression> available_expression = nullptr,
+      std::shared_ptr<const IntegralExpression> enabled_expression = nullptr,
+      bool allow_start_from_chat_command = false,
+      bool force_joinable = false,
+      int16_t lock_status_register = -1);
 
   std::string bin_filename() const;
   std::string dat_filename() const;
+  std::string pvr_filename() const;
   std::string xb_filename() const;
 
   std::shared_ptr<VersionedQuest> create_download_quest(uint8_t override_language = 0xFF) const;
   std::string encode_qst() const;
 };
 
-class Quest {
-public:
+struct Quest {
+  uint32_t quest_number;
+  uint32_t category_id;
+  Episode episode;
+  bool allow_start_from_chat_command;
+  bool joinable;
+  int16_t lock_status_register;
+  std::string name;
+  mutable std::shared_ptr<const SuperMap> supermap;
+  std::shared_ptr<const BattleRules> battle_rules;
+  ssize_t challenge_template_index;
+  uint8_t description_flag;
+  std::shared_ptr<const IntegralExpression> available_expression;
+  std::shared_ptr<const IntegralExpression> enabled_expression;
+  std::map<uint32_t, std::shared_ptr<const VersionedQuest>> versions;
+
   Quest() = delete;
   explicit Quest(std::shared_ptr<const VersionedQuest> initial_version);
   Quest(const Quest&) = default;
@@ -104,23 +136,16 @@ public:
   Quest& operator=(const Quest&) = default;
   Quest& operator=(Quest&&) = default;
 
+  phosg::JSON json() const;
+
+  std::shared_ptr<const SuperMap> get_supermap(int64_t random_seed) const;
+
   void add_version(std::shared_ptr<const VersionedQuest> vq);
   bool has_version(Version v, uint8_t language) const;
   bool has_version_any_language(Version v) const;
   std::shared_ptr<const VersionedQuest> version(Version v, uint8_t language) const;
 
   static uint32_t versions_key(Version v, uint8_t language);
-
-  uint32_t quest_number;
-  uint32_t category_id;
-  Episode episode;
-  bool joinable;
-  std::string name;
-  std::shared_ptr<const BattleRules> battle_rules;
-  ssize_t challenge_template_index;
-  std::shared_ptr<const QuestAvailabilityExpression> available_expression;
-  std::shared_ptr<const QuestAvailabilityExpression> enabled_expression;
-  std::map<uint32_t, std::shared_ptr<const VersionedQuest>> versions;
 };
 
 struct QuestIndex {
@@ -135,21 +160,23 @@ struct QuestIndex {
   std::shared_ptr<const QuestCategoryIndex> category_index;
 
   std::map<uint32_t, std::shared_ptr<Quest>> quests_by_number;
+  std::map<std::string, std::shared_ptr<Quest>> quests_by_name;
   std::map<uint32_t, std::map<uint32_t, std::shared_ptr<Quest>>> quests_by_category_id_and_number;
 
   QuestIndex(const std::string& directory, std::shared_ptr<const QuestCategoryIndex> category_index, bool is_ep3);
+  phosg::JSON json() const;
 
   std::shared_ptr<const Quest> get(uint32_t quest_number) const;
+  std::shared_ptr<const Quest> get(const std::string& name) const;
 
   std::vector<std::shared_ptr<const QuestCategoryIndex::Category>> categories(
       QuestMenuType menu_type,
       Episode episode,
-      Version version,
+      uint16_t version_flags,
       IncludeCondition include_condition = nullptr) const;
   std::vector<std::pair<QuestIndex::IncludeState, std::shared_ptr<const Quest>>> filter(
-      QuestMenuType menu_type,
       Episode episode,
-      Version version,
+      uint16_t version_flags,
       uint32_t category_id,
       IncludeCondition include_condition = nullptr,
       size_t limit = 0) const;

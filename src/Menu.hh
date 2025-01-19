@@ -14,15 +14,20 @@
 
 namespace MenuID {
 constexpr uint32_t MAIN = 0x11000011;
+constexpr uint32_t CLEAR_LICENSE_CONFIRMATION = 0x11111111;
 constexpr uint32_t INFORMATION = 0x22000022;
 constexpr uint32_t LOBBY = 0x33000033;
 constexpr uint32_t GAME = 0x44000044;
 constexpr uint32_t QUEST_EP1 = 0x55010155;
 constexpr uint32_t QUEST_EP2 = 0x55020255;
-constexpr uint32_t QUEST_CATEGORIES = 0x66010166;
+// See the decsription of the A2 command in CommandFormats.hh for why these
+// menu IDs don't fit the rest of the pattern.
+constexpr uint32_t QUEST_CATEGORIES_EP1 = 0x01000001;
+constexpr uint32_t QUEST_CATEGORIES_EP2 = 0x02000002;
 constexpr uint32_t PROXY_DESTINATIONS = 0x77000077;
 constexpr uint32_t PROGRAMS = 0x88000088;
 constexpr uint32_t PATCHES = 0x99000099;
+constexpr uint32_t PATCH_SWITCHES = 0x99010199;
 constexpr uint32_t PROXY_OPTIONS = 0xAA0000AA;
 constexpr uint32_t TOURNAMENTS = 0xBB0000BB;
 constexpr uint32_t TOURNAMENTS_FOR_SPEC = 0xBB1111BB;
@@ -35,10 +40,16 @@ constexpr uint32_t INFORMATION = 0x11333311;
 constexpr uint32_t DOWNLOAD_QUESTS = 0x11444411;
 constexpr uint32_t PROXY_DESTINATIONS = 0x11555511;
 constexpr uint32_t PATCHES = 0x11666611;
+constexpr uint32_t PATCH_SWITCHES = 0x11676711;
 constexpr uint32_t PROGRAMS = 0x11777711;
 constexpr uint32_t DISCONNECT = 0x11888811;
 constexpr uint32_t CLEAR_LICENSE = 0x11999911;
 } // namespace MainMenuItemID
+
+namespace ClearLicenseConfirmationMenuItemID {
+constexpr uint32_t CANCEL = 0x01010101;
+constexpr uint32_t CLEAR_LICENSE = 0x02020202;
+} // namespace ClearLicenseConfirmationMenuItemID
 
 namespace InformationMenuItemID {
 constexpr uint32_t GO_BACK = 0x22FFFF22;
@@ -61,20 +72,22 @@ namespace ProxyOptionsMenuItemID {
 constexpr uint32_t GO_BACK = 0xAAFFFFAA;
 constexpr uint32_t CHAT_COMMANDS = 0xAA0101AA;
 constexpr uint32_t PLAYER_NOTIFICATIONS = 0xAA0202AA;
-constexpr uint32_t BLOCK_PINGS = 0xAA0303AA;
-constexpr uint32_t INFINITE_HP = 0xAA0404AA;
-constexpr uint32_t INFINITE_TP = 0xAA0505AA;
-constexpr uint32_t SWITCH_ASSIST = 0xAA0606AA;
-constexpr uint32_t BLOCK_EVENTS = 0xAA0707AA;
-constexpr uint32_t BLOCK_PATCHES = 0xAA0808AA;
-constexpr uint32_t SAVE_FILES = 0xAA0909AA;
-constexpr uint32_t RED_NAME = 0xAA0A0AAA;
-constexpr uint32_t BLANK_NAME = 0xAA0B0BAA;
-constexpr uint32_t SUPPRESS_LOGIN = 0xAA0C0CAA;
-constexpr uint32_t SKIP_CARD = 0xAA0D0DAA;
-constexpr uint32_t EP3_INFINITE_MESETA = 0xAA0E0EAA;
-constexpr uint32_t EP3_INFINITE_TIME = 0xAA0F0FAA;
-constexpr uint32_t EP3_UNMASK_WHISPERS = 0xAA1010AA;
+constexpr uint32_t DROP_NOTIFICATIONS = 0xAA0303AA;
+constexpr uint32_t BLOCK_PINGS = 0xAA0404AA;
+constexpr uint32_t INFINITE_HP = 0xAA0505AA;
+constexpr uint32_t INFINITE_TP = 0xAA0606AA;
+constexpr uint32_t SWITCH_ASSIST = 0xAA0707AA;
+constexpr uint32_t BLOCK_EVENTS = 0xAA0808AA;
+constexpr uint32_t BLOCK_PATCHES = 0xAA0909AA;
+constexpr uint32_t SAVE_FILES = 0xAA0A0AAA;
+constexpr uint32_t VIRTUAL_CLIENT = 0xAA0B0BAA;
+constexpr uint32_t RED_NAME = 0xAA0C0CAA;
+constexpr uint32_t BLANK_NAME = 0xAA0D0DAA;
+constexpr uint32_t SUPPRESS_LOGIN = 0xAA0E0EAA;
+constexpr uint32_t SKIP_CARD = 0xAA0F0FAA;
+constexpr uint32_t EP3_INFINITE_MESETA = 0xAA1010AA;
+constexpr uint32_t EP3_INFINITE_TIME = 0xAA1111AA;
+constexpr uint32_t EP3_UNMASK_WHISPERS = 0xAA1212AA;
 } // namespace ProxyOptionsMenuItemID
 
 namespace TeamRewardMenuItemID {
