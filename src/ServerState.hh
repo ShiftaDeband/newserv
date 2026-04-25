@@ -286,6 +286,8 @@ struct ServerState : public std::enable_shared_from_this<ServerState> {
   std::vector<std::pair<std::string, uint16_t>> proxy_destinations_xb;
   std::optional<std::pair<std::string, uint16_t>> proxy_destination_patch;
   std::optional<std::pair<std::string, uint16_t>> proxy_destination_bb;
+  bool retail_ship_flow_enabled = false;
+  std::vector<std::string> retail_ship_names;
   std::string welcome_message;
   std::string pc_patch_server_message;
   std::string bb_patch_server_message;
@@ -370,6 +372,10 @@ struct ServerState : public std::enable_shared_from_this<ServerState> {
   inline const std::vector<uint32_t>& public_lobby_search_order(std::shared_ptr<const Client> c) const {
     return this->public_lobby_search_order(c->version(), c->check_flag(Client::Flag::IS_CLIENT_CUSTOMIZATION));
   }
+
+  std::vector<std::shared_ptr<Lobby>> default_lobbies_for_version(Version version, bool ep3, uint8_t ship_menu_item_id = 0) const;
+  std::shared_ptr<Lobby> find_default_lobby(Version version, bool ep3, uint8_t block, uint8_t ship_menu_item_id = 0) const;
+  std::string location_string_for_lobby(std::shared_ptr<const Lobby> l) const;
 
   inline uint32_t name_color_for_client(Version v, bool is_client_customization) const {
     if (is_client_customization && this->client_customization_name_color) {

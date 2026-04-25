@@ -157,6 +157,7 @@ public:
   uint8_t lobby_client_id = 0;
   uint8_t lobby_arrow_color = 0;
   int64_t preferred_lobby_id = -1; // <0 = no preference
+  ssize_t preferred_ship_menu_item_id = -1; // <0 = no preference
 
   asio::steady_timer save_game_data_timer;
   asio::steady_timer send_ping_timer;

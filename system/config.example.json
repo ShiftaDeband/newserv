@@ -263,6 +263,13 @@
   // BB users, though the patch server message (below) can be used for a similar purpose.
   "WelcomeMessage": "",
 
+  // Retail ship/block flow. If enabled, clients are shown a Ship Select menu and then a Block Select menu instead
+  // of the custom main menu flow.
+  "RetailShipFlowEnabled": false,
+  // Ship names shown in Ship Select. If omitted, defaults are
+  // ["21:US/Vega", "22:US/Altair", "23:US/Deneb", "24:US/Antares"].
+  // "RetailShipNames": ["21:US/Vega", "22:US/Altair", "23:US/Deneb", "24:US/Antares"],
+
   // Patch server message. If not blank, these messages will be shown to PSO PC and PSO BB users (respectively) when
   // they connect to the patch server. Note that PSO PC displays the text in a Windows edit control instead of using
   // PSO's normal text renderer, so linebreaks must be \r\n and color escapes do not work in PCPatchServerMessage.

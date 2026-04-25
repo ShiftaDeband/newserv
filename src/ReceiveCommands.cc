@@ -1,5 +1,6 @@
 #include "ReceiveCommands.hh"
 
+#include <algorithm>
 #include <inttypes.h>
 #include <string.h>
 
@@ -148,6 +149,95 @@ static void send_main_menu(shared_ptr<Client> c) {
   send_menu(c, main_menu);
 }
 
+static bool should_use_retail_ship_flow(shared_ptr<const Client> c) {
+  auto s = c->require_server_state();
+  return s->retail_ship_flow_enabled && !is_v4(c->version()) && !is_patch(c->version());
+}
+
+static vector<shared_ptr<Lobby>> retail_block_targets_for_client(shared_ptr<Client> c, size_t ship_index) {
+  auto s = c->require_server_state();
+  uint8_t ship_menu_item_id = is_ep3(c->version()) ? 0 : (ship_index + 1);
+  return s->default_lobbies_for_version(c->version(), is_ep3(c->version()), ship_menu_item_id);
+}
+
+static void send_retail_ship_select_menu(shared_ptr<Client> c) {
+  auto s = c->require_server_state();
+  auto menu = make_shared<Menu>(MenuID::RETAIL_SHIP_SELECT, s->name);
+  weak_ptr<ServerState> weak_s = s;
+  for (size_t z = 0; z < s->retail_ship_names.size(); z++) {
+    uint8_t ship_id = static_cast<uint8_t>(z + 1);
+    auto get_desc = [weak_s, ship_id]() -> string {
+      auto s = weak_s.lock();
+      if (!s) {
+        return "";
+      }
+      size_t players = 0, teams = 0;
+      for (const auto& l : s->all_lobbies()) {
+        if (l->ship_menu_item_id != ship_id) {
+          continue;
+        }
+        if (l->is_game()) {
+          teams++;
+        } else if (l->check_flag(Lobby::Flag::DEFAULT) && l->check_flag(Lobby::Flag::PUBLIC)) {
+          players += l->count_clients();
+        }
+      }
+      return std::format("{} Players\n{} Teams", players, teams);
+    };
+    menu->items.emplace_back(static_cast<uint32_t>(z + 1), s->retail_ship_names[z], std::move(get_desc), 0);
+  }
+  send_menu(c, menu);
+}
+
+static void send_retail_block_select_menu(shared_ptr<Client> c, size_t ship_index) {
+  auto s = c->require_server_state();
+  auto menu = make_shared<Menu>(MenuID::RETAIL_BLOCK_SELECT, s->retail_ship_names.at(ship_index));
+
+  auto lobbies = retail_block_targets_for_client(c, ship_index);
+  if (is_ep3(c->version())) {
+    for (const auto& l : lobbies) {
+      string name = std::format("BLOCK{:02d}", l->block);
+      string description = std::format("$C6{}$C7 players", l->count_clients());
+      menu->items.emplace_back(l->lobby_id, name, description, 0);
+    }
+  } else {
+    uint8_t ship_id = static_cast<uint8_t>(ship_index + 1);
+    weak_ptr<ServerState> weak_s = s;
+    for (size_t block = 1; block <= 10; block++) {
+      string name = std::format("BLOCK{:02d}", block);
+      uint8_t block_u8 = static_cast<uint8_t>(block);
+      auto get_desc = [weak_s, ship_id, block_u8]() -> string {
+        auto s = weak_s.lock();
+        if (!s) {
+          return "";
+        }
+        size_t players = 0, teams = 0;
+        for (const auto& l : s->all_lobbies()) {
+          if (l->ship_menu_item_id != ship_id) {
+            continue;
+          }
+          if (l->is_game() && l->block == block_u8) {
+            teams++;
+          } else if (l->block == block_u8 && l->check_flag(Lobby::Flag::DEFAULT)) {
+            players += l->count_clients();
+          }
+        }
+        return std::format("{} Players\n{} Teams", players, teams);
+      };
+      menu->items.emplace_back(block, name, std::move(get_desc), 0);
+    }
+  }
+  send_menu(c, menu);
+}
+
+static void send_primary_menu(shared_ptr<Client> c) {
+  if (should_use_retail_ship_flow(c)) {
+    send_retail_ship_select_menu(c);
+  } else {
+    send_main_menu(c);
+  }
+}
+
 static void send_proxy_destinations_menu(shared_ptr<Client> c) {
   auto s = c->require_server_state();
   send_menu(c, s->proxy_destinations_menu(c->version()));
@@ -275,6 +365,8 @@ static asio::awaitable<void> send_auto_patches_if_needed(shared_ptr<Client> c) {
   }
 }
 
+static asio::awaitable<void> enable_save_if_needed(shared_ptr<Client> c);
+
 asio::awaitable<void> start_login_server_procedure(shared_ptr<Client> c) {
   auto s = c->require_server_state();
 
@@ -314,11 +406,13 @@ asio::awaitable<void> start_login_server_procedure(shared_ptr<Client> c) {
     s->ep3_tournament_index->link_client(c);
   }
 
+  co_await enable_save_if_needed(c);
+
   if (s->welcome_message.empty() ||
       c->check_flag(Client::Flag::NO_D6) ||
       !c->check_flag(Client::Flag::AT_WELCOME_MESSAGE)) {
     c->clear_flag(Client::Flag::AT_WELCOME_MESSAGE);
-    send_main_menu(c);
+    send_primary_menu(c);
   } else {
     send_message_box(c, s->welcome_message);
   }
@@ -2122,7 +2216,7 @@ static asio::awaitable<void> on_D6_V3(shared_ptr<Client> c, Channel::Message& ms
     send_menu(c, s->information_menu(c->version()));
   } else if (c->check_flag(Client::Flag::AT_WELCOME_MESSAGE)) {
     c->clear_flag(Client::Flag::AT_WELCOME_MESSAGE);
-    send_main_menu(c);
+    send_primary_menu(c);
   }
   co_return;
 }
@@ -2597,7 +2691,7 @@ static asio::awaitable<void> on_10_main_menu(shared_ptr<Client> c, uint32_t item
 static void on_10_clear_license_confirmation(shared_ptr<Client> c, uint32_t item_id) {
   switch (item_id) {
     case ClearLicenseConfirmationMenuItemID::CANCEL:
-      send_main_menu(c);
+      send_primary_menu(c);
       break;
     case ClearLicenseConfirmationMenuItemID::CLEAR_LICENSE:
       send_command(c, 0x9A, 0x04);
@@ -2608,7 +2702,7 @@ static void on_10_clear_license_confirmation(shared_ptr<Client> c, uint32_t item
 static void on_10_information(shared_ptr<Client> c, uint32_t item_id) {
   if (item_id == InformationMenuItemID::GO_BACK) {
     c->clear_flag(Client::Flag::IN_INFORMATION_MENU);
-    send_main_menu(c);
+    send_primary_menu(c);
   } else {
     try {
       auto contents = c->require_server_state()->information_contents_for_client(c);
@@ -2689,7 +2783,7 @@ static void on_10_proxy_options(shared_ptr<Client> c, uint32_t item_id) {
 
 static asio::awaitable<void> on_10_proxy_destinations(shared_ptr<Client> c, uint32_t item_id) {
   if (item_id == ProxyDestinationsMenuItemID::GO_BACK) {
-    send_main_menu(c);
+    send_primary_menu(c);
 
   } else if (item_id == ProxyDestinationsMenuItemID::OPTIONS) {
     send_menu(c, proxy_options_menu_for_client(c));
@@ -2714,6 +2808,167 @@ static asio::awaitable<void> on_10_proxy_destinations(shared_ptr<Client> c, uint
 
       co_await enable_save_if_needed(c);
       co_await start_proxy_session(c, dest->first, dest->second, false);
+    }
+  }
+}
+
+static void on_10_retail_ship_select(shared_ptr<Client> c, uint32_t item_id) {
+  auto s = c->require_server_state();
+  if (item_id == 0 || item_id > s->retail_ship_names.size()) {
+    send_message_box(c, "Incorrect menu item ID.");
+    return;
+  }
+
+  c->preferred_ship_menu_item_id = item_id;
+  send_retail_block_select_menu(c, item_id - 1);
+}
+
+static asio::awaitable<void> on_10_retail_block_select(shared_ptr<Client> c, uint32_t item_id) {
+  auto s = c->require_server_state();
+  if (c->preferred_ship_menu_item_id <= 0 ||
+      static_cast<size_t>(c->preferred_ship_menu_item_id) > s->retail_ship_names.size()) {
+    send_retail_ship_select_menu(c);
+    co_return;
+  }
+
+  co_await enable_save_if_needed(c);
+
+  size_t ship_index = static_cast<size_t>(c->preferred_ship_menu_item_id - 1);
+  auto ship_lobbies = retail_block_targets_for_client(c, ship_index);
+  shared_ptr<Lobby> target_lobby;
+  for (const auto& l : ship_lobbies) {
+    uint32_t candidate_item_id = is_ep3(c->version()) ? l->lobby_id : l->block;
+    if (candidate_item_id == item_id) {
+      target_lobby = l;
+      break;
+    }
+  }
+  if (!target_lobby) {
+    send_lobby_message_box(c, "$C6Can\'t change block\n\n$C7That block does not\nexist.");
+    co_return;
+  }
+
+  bool changed = s->change_client_lobby(c, target_lobby);
+  if (!changed) {
+    bool joined = false;
+    for (const auto& l : ship_lobbies) {
+      if (l == target_lobby) {
+        continue;
+      }
+      if (!is_ep3(c->version()) && (l->block != target_lobby->block)) {
+        continue;
+      }
+      if (s->change_client_lobby(c, l)) {
+        joined = true;
+        break;
+      }
+    }
+    if (!joined) {
+      send_lobby_message_box(c, "$C6Can\'t change block\n\n$C7All blocks on this\nship are full.");
+    }
+  }
+  co_return;
+}
+
+static asio::awaitable<void> on_retail_block_change(shared_ptr<Client> c, uint32_t menu_id, uint32_t item_id) {
+  if (menu_id == MenuID::RETAIL_SHIP_SELECT) {
+    on_10_retail_ship_select(c, item_id);
+    co_return;
+  }
+  if (menu_id == MenuID::RETAIL_BLOCK_SELECT) {
+    co_await on_10_retail_block_select(c, item_id);
+    co_return;
+  }
+  {
+    send_message_box(c, "Incorrect menu ID");
+    co_return;
+  }
+}
+
+static void on_lobby_selection(shared_ptr<Client> c, uint32_t item_id) {
+  auto s = c->require_server_state();
+
+  if (!c->lobby.lock()) {
+    // If the client isn't in any lobby, then they just left a game. Add them to the lobby they requested, but fall
+    // back to another lobby if it's full.
+    c->preferred_lobby_id = item_id;
+    s->add_client_to_available_lobby(c);
+
+  } else {
+    auto current_lobby = c->lobby.lock();
+
+    // If the client already is in a lobby, then they're using the lobby teleporter; add them to the lobby they
+    // requested or send a failure message.
+    shared_ptr<Lobby> new_lobby;
+    if (should_use_retail_ship_flow(c) && current_lobby && !current_lobby->is_ep3() &&
+        current_lobby->check_flag(Lobby::Flag::PUBLIC) && current_lobby->check_flag(Lobby::Flag::DEFAULT) &&
+        (item_id >= 1) && (item_id <= 15)) {
+      auto same_ship_lobbies = s->default_lobbies_for_version(
+          c->version(), false, current_lobby->ship_menu_item_id);
+      for (const auto& l : same_ship_lobbies) {
+        if ((l->block == current_lobby->block) && (l->lobby_number == item_id)) {
+          new_lobby = l;
+          break;
+        }
+      }
+    }
+    if (!new_lobby) {
+      new_lobby = s->find_lobby(item_id);
+    }
+    if (!new_lobby) {
+      send_lobby_message_box(c, "$C6Can't change lobby\n\n$C7The lobby does not\nexist.");
+      return;
+    }
+
+    if (new_lobby->is_game()) {
+      send_lobby_message_box(c, "$C6Can't change lobby\n\n$C7The specified lobby\nis a game.");
+      return;
+    }
+
+    if (new_lobby->is_ep3() && !is_ep3(c->version())) {
+      send_lobby_message_box(c, "$C6Can't change lobby\n\n$C7The lobby is for\nEpisode 3 only.");
+      return;
+    }
+
+    if (new_lobby == current_lobby) {
+      // Already in this lobby; attempting to re-join would cause a client stall.
+      c->log.info_f(
+          "Lobby selection resolved to current lobby (menu_item={:08X} lobby_id={:08X} lobby_number={} block={} occupancy={}/{})",
+          item_id,
+          new_lobby->lobby_id,
+          static_cast<size_t>(new_lobby->lobby_number),
+          static_cast<size_t>(new_lobby->block),
+          new_lobby->count_clients(),
+          static_cast<size_t>(new_lobby->max_clients));
+      if (new_lobby->count_clients() >= new_lobby->max_clients) {
+        send_lobby_message_box(c, "The lobby is full.");
+        send_lobby_list(c);
+      } else {
+        send_join_lobby(c, new_lobby);
+      }
+      return;
+    }
+
+    if (!s->change_client_lobby(c, new_lobby)) {
+      bool joined = false;
+      if (should_use_retail_ship_flow(c) && !new_lobby->is_ep3() &&
+          new_lobby->check_flag(Lobby::Flag::PUBLIC) && new_lobby->check_flag(Lobby::Flag::DEFAULT)) {
+        auto same_ship_lobbies = s->default_lobbies_for_version(
+            c->version(), false, new_lobby->ship_menu_item_id);
+        for (const auto& l : same_ship_lobbies) {
+          if ((l->block != new_lobby->block) || (l->lobby_number <= new_lobby->lobby_number)) {
+            continue;
+          }
+          if (s->change_client_lobby(c, l)) {
+            joined = true;
+            break;
+          }
+        }
+      }
+
+      if (!joined) {
+        send_lobby_message_box(c, "$C6The lobby is full.");
+      }
     }
   }
 }
@@ -2900,7 +3155,7 @@ static void on_10_ep3_download_quest_menu(shared_ptr<Client> c, uint32_t item_id
 
 static void on_10_patch_switches(shared_ptr<Client> c, uint32_t item_id) {
   if (item_id == PatchesMenuItemID::GO_BACK) {
-    send_main_menu(c);
+    send_primary_menu(c);
 
   } else {
     if (!c->check_flag(Client::Flag::HAS_SEND_FUNCTION_CALL)) {
@@ -2920,7 +3175,7 @@ static void on_10_patch_switches(shared_ptr<Client> c, uint32_t item_id) {
 
 static asio::awaitable<void> on_10_programs(shared_ptr<Client> c, uint32_t item_id) {
   if (item_id == ProgramsMenuItemID::GO_BACK) {
-    send_main_menu(c);
+    send_primary_menu(c);
 
   } else {
     if (!c->check_flag(Client::Flag::HAS_SEND_FUNCTION_CALL)) {
@@ -3029,6 +3284,12 @@ static asio::awaitable<void> on_10(shared_ptr<Client> c, Channel::Message& msg) 
     case MenuID::MAIN:
       co_await on_10_main_menu(c, base_cmd.item_id);
       break;
+    case MenuID::RETAIL_SHIP_SELECT:
+      on_10_retail_ship_select(c, base_cmd.item_id);
+      break;
+    case MenuID::RETAIL_BLOCK_SELECT:
+      co_await on_10_retail_block_select(c, base_cmd.item_id);
+      break;
     case MenuID::CLEAR_LICENSE_CONFIRMATION:
       on_10_clear_license_confirmation(c, base_cmd.item_id);
       break;
@@ -3076,11 +3337,44 @@ static asio::awaitable<void> on_10(shared_ptr<Client> c, Channel::Message& msg) 
 
 static asio::awaitable<void> on_84(shared_ptr<Client> c, Channel::Message& msg) {
   const auto& cmd = check_size_t<C_LobbySelection_84>(msg.data);
-  auto s = c->require_server_state();
 
   if (c->check_flag(Client::Flag::AWAITING_ENABLE_B2_QUEST)) {
     co_await start_login_server_procedure(c);
     c->clear_flag(Client::Flag::AWAITING_ENABLE_B2_QUEST);
+    co_return;
+  }
+
+  if (should_use_retail_ship_flow(c) &&
+      ((cmd.menu_id == MenuID::RETAIL_SHIP_SELECT) ||
+          (cmd.menu_id == MenuID::RETAIL_BLOCK_SELECT))) {
+    co_await on_retail_block_change(c, cmd.menu_id, cmd.item_id);
+    co_return;
+  }
+
+  // Some clients send a zeroed 84 when opening/refreshing the lobby warp list.
+  // Only respond with the lobby list if the client is not currently in a game; receiving an
+  // unexpected 0x83 during game loading could confuse the client.
+  if ((cmd.menu_id == 0) && (cmd.item_id == 0)) {
+    auto lobby_check = c->lobby.lock();
+    if (!lobby_check || !lobby_check->is_game()) {
+      send_lobby_list(c);
+    }
+    co_return;
+  }
+
+  // Some clients can send stale/invalid lobby selection IDs immediately after game teardown.
+  // If this happens outside of a game, refresh the lobby list instead of showing an error box.
+  auto lobby_check = c->lobby.lock();
+  if ((!lobby_check || !lobby_check->is_game()) &&
+      (cmd.menu_id != MenuID::LOBBY) &&
+      (cmd.menu_id != MenuID::RETAIL_SHIP_SELECT) &&
+      (cmd.menu_id != MenuID::RETAIL_BLOCK_SELECT)) {
+    if (lobby_check && !lobby_check->is_game()) {
+      send_join_lobby(c, lobby_check);
+      co_return;
+    }
+    c->log.info_f("Received unknown 84 outside game (menu_id={:08X} item_id={:08X}); falling back to lobby list refresh", cmd.menu_id, cmd.item_id);
+    send_lobby_list(c);
     co_return;
   }
 
@@ -3089,35 +3383,7 @@ static asio::awaitable<void> on_84(shared_ptr<Client> c, Channel::Message& msg) 
     co_return;
   }
 
-  if (!c->lobby.lock()) {
-    // If the client isn't in any lobby, then they just left a game. Add them to the lobby they requested, but fall
-    // back to another lobby if it's full.
-    c->preferred_lobby_id = cmd.item_id;
-    s->add_client_to_available_lobby(c);
-
-  } else {
-    // If the client already is in a lobby, then they're using the lobby teleporter; add them to the lobby they
-    // requested or send a failure message.
-    auto new_lobby = s->find_lobby(cmd.item_id);
-    if (!new_lobby) {
-      send_lobby_message_box(c, "$C6Can't change lobby\n\n$C7The lobby does not\nexist.");
-      co_return;
-    }
-
-    if (new_lobby->is_game()) {
-      send_lobby_message_box(c, "$C6Can't change lobby\n\n$C7The specified lobby\nis a game.");
-      co_return;
-    }
-
-    if (new_lobby->is_ep3() && !is_ep3(c->version())) {
-      send_lobby_message_box(c, "$C6Can't change lobby\n\n$C7The lobby is for\nEpisode 3 only.");
-      co_return;
-    }
-
-    if (!s->change_client_lobby(c, new_lobby)) {
-      send_lobby_message_box(c, "$C6Can\'t change lobby\n\n$C7The lobby is full.");
-    }
-  }
+  on_lobby_selection(c, cmd.item_id);
 }
 
 static asio::awaitable<void> on_08_E6(shared_ptr<Client> c, Channel::Message& msg) {
@@ -3137,24 +3403,41 @@ static asio::awaitable<void> on_A0(shared_ptr<Client> c, Channel::Message&) {
   // The client sends data in this command, but none of it is important. We intentionally don't call check_size here,
   // but just ignore the data.
 
+  if (should_use_retail_ship_flow(c)) {
+    co_await enable_save_if_needed(c);
+    send_retail_ship_select_menu(c);
+    co_return;
+  }
+
   // Delete the player from the lobby they're in (but only visible to themself). This makes it safe to allow the player
   // to choose download quests from the main menu again - if we didn't do this, they could move in the lobby after
   // canceling the download quests menu, which looks really bad.
   send_self_leave_notification(c);
 
   // Sending a blank message box here works around the bug where the log window contents appear prepended to the next
-  // large message box. But, we don't have to do this if we're not going to show the welcome message or information
-  // menu (that is, if the client will not send a close confirmation).
-  if (!c->check_flag(Client::Flag::NO_D6)) {
+  // large message box. We only need this when we'll show a close-confirmed welcome message next.
+  if (!c->check_flag(Client::Flag::NO_D6) && c->check_flag(Client::Flag::AT_WELCOME_MESSAGE)) {
     send_message_box(c, "");
   }
 
-  return start_login_server_procedure(c);
+  co_await start_login_server_procedure(c);
+  co_return;
 }
 
 static asio::awaitable<void> on_A1(shared_ptr<Client> c, Channel::Message& msg) {
+  co_await enable_save_if_needed(c);
+
+  if (should_use_retail_ship_flow(c)) {
+    if (c->preferred_ship_menu_item_id <= 0) {
+      send_retail_ship_select_menu(c);
+    } else {
+      send_retail_block_select_menu(c, c->preferred_ship_menu_item_id - 1);
+    }
+    co_return;
+  }
   // newserv doesn't have blocks; treat block change the same as ship change
-  return on_A0(c, msg);
+  co_await on_A0(c, msg);
+  co_return;
 }
 
 static asio::awaitable<void> on_8E_DCNTE(shared_ptr<Client> c, Channel::Message& msg) {
@@ -3621,6 +3904,9 @@ static asio::awaitable<void> on_6x_C9_CB(shared_ptr<Client> c, Channel::Message&
   check_size_v(msg.data.size(), 4, 0xFFFF);
   if ((msg.data.size() > 0x400) && (msg.command != 0x6C) && (msg.command != 0x6D)) {
     throw runtime_error("non-extended game command data size is too large");
+  }
+  if (msg.command == 0x60) {
+    c->log.info_f("on_6x_C9_CB: received 0x60 (size={})", msg.data.size());
   }
   co_await on_subcommand_multi(c, msg);
 }
@@ -4254,13 +4540,7 @@ static void on_choice_search_t(shared_ptr<Client> c, const ChoiceSearchConfig& c
             name_for_section_id(lp->disp.visual.section_id));
         result.info_string.encode(info_string, c->language());
         string location_string;
-        if (l->is_game()) {
-          location_string = std::format("{},,BLOCK01,{}", l->name, s->name);
-        } else if (l->is_ep3()) {
-          location_string = std::format("BLOCK01-C{:02},,BLOCK01,{}", l->lobby_id - 15, s->name);
-        } else {
-          location_string = std::format("BLOCK01-{:02},,BLOCK01,{}", l->lobby_id, s->name);
-        }
+        location_string = s->location_string_for_lobby(l);
         result.location_string.encode(location_string, c->language());
         result.reconnect_command_header.command = 0x19;
         result.reconnect_command_header.flag = 0x00;
@@ -4660,7 +4940,8 @@ shared_ptr<Lobby> create_game_generic(
   game->create_item_creator(creator_c->version());
 
   game->event = current_lobby->event;
-  game->block = 0xFF;
+  game->ship_menu_item_id = current_lobby->ship_menu_item_id;
+  game->block = current_lobby->block;
   game->max_clients = game->check_flag(Lobby::Flag::IS_SPECTATOR_TEAM) ? 12 : 4;
   game->min_level = min_level;
   game->max_level = 0xFFFFFFFF;
@@ -4751,6 +5032,15 @@ static asio::awaitable<void> on_C1_PC(shared_ptr<Client> c, Channel::Message& ms
     s->change_client_lobby(c, game);
     c->set_flag(Client::Flag::LOADING);
     c->log.info_f("LOADING flag set");
+
+    // If this is a solo game (just created with 1 player), set the artificial state flags so the creator
+    // receives all game state when they send their first ping (0x1D)
+    if (game->mode == GameMode::SOLO) {
+      c->set_flag(Client::Flag::SHOULD_SEND_ARTIFICIAL_ITEM_STATE);
+      c->set_flag(Client::Flag::SHOULD_SEND_ARTIFICIAL_ENEMY_AND_SET_STATE);
+      c->set_flag(Client::Flag::SHOULD_SEND_ARTIFICIAL_OBJECT_STATE);
+      c->set_flag(Client::Flag::SHOULD_SEND_ARTIFICIAL_FLAG_STATE);
+    }
   }
   co_return;
 }
@@ -4959,7 +5249,10 @@ static asio::awaitable<void> on_6F(shared_ptr<Client> c, Channel::Message& msg) 
     // happens before any inbound commands are processed, so we already did it when the client was added to the lobby.
     // So, we only assign item IDs here if the client is not the leader.
     if ((msg.command == 0x006F) && (c->lobby_client_id != l->leader_id)) {
+      c->log.info_f("Assigning item IDs (not leader)");
       l->assign_inventory_and_bank_item_ids(c, true);
+    } else {
+      c->log.info_f("NOT assigning item IDs (is_leader={}, msg.command={:02X})", (c->lobby_client_id == l->leader_id), msg.command);
     }
   }
 
@@ -4967,6 +5260,16 @@ static asio::awaitable<void> on_6F(shared_ptr<Client> c, Channel::Message& msg) 
     auto s = l->require_server_state();
     l->log.info_f("Deleting Episode 3 server state");
     l->ep3_server.reset();
+  }
+
+  // If the client requested save enable (0x96), complete that handshake here before
+  // sending resume-time gameplay state for this load transition.
+  co_await enable_save_if_needed(c);
+
+  // Some clients are only reliable if they receive an additional save-enable poke
+  // during initial game load; send one when save is already enabled.
+  if (!is_pre_v1(c->version()) && c->check_flag(Client::Flag::SAVE_ENABLED)) {
+    send_command(c, 0x97, 0x01);
   }
 
   send_server_time(c);
@@ -5023,23 +5326,34 @@ static asio::awaitable<void> on_6F(shared_ptr<Client> c, Channel::Message& msg) 
   // - command is 016F and a joinable quest is in progress
   // - command is 006F and a joinable quest is NOT in progress
   if (should_resume_game) {
+    c->log.info_f("About to call send_resume_game");
     send_resume_game(l, c);
+    c->log.info_f("Returned from send_resume_game");
+  } else {
+    c->log.info_f("NOT calling send_resume_game (should_resume_game=false)");
   }
 
   // Handle initial commands for spectator teams
+  c->log.info_f("After send_resume_game; checking for spectator/battle_player logic");
   auto watched_lobby = l->watched_lobby.lock();
   if (l->battle_player && l->check_flag(Lobby::Flag::START_BATTLE_PLAYER_IMMEDIATELY)) {
+    c->log.info_f("Starting battle player");
     l->battle_player->start();
   } else if (watched_lobby && watched_lobby->ep3_server) {
+    c->log.info_f("Handling spectator team commands");
     if (!watched_lobby->ep3_server->battle_finished) {
       watched_lobby->ep3_server->send_commands_for_joining_spectator(c->channel);
     }
     send_ep3_update_game_metadata(watched_lobby);
+  } else {
+    c->log.info_f("No battle_player or watched_lobby to handle");
   }
 
   // If there are more players to bring in, try to do so
+  c->log.info_f("About to call add_next_game_client");
   c->disconnect_hooks.erase(ADD_NEXT_CLIENT_DISCONNECT_HOOK_NAME);
   add_next_game_client(l);
+  c->log.info_f("Returned from add_next_game_client; on_6F complete");
 }
 
 static asio::awaitable<void> on_99(shared_ptr<Client> c, Channel::Message& msg) {

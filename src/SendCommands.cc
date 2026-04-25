@@ -1223,14 +1223,7 @@ void send_card_search_result_t(shared_ptr<Client> c, shared_ptr<Client> result, 
   cmd.reconnect_command.port = s->game_server_port_for_version(c->version());
   cmd.reconnect_command.unused = 0;
 
-  string location_string;
-  if (result_lobby->is_game()) {
-    location_string = std::format("{},,BLOCK01,{}", result_lobby->name, s->name);
-  } else if (result_lobby->is_ep3()) {
-    location_string = std::format("BLOCK01-C{:02},,BLOCK01,{}", result_lobby->lobby_id - 15, s->name);
-  } else {
-    location_string = std::format("BLOCK01-{:02},,BLOCK01,{}", result_lobby->lobby_id, s->name);
-  }
+  string location_string = s->location_string_for_lobby(result_lobby);
   cmd.location_string.encode(location_string, c->language());
   cmd.extension.lobby_refs[0].menu_id = MenuID::LOBBY;
   cmd.extension.lobby_refs[0].item_id = result_lobby->lobby_id;
@@ -1794,16 +1787,48 @@ void send_lobby_list(shared_ptr<Client> c) {
 
   auto s = c->require_server_state();
   vector<S_LobbyListEntry_83> entries;
-  for (shared_ptr<Lobby> l : s->all_lobbies()) {
-    if (!l->check_flag(Lobby::Flag::DEFAULT)) {
-      continue;
+
+  vector<shared_ptr<Lobby>> lobbies;
+  if (s->retail_ship_flow_enabled && !is_v4(c->version()) && !is_patch(c->version()) && !is_ep3(c->version())) {
+    uint8_t current_block = 1;
+    if (auto cl = c->lobby.lock()) {
+      if (!cl->is_game() && cl->check_flag(Lobby::Flag::DEFAULT) && cl->check_flag(Lobby::Flag::PUBLIC)) {
+        current_block = cl->block;
+      }
     }
-    if (!l->version_is_allowed(c->version())) {
-      continue;
+
+    uint8_t ship_menu_item_id = 1;
+    if ((c->preferred_ship_menu_item_id > 0) &&
+        (static_cast<size_t>(c->preferred_ship_menu_item_id) <= s->retail_ship_names.size())) {
+      ship_menu_item_id = c->preferred_ship_menu_item_id;
     }
+    auto ship_lobbies = s->default_lobbies_for_version(c->version(), false, ship_menu_item_id);
+    for (const auto& l : ship_lobbies) {
+      if (l->block == current_block) {
+        lobbies.emplace_back(l);
+      }
+    }
+
+  } else {
+    for (shared_ptr<Lobby> l : s->all_lobbies()) {
+      if (!l->check_flag(Lobby::Flag::DEFAULT)) {
+        continue;
+      }
+      if (!l->version_is_allowed(c->version())) {
+        continue;
+      }
+      lobbies.emplace_back(l);
+    }
+  }
+
+  for (const auto& l : lobbies) {
     auto& e = entries.emplace_back();
     e.menu_id = MenuID::LOBBY;
-    e.item_id = l->lobby_id;
+    if (s->retail_ship_flow_enabled && !is_v4(c->version()) && !is_patch(c->version()) && !is_ep3(c->version())) {
+      e.item_id = l->lobby_number;
+    } else {
+      e.item_id = l->lobby_id;
+    }
     e.player_count = l->count_clients();
   }
 
@@ -2167,6 +2192,9 @@ void send_join_lobby_t(shared_ptr<Client> c, shared_ptr<Lobby> l, shared_ptr<Cli
   } else {
     if (c->override_lobby_number != 0x80) {
       lobby_type = c->override_lobby_number;
+    } else if (s->retail_ship_flow_enabled && (l->ship_menu_item_id > 0) && !l->is_ep3() &&
+        l->check_flag(Lobby::Flag::PUBLIC) && l->check_flag(Lobby::Flag::DEFAULT)) {
+      lobby_type = l->lobby_number ? (l->lobby_number - 1) : 0;
     } else if (l->check_flag(Lobby::Flag::IS_OVERFLOW)) {
       lobby_type = is_ep3(c->version()) ? 15 : 0;
     } else {

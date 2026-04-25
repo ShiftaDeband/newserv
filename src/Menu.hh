@@ -14,6 +14,8 @@
 
 namespace MenuID {
 constexpr uint32_t MAIN = 0x11000011;
+constexpr uint32_t RETAIL_SHIP_SELECT = 0x11010011;
+constexpr uint32_t RETAIL_BLOCK_SELECT = 0x11020011;
 constexpr uint32_t CLEAR_LICENSE_CONFIRMATION = 0x11111111;
 constexpr uint32_t INFORMATION = 0x22000022;
 constexpr uint32_t LOBBY = 0x33000033;

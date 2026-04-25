@@ -224,6 +224,7 @@
     ["Area list", "$C7Show stage code\nlist", "Use these names with %swarpme and %swarpall.\n$C2Green$C7 areas will be empty unless you are in a quest.\n$C6Yellow$C7 areas will not allow you to move.\n\n    $C8Episode 1  / Episode 2        / Episode 4$C7\n0: Pioneer 2  / Pioneer 2        / Pioneer 2\n1: Forest 1   / Temple Alpha    / Crater East\n2: Forest 2   / Temple Beta     / Crater West\n3: Caves 1    / Spaceship Alpha / Crater South\n4: Caves 2    / Spaceship Beta  / Crater North\n5: Caves 3    / CCA              / Crater Interior\n6: Mines 1    / Jungle North     / Desert 1\n7: Mines 2    / Jungle South     / Desert 2\n8: Ruins 1     / Mountain         / Desert 3\n9: Ruins 2     / Seaside          / Saint-Milion\n10: Ruins 3   / Seabed Upper    / $C6Test map$C7\n11: Dragon    / Seabed Lower\n12: De Rol Le / Gal Gryphon\n13: Vol Opt   / Olga Flow\n14: Dark Falz / Barba Ray\n15: $C2Lobby$C7     / Gol Dragon\n16: $C6Battle 1$C7  / $C6Seaside Night$C7\n17: $C6Battle 2$C7  / $C2Tower$C7"],
   ],
   "WelcomeMessage": "You are connected to $C6Alexandria$C7.",
+  "RetailShipFlowEnabled": false,
   "PCPatchServerMessage": "newserv patch server\r\n\r\nThis server is not affiliated with, sponsored by, or in any other way connected to SEGA or Sonic Team, and is owned and operated completely independently.",
   "BBPatchServerMessage": "$C7newserv patch server\n\nThis server is not affiliated with, sponsored by, or in any\nother way connected to SEGA or Sonic Team, and is owned\nand operated completely independently.",
 

@@ -161,7 +161,9 @@ struct Lobby : public std::enable_shared_from_this<Lobby> {
 
   // Lobby stuff
   uint8_t event = 0;
+  uint8_t ship_menu_item_id = 0;
   uint8_t block = 0;
+  uint8_t lobby_number = 1;
   uint8_t leader_id = 0;
   uint8_t max_clients = 12;
   uint32_t enabled_flags = 0;

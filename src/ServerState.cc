@@ -98,6 +98,21 @@ void ServerState::add_client_to_available_lobby(shared_ptr<Client> c) {
   }
 
   if (!added_to_lobby.get()) {
+    if (this->retail_ship_flow_enabled && !is_v4(c->version()) && !is_patch(c->version())) {
+      uint8_t ship_menu_item_id = 1;
+      if ((c->preferred_ship_menu_item_id > 0) &&
+          (static_cast<size_t>(c->preferred_ship_menu_item_id) <= this->retail_ship_names.size())) {
+        ship_menu_item_id = c->preferred_ship_menu_item_id;
+      }
+      auto l = this->find_default_lobby(c->version(), false, 1, ship_menu_item_id);
+      if (l) {
+        l->add_client(c);
+        added_to_lobby = l;
+      }
+    }
+  }
+
+  if (!added_to_lobby.get()) {
     for (const auto& lobby_id : this->public_lobby_search_order(c)) {
       try {
         auto l = this->find_lobby(lobby_id);
@@ -121,6 +136,10 @@ void ServerState::add_client_to_available_lobby(shared_ptr<Client> c) {
     added_to_lobby->event = this->pre_lobby_event;
     added_to_lobby->allow_version(c->version());
     added_to_lobby->add_client(c);
+  }
+
+  if (added_to_lobby && (added_to_lobby->ship_menu_item_id > 0)) {
+    c->preferred_ship_menu_item_id = added_to_lobby->ship_menu_item_id;
   }
 
   // Send a join message to the joining player, and notifications to all others
@@ -153,6 +172,9 @@ bool ServerState::change_client_lobby(
 
   if (current_lobby) {
     this->on_player_left_lobby(current_lobby, old_lobby_client_id);
+  }
+  if (new_lobby->ship_menu_item_id > 0) {
+    c->preferred_ship_menu_item_id = new_lobby->ship_menu_item_id;
   }
   if (send_join_notification) {
     this->send_lobby_join_notifications(new_lobby, c);
@@ -385,6 +407,64 @@ const vector<uint32_t>& ServerState::public_lobby_search_order(Version version, 
     return this->client_customization_public_lobby_search_order;
   }
   return this->public_lobby_search_orders.at(static_cast<size_t>(version));
+}
+
+vector<shared_ptr<Lobby>> ServerState::default_lobbies_for_version(Version version, bool ep3, uint8_t ship_menu_item_id) const {
+  vector<shared_ptr<Lobby>> ret;
+  for (const auto& it : this->id_to_lobby) {
+    const auto& l = it.second;
+    if (!l || l->is_game() || !l->check_flag(Lobby::Flag::PUBLIC) || !l->check_flag(Lobby::Flag::DEFAULT)) {
+      continue;
+    }
+    if (!l->version_is_allowed(version) || (l->is_ep3() != ep3)) {
+      continue;
+    }
+    if (ship_menu_item_id && (l->ship_menu_item_id != ship_menu_item_id)) {
+      continue;
+    }
+    ret.emplace_back(l);
+  }
+  sort(ret.begin(), ret.end(), [](const auto& a, const auto& b) {
+    if (a->block == b->block) {
+      if (a->lobby_number == b->lobby_number) {
+        return a->lobby_id < b->lobby_id;
+      }
+      return a->lobby_number < b->lobby_number;
+    }
+    return a->block < b->block;
+  });
+  return ret;
+}
+
+shared_ptr<Lobby> ServerState::find_default_lobby(Version version, bool ep3, uint8_t block, uint8_t ship_menu_item_id) const {
+  auto lobbies = this->default_lobbies_for_version(version, ep3, ship_menu_item_id);
+  for (const auto& l : lobbies) {
+    if (l->block == block) {
+      return l;
+    }
+  }
+  return nullptr;
+}
+
+string ServerState::location_string_for_lobby(shared_ptr<const Lobby> l) const {
+  auto ep3_lobby_number = static_cast<size_t>((l->block > 15) ? (l->block - 15) : l->block);
+  string block_label;
+  if (this->retail_ship_flow_enabled && (l->ship_menu_item_id > 0) && !l->is_ep3() &&
+      (static_cast<size_t>(l->ship_menu_item_id) <= this->retail_ship_names.size())) {
+    block_label = std::format("{}-{:02}", this->retail_ship_names.at(l->ship_menu_item_id - 1), l->block);
+  } else {
+    block_label = "BLOCK01";
+  }
+
+  if (l->is_game()) {
+    return std::format("{},,{},{}", l->name, block_label, this->name);
+  } else if (l->is_ep3()) {
+    return std::format("{}-C{:02},,{},{}", block_label, ep3_lobby_number, block_label, this->name);
+  } else if (block_label == "BLOCK01") {
+    return std::format("BLOCK01-{:02},,BLOCK01,{}", static_cast<size_t>(l->block), this->name);
+  } else {
+    return std::format("{}-L{:02},,{},{}", block_label, static_cast<size_t>(l->lobby_number), block_label, this->name);
+  }
 }
 
 shared_ptr<const vector<string>> ServerState::information_contents_for_client(shared_ptr<const Client> c) const {
@@ -1288,6 +1368,22 @@ void ServerState::load_config_early() {
   this->welcome_message = this->config_json->get_string("WelcomeMessage", "");
   this->pc_patch_server_message = this->config_json->get_string("PCPatchServerMessage", "");
   this->bb_patch_server_message = this->config_json->get_string("BBPatchServerMessage", "");
+  this->retail_ship_flow_enabled = this->config_json->get_bool("RetailShipFlowEnabled", false);
+  this->retail_ship_names.clear();
+  try {
+    for (const auto& it : this->config_json->get_list("RetailShipNames")) {
+      this->retail_ship_names.emplace_back(it->as_string());
+    }
+  } catch (const out_of_range&) {
+  }
+  if (this->retail_ship_names.empty()) {
+    this->retail_ship_names = {
+        "21:US/Vega",
+        "22:US/Altair",
+        "23:US/Deneb",
+        "24:US/Antares",
+    };
+  }
 
   this->team_reward_defs_json = nullptr;
   try {
@@ -2213,41 +2309,85 @@ void ServerState::create_default_lobbies() {
   }
   this->default_lobbies_created = true;
 
-  vector<shared_ptr<Lobby>> non_v1_only_lobbies;
-  vector<shared_ptr<Lobby>> ep3_only_lobbies;
-
-  for (size_t x = 0; x < 20; x++) {
-    auto lobby_name = std::format("LOBBY{}", x + 1);
-    bool allow_v1 = (x <= 9);
-    bool allow_non_ep3 = (x <= 14);
-
-    shared_ptr<Lobby> l = this->create_lobby(false);
-    l->event = this->pre_lobby_event;
-    l->set_flag(Lobby::Flag::PUBLIC);
-    l->set_flag(Lobby::Flag::DEFAULT);
-    l->set_flag(Lobby::Flag::PERSISTENT);
-    if (allow_non_ep3) {
-      if (allow_v1) {
-        l->allow_version(Version::DC_NTE);
-        l->allow_version(Version::DC_11_2000);
-        l->allow_version(Version::DC_V1);
+  if (this->retail_ship_flow_enabled) {
+    size_t ship_count = max<size_t>(1, this->retail_ship_names.size());
+    for (size_t ship_index = 0; ship_index < ship_count; ship_index++) {
+      for (size_t block = 1; block <= 10; block++) {
+        for (size_t lobby_number = 1; lobby_number <= 15; lobby_number++) {
+          shared_ptr<Lobby> l = this->create_lobby(false);
+          l->event = this->pre_lobby_event;
+          l->set_flag(Lobby::Flag::PUBLIC);
+          l->set_flag(Lobby::Flag::DEFAULT);
+          l->set_flag(Lobby::Flag::PERSISTENT);
+          l->allow_version(Version::DC_NTE);
+          l->allow_version(Version::DC_11_2000);
+          l->allow_version(Version::DC_V1);
+          l->allow_version(Version::DC_V2);
+          l->allow_version(Version::PC_NTE);
+          l->allow_version(Version::PC_V2);
+          l->allow_version(Version::GC_NTE);
+          l->allow_version(Version::GC_V3);
+          l->allow_version(Version::XB_V3);
+          l->allow_version(Version::BB_V4);
+          l->ship_menu_item_id = ship_index + 1;
+          l->block = block;
+          l->lobby_number = lobby_number;
+          l->name = std::format("LOBBY{}-{}-{}", ship_index + 1, block, lobby_number);
+          l->max_clients = 12;
+        }
       }
-      l->allow_version(Version::DC_V2);
-      l->allow_version(Version::PC_NTE);
-      l->allow_version(Version::PC_V2);
-      l->allow_version(Version::GC_NTE);
-      l->allow_version(Version::GC_V3);
-      l->allow_version(Version::XB_V3);
-      l->allow_version(Version::BB_V4);
     }
-    l->allow_version(Version::GC_EP3_NTE);
-    l->allow_version(Version::GC_EP3);
 
-    l->block = x + 1;
-    l->name = lobby_name;
-    l->max_clients = 12;
-    if (!allow_non_ep3) {
+    for (size_t x = 0; x < 5; x++) {
+      shared_ptr<Lobby> l = this->create_lobby(false);
+      l->event = this->pre_lobby_event;
+      l->set_flag(Lobby::Flag::PUBLIC);
+      l->set_flag(Lobby::Flag::DEFAULT);
+      l->set_flag(Lobby::Flag::PERSISTENT);
+      l->allow_version(Version::GC_EP3_NTE);
+      l->allow_version(Version::GC_EP3);
+      l->block = x + 1;
+      l->lobby_number = 1;
+      l->name = std::format("LOBBYC{}", x + 1);
+      l->max_clients = 12;
       l->episode = Episode::EP3;
+    }
+
+  } else {
+    for (size_t x = 0; x < 20; x++) {
+      auto lobby_name = std::format("LOBBY{}", x + 1);
+      bool allow_v1 = (x <= 9);
+      bool allow_non_ep3 = (x <= 14);
+
+      shared_ptr<Lobby> l = this->create_lobby(false);
+      l->event = this->pre_lobby_event;
+      l->set_flag(Lobby::Flag::PUBLIC);
+      l->set_flag(Lobby::Flag::DEFAULT);
+      l->set_flag(Lobby::Flag::PERSISTENT);
+      if (allow_non_ep3) {
+        if (allow_v1) {
+          l->allow_version(Version::DC_NTE);
+          l->allow_version(Version::DC_11_2000);
+          l->allow_version(Version::DC_V1);
+        }
+        l->allow_version(Version::DC_V2);
+        l->allow_version(Version::PC_NTE);
+        l->allow_version(Version::PC_V2);
+        l->allow_version(Version::GC_NTE);
+        l->allow_version(Version::GC_V3);
+        l->allow_version(Version::XB_V3);
+        l->allow_version(Version::BB_V4);
+      }
+      l->allow_version(Version::GC_EP3_NTE);
+      l->allow_version(Version::GC_EP3);
+
+      l->block = x + 1;
+      l->lobby_number = 1;
+      l->name = lobby_name;
+      l->max_clients = 12;
+      if (!allow_non_ep3) {
+        l->episode = Episode::EP3;
+      }
     }
   }
 }
