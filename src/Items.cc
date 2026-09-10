@@ -129,6 +129,11 @@ void player_use_item(std::shared_ptr<Client> c, size_t item_index, std::shared_p
     item.flags &= (~8); // Unequip it
     should_delete_item = false;
 
+  } else if (primary_identifier == 0x00C50000) {
+    // Glide Divine can be used to restore TP at the cost of setting HP to 1; the server doesn't have to do anything in
+    // this case
+    should_delete_item = false;
+
   } else if ((primary_identifier & 0xFFFF0000) == 0x030C0000) { // Non-combo mag cells
     auto& mag = player->inventory.items[player->inventory.find_equipped_item(EquipSlot::MAG)];
     uint8_t evolution_number = s->data->mag_metadata_table(c->version())->get_evolution_number(mag.data.data1[1]);
