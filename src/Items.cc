@@ -199,6 +199,9 @@ void player_use_item(std::shared_ptr<Client> c, size_t item_index, std::shared_p
       }
     }
 
+  } else if ((primary_identifier & 0xFFFD0000) == 0x03140000) { // Event items (0314xx) and music disks (0316xx)
+    // These only have effects on the client side; we can just delete them from the inventory
+
   } else if (primary_identifier == 0x03170000) { // Unopened Hunters Report
     // The unopened Hunters Report's rank is stored in the kill count field; using the unopened report copies the rank
     // to data1[2] and replaces the inventory item with a new item with the same ID. The game also moves the item to
