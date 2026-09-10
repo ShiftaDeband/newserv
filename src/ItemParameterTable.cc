@@ -245,14 +245,14 @@ ItemParameterTable::Unit ItemParameterTable::Unit::from_json(const phosg::JSON& 
   ItemParameterTable::Unit ret;
   ret.parse_base_from_json(json);
   ret.stat = json.get_int("Stat");
-  ret.stat_amount = json.get_int("StatAmount");
+  ret.amount = json.contains("Amount") ? json.get_int("Amount") : json.get_int("StatAmount");
   ret.modifier_amount = json.get_int("ModifierAmount");
   return ret;
 }
 phosg::JSON ItemParameterTable::Unit::json() const {
   phosg::JSON ret = this->ItemBase::json();
   ret.emplace("Stat", this->stat);
-  ret.emplace("StatAmount", this->stat_amount);
+  ret.emplace("Amount", this->amount);
   ret.emplace("ModifierAmount", this->modifier_amount);
   return ret;
 }
@@ -1556,15 +1556,15 @@ struct UnitT {
   /* V1/V2 offsets */
   /* 00 */ BaseT base;
   /* 04 */ U16T<BE> stat = 0;
-  /* 06 */ U16T<BE> stat_amount = 0;
+  /* 06 */ U16T<BE> amount = 0;
   /* 08 */
   UnitT() = default;
-  UnitT(const ItemParameterTable::Unit& u) : base(u), stat(u.stat), stat_amount(u.stat_amount) {}
+  UnitT(const ItemParameterTable::Unit& u) : base(u), stat(u.stat), amount(u.amount) {}
   operator ItemParameterTable::Unit() const {
     ItemParameterTable::Unit ret;
     this->base.parse_into(ret);
     ret.stat = this->stat;
-    ret.stat_amount = this->stat_amount;
+    ret.amount = this->amount;
     return ret;
   }
 } __attribute__((packed));

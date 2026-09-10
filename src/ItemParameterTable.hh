@@ -130,8 +130,38 @@ public:
   };
 
   struct Unit : ItemBase {
+    // Values for stat:
+    //   0000 = ATP (amount = bonus value)
+    //   0001 = MST (amount = bonus value)
+    //   0002 = ATA (amount = bonus value * 10, so amount = 30 means 3 ATA, for example)
+    //   0003 = EVP (amount = bonus value)
+    //   0004 = HP (amount = bonus value)
+    //   0005 = TP (amount = bonus value)
+    //   0006 = DFP (amount = bonus value)
+    //   0007 = LCK (amount = bonus value)
+    //   0008 = ATP, MST, ATA, EVP, DFP, and LCK (amount = bonus value, except ATA for which amount = bonus value * 10)
+    //   0009 = EFR (amount = bonus value)
+    //   000A = EIC (amount = bonus value)
+    //   000B = ETH (amount = bonus value)
+    //   000C = ELT (amount = bonus value)
+    //   000D = EDK (amount = bonus value)
+    //   000E = EFR, EIC, ETH, ELT, and EDK (amount = bonus value)
+    //   000F = HP generation (amount = seconds between HP increments)
+    //   0010 = TP generation (amount = seconds between TP increments)
+    //   0011 = PB generation (amount = seconds between PB increments)
+    //   0012 = Level of all learned techniques (amount = number of levels)
+    //   0013 = Attack speed (amount = percentage increase)
+    //   0014 = immunity to all negative status effects (amount is ignored)
+    //   0015 = trap vision (amount is ignored)
+    //   0016 = immunity to poison (amount is ignored)
+    //   0017 = immunity to paralysis (amount is ignored)
+    //   0018 = immunity to shock (amount is ignored)
+    //   0019 = immunity to slow (amount is ignored)
+    //   001A = immunity to confusion (amount is ignored)
+    //   001B = immunity to freeze (amount is ignored)
+    //   0027 = unknown (possibly unused / does nothing, but appears in Sega's ItemPMT file. TODO: investigate)
     uint16_t stat = 0;
-    uint16_t stat_amount = 0;
+    uint16_t amount = 0;
     int16_t modifier_amount = 0;
 
     static Unit from_json(const phosg::JSON& json);
@@ -190,9 +220,16 @@ public:
   };
 
   struct Tool : ItemBase {
+    // The use of this field varies by item type:
+    // - For mates, this value is scaled by difficulty level: 1.0 in Normal, 1.5 in Hard, 2.0 in Very Hard, and 2.5 in
+    //   Ultimate. Trimate ignores this value and always restores full HP.
+    // - For fluids, this value is used directly in Normal; in Hard, 25 or 50 is added (for Monofluid and Difluid
+    //   respectively); in Very Hard, 50 or 100 is added; in Ultimate, 75 or 150 is added. Trifluid ignores this value
+    //   and always restores full TP.
+    // - For grinders, this is the amount to increment the equipped weapon's grind when used.
     uint16_t amount = 0;
-    uint16_t tech = 0;
-    int32_t cost = 0;
+    uint16_t tech = 0; // Only used for technique disks
+    int32_t cost = 0; // If stackable, cost for 1x of the item
     // Bits in item_flags:
     //   00000001 - ever usable by player ("Use" appears in inventory menu)
     //   00000002 - unknown

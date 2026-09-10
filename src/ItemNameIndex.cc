@@ -946,17 +946,7 @@ void ItemNameIndex::print_table(FILE* stream) const {
       std::string name = this->describe_item(item);
 
       phosg::fwrite_fmt(stream, "  0103{:02X} => {:08X} {:04X} {:04X} {:6} {:04X} {:5} {:6} {:2}* {} {}\n",
-          data1_2,
-          u.id,
-          u.type,
-          u.skin,
-          u.team_points,
-          u.stat,
-          u.stat_amount,
-          u.modifier_amount,
-          stars,
-          divisor_str,
-          name);
+          data1_2, u.id, u.type, u.skin, u.team_points, u.stat, u.amount, u.modifier_amount, stars, divisor_str, name);
     }
   }
 

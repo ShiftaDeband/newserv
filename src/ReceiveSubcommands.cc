@@ -1159,7 +1159,7 @@ uint32_t Parsed6x70Data::convert_player_flags(uint32_t player_flags, bool to_v3)
   // The format of player_flags was changed significantly between v2 and v3, and not accounting for this results in odd
   // effects like other characters not appearing when joining a game. Unfortunately, some bits were deleted on v3 and
   // other bits were added, so it doesn't suffice to simply store the most complete format of this field - we have to
-  // be able to convert between the two. What's known about these bits (? indicates meaning/behavior is unverified):
+  // be able to convert between the two. What's known about these bits:
   //   V1/V2    V3/V4
   //   00000001 00000001 = player hold is set (see notes on 6x2C and 6x2D in CommandFormats.hh)
   //   00000002 00000002 = player hold is set for the purpose of dropping an item
@@ -1181,7 +1181,7 @@ uint32_t Parsed6x70Data::convert_player_flags(uint32_t player_flags, bool to_v3)
   //   00020000 00004000 = is teleporting as a result of 6x24 (set only briefly after appearing at destination)
   //   00040000 00008000 = is dead NPC (set by e.g. npc_crptalk_id when regsA[4] == 1)
   //   00080000 -------- = unknown (TODO: appears to be entirely unused, at least in v2)
-  //   00100000 00010000 = has permanent trap vision (e.g. is android)
+  //   00100000 00010000 = has trap vision (set permanently for androids, or temporarily after a Trap Vision is used)
   //   00200000 00020000 = equipped items are invisible / intangible (e.g. in Pioneer 2)
   //   00400000 00040000 = is loading / changing floors (set by 6x22 and at game join, cleared by 6x23)
   //   00800000 00080000 = player data is in the process of being exported to save file format
