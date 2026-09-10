@@ -5,38 +5,36 @@
 #include <stdexcept>
 
 #include "Text.hh"
+#include "Types.hh"
 
-using namespace std;
-
-template <bool IsBigEndian>
-struct GSLHeaderEntry {
-  using U32T = typename std::conditional<IsBigEndian, be_uint32_t, le_uint32_t>::type;
-
+template <bool BE>
+struct GSLHeaderEntryT {
   pstring<TextEncoding::ASCII, 0x20> filename;
-  U32T offset; // In pages, so actual offset is this * 0x800
-  U32T size;
+  U32T<BE> offset; // In pages, so actual offset is this * 0x800
+  U32T<BE> size;
   uint64_t unused;
-} __attribute__((packed));
+} __packed_ws_be__(GSLHeaderEntryT, 0x30);
+using GSLHeaderEntry = GSLHeaderEntryT<false>;
+using GSLHeaderEntryBE = GSLHeaderEntryT<true>;
 
-template <bool IsBigEndian>
+template <bool BE>
 void GSLArchive::load_t() {
-  StringReader r(*this->data);
+  phosg::StringReader r(*this->data);
   uint64_t min_data_offset = 0xFFFFFFFFFFFFFFFF;
   while (r.where() < min_data_offset) {
-    const auto& entry = r.get<GSLHeaderEntry<IsBigEndian>>();
+    const auto& entry = r.get<GSLHeaderEntryT<BE>>();
     if (entry.filename.empty()) {
       break;
     }
     uint64_t offset = static_cast<uint64_t>(entry.offset) * 0x800;
     if (offset + entry.size > this->data->size()) {
-      throw runtime_error("GSL entry extends beyond end of data");
+      throw std::runtime_error("GSL entry extends beyond end of data");
     }
     this->entries.emplace(entry.filename.decode(), Entry{offset, entry.size});
   }
 }
 
-GSLArchive::GSLArchive(shared_ptr<const string> data, bool big_endian)
-    : data(data) {
+GSLArchive::GSLArchive(std::shared_ptr<const std::string> data, bool big_endian) : data(data) {
   if (big_endian) {
     this->load_t<true>();
   } else {
@@ -44,51 +42,50 @@ GSLArchive::GSLArchive(shared_ptr<const string> data, bool big_endian)
   }
 }
 
-const unordered_map<string, GSLArchive::Entry> GSLArchive::all_entries() const {
+const std::unordered_map<std::string, GSLArchive::Entry> GSLArchive::all_entries() const {
   return this->entries;
 }
 
-pair<const void*, size_t> GSLArchive::get(const std::string& name) const {
+std::pair<const void*, size_t> GSLArchive::get(const std::string& name) const {
   try {
     const auto& entry = this->entries.at(name);
-    return make_pair(this->data->data() + entry.offset, entry.size);
-  } catch (const out_of_range&) {
-    throw out_of_range("GSL does not contain file: " + name);
+    return std::make_pair(this->data->data() + entry.offset, entry.size);
+  } catch (const std::out_of_range&) {
+    throw std::out_of_range("GSL does not contain file: " + name);
   }
 }
 
-string GSLArchive::get_copy(const string& name) const {
+std::string GSLArchive::get_copy(const std::string& name) const {
   try {
     const auto& entry = this->entries.at(name);
     return this->data->substr(entry.offset, entry.size);
-  } catch (const out_of_range&) {
-    throw out_of_range("GSL does not contain file: " + name);
+  } catch (const std::out_of_range&) {
+    throw std::out_of_range("GSL does not contain file: " + name);
   }
 }
 
-StringReader GSLArchive::get_reader(const string& name) const {
+phosg::StringReader GSLArchive::get_reader(const std::string& name) const {
   try {
     const auto& entry = this->entries.at(name);
-    return StringReader(this->data->data() + entry.offset, entry.size);
-  } catch (const out_of_range&) {
-    throw out_of_range("GSL does not contain file: " + name);
+    return phosg::StringReader(this->data->data() + entry.offset, entry.size);
+  } catch (const std::out_of_range&) {
+    throw std::out_of_range("GSL does not contain file: " + name);
   }
 }
 
-string GSLArchive::generate(const unordered_map<string, string>& files, bool big_endian) {
+std::string GSLArchive::generate(const std::unordered_map<std::string, std::string>& files, bool big_endian) {
   return big_endian ? GSLArchive::generate_t<true>(files) : GSLArchive::generate_t<false>(files);
 }
 
-template <bool IsBigEndian>
-string GSLArchive::generate_t(const unordered_map<string, string>& files) {
-  StringWriter w;
+template <bool BE>
+std::string GSLArchive::generate_t(const std::unordered_map<std::string, std::string>& files) {
+  phosg::StringWriter w;
 
-  // Make sure there's enough space for a blank header entry before any file's
-  // data pages begin
-  uint32_t data_start_offset = ((sizeof(GSLHeaderEntry<IsBigEndian>) * (files.size() + 1)) + 0x7FF) & (~0x7FF);
+  // Make sure there's enough space for a blank header entry before any file's data pages begin
+  uint32_t data_start_offset = ((sizeof(GSLHeaderEntryT<BE>) * (files.size() + 1)) + 0x7FF) & (~0x7FF);
   uint32_t data_offset = data_start_offset;
   for (const auto& file : files) {
-    GSLHeaderEntry<IsBigEndian> entry;
+    GSLHeaderEntryT<BE> entry;
     entry.filename.encode(file.first);
     entry.offset = data_offset >> 11;
     entry.size = file.second.size();

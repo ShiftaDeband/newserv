@@ -1,10 +1,5 @@
 #include "IPStackSimulator.hh"
 
-#include <arpa/inet.h>
-#include <event2/buffer.h>
-#include <event2/bufferevent.h>
-#include <event2/listener.h>
-#include <netinet/in.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -14,54 +9,56 @@
 #include <string>
 
 #include "DNSServer.hh"
+#include "GameServer.hh"
 #include "IPFrameInfo.hh"
 #include "Loggers.hh"
 
-using namespace std;
-
-static const size_t DEFAULT_RESEND_PUSH_USECS = 200000; // 200ms
-
-static string unescape_hdlc_frame(const void* data, size_t size) {
-  StringReader r(data, size);
-  if (r.get_u8(data) != 0x7E) {
-    throw runtime_error("HDLC frame does not begin with 7E");
-  }
-  string ret("\x7E", 1);
-
-  while (r.get_u8(false) != 0x7E) {
-    uint8_t ch = r.get_u8();
-    if (ch == 0x7D) {
-      ch = r.get_u8();
-      if (ch == 0x7E) {
-        throw runtime_error("abort sequence received");
-      }
-      ret.push_back(ch ^ 0x20);
-    } else {
-      ret.push_back(ch);
-    }
-  }
-  ret.push_back(0x7E);
-  return ret;
-}
-
-static string unescape_hdlc_frame(const string& data) {
-  return unescape_hdlc_frame(data.data(), data.size());
-}
-
-static string escape_hdlc_frame(const void* data, size_t size, uint32_t escape_control_character_flags = 0xFFFFFFFF) {
+static size_t unescape_hdlc_frame_inplace(void* vdata, size_t size) {
+  uint8_t* data = reinterpret_cast<uint8_t*>(vdata);
   if (size < 2) {
-    throw runtime_error("HDLC frame too small for start and end sentinels");
+    throw std::runtime_error("escaped HDLC frame is too small");
+  }
+  if (data[0] != 0x7E) {
+    throw std::runtime_error("HDLC frame does not begin with 7E");
+  }
+  if (data[size - 1] != 0x7E) {
+    throw std::runtime_error("HDLC frame does not end with 7E");
   }
 
-  StringReader r(data, size);
+  size_t read_offset = 1;
+  size_t write_offset = 1;
+  while (read_offset < size - 1) {
+    uint8_t ch = data[read_offset++];
+    if (ch == 0x7D) {
+      if (read_offset >= size - 1) {
+        throw std::runtime_error("abort sequence received");
+      }
+      ch = data[read_offset++] ^ 0x20;
+    }
+    data[write_offset++] = ch;
+  }
+  if (write_offset > size - 1) {
+    throw std::logic_error("unescaping HDLC frame resulted in longer data string");
+  }
+  data[write_offset++] = 0x7E;
+  return write_offset;
+}
+
+static std::string escape_hdlc_frame(
+    const void* data, size_t size, uint32_t escape_control_character_flags = 0xFFFFFFFF) {
+  if (size < 2) {
+    throw std::runtime_error("HDLC frame too small for start and end sentinels");
+  }
+
+  phosg::StringReader r(data, size);
   if (r.pget_u8(size - 1) != 0x7E) {
-    throw runtime_error("HDLC frame does not end with 7E");
+    throw std::runtime_error("HDLC frame does not end with 7E");
   }
   r.truncate(size - 1);
   if (r.get_u8() != 0x7E) {
-    throw runtime_error("HDLC frame does not begin with 7E");
+    throw std::runtime_error("HDLC frame does not begin with 7E");
   }
-  string ret("\x7E", 1);
+  std::string ret("\x7E", 1);
 
   while (!r.eof()) {
     uint8_t ch = r.get_u8();
@@ -76,13 +73,12 @@ static string escape_hdlc_frame(const void* data, size_t size, uint32_t escape_c
   return ret;
 }
 
-static string escape_hdlc_frame(const string& data, uint32_t escape_control_character_flags = 0xFFFFFFFF) {
+static std::string escape_hdlc_frame(const std::string& data, uint32_t escape_control_character_flags = 0xFFFFFFFF) {
   return escape_hdlc_frame(data.data(), data.size(), escape_control_character_flags);
 }
 
-// Note: these functions exist because seq nums are allowed to wrap around the
-// 32-bit integer space by design. We have to do the subtraction before the
-// comparison to allow integer overflow to occur if needed.
+// Note: these functions exist because seq nums are allowed to wrap around the 32-bit integer space by design. We have
+// to do the subtraction before the comparison to allow integer overflow to occur if needed.
 
 static inline bool seq_num_less(uint32_t a, uint32_t b) {
   return (a - b) & 0x80000000;
@@ -100,425 +96,440 @@ static __attribute__((unused)) inline bool seq_num_greater_or_equal(uint32_t a, 
   return (a == b) || seq_num_greater(a, b);
 }
 
-string IPStackSimulator::str_for_ipv4_netloc(uint32_t addr, uint16_t port) {
-  be_uint32_t be_addr = addr;
-  char addr_str[INET_ADDRSTRLEN];
-  if (!inet_ntop(AF_INET, &be_addr, addr_str, INET_ADDRSTRLEN)) {
-    return string_printf("<UNKNOWN>:%hu", port);
-  } else {
-    return string_printf("%s:%hu", addr_str, port);
+IPSSClient::TCPConnection::TCPConnection(std::shared_ptr<IPSSClient> client)
+    : client(client),
+      resend_push_timer(*client->io_context) {}
+
+void IPSSClient::TCPConnection::drain_outbound_data(size_t size) {
+  this->outbound_data_bytes -= size;
+  while (size > 0 && !this->outbound_data.empty()) {
+    auto& front_block = this->outbound_data.front();
+    if (front_block.size() <= size) {
+      size -= front_block.size();
+      this->outbound_data.pop_front();
+    } else {
+      front_block = front_block.substr(size);
+      size = 0;
+    }
+  }
+  if (size > 0) {
+    throw std::logic_error("attempted to drain more outbound data than was present");
   }
 }
 
-string IPStackSimulator::str_for_tcp_connection(shared_ptr<const IPClient> c, const IPClient::TCPConnection& conn) {
-  uint64_t key = IPStackSimulator::tcp_conn_key_for_connection(conn);
-  string server_netloc_str = str_for_ipv4_netloc(conn.server_addr, conn.server_port);
-  string client_netloc_str = str_for_ipv4_netloc(c->ipv4_addr, conn.client_port);
-  int fd = bufferevent_getfd(c->bev.get());
-  return string_printf("%d+%016" PRIX64 " (%s -> %s)",
-      fd, key, client_netloc_str.c_str(), server_netloc_str.c_str());
+void IPSSClient::TCPConnection::linearize_outbound_data(size_t size) {
+  while (this->outbound_data.size() > 1 && this->outbound_data.front().size() < size) {
+    auto second_block_it = this->outbound_data.begin();
+    second_block_it++;
+    this->outbound_data.front() += *second_block_it;
+    this->outbound_data.erase(second_block_it);
+  }
 }
 
-IPStackSimulator::IPStackSimulator(
-    shared_ptr<struct event_base> base,
-    shared_ptr<ServerState> state)
-    : base(base),
-      state(state),
-      pcap_text_log_file(state->ip_stack_debug ? fopen("IPStackSimulator-Log.txt", "wt") : nullptr) {
+IPSSClient::IPSSClient(
+    std::shared_ptr<IPStackSimulator> sim, uint64_t network_id, VirtualNetworkProtocol protocol, asio::ip::tcp::socket&& sock)
+    : io_context(sim->get_io_context()),
+      sim(sim),
+      network_id(network_id),
+      sock(std::move(sock)),
+      protocol(protocol),
+      mac_addr(0),
+      ipv4_addr(0),
+      idle_timeout_timer(*sim->get_io_context()) {
+  this->reschedule_idle_timeout();
+}
+
+void IPSSClient::reschedule_idle_timeout() {
+  auto sim = this->sim.lock();
+  if (!sim) {
+    throw std::runtime_error("cannot reschedule idle timeout when simulator is missing");
+  }
+  this->idle_timeout_timer.cancel();
+  this->idle_timeout_timer.expires_after(std::chrono::microseconds(sim->get_state()->data->client_idle_timeout_usecs));
+  this->idle_timeout_timer.async_wait([this, sim](std::error_code ec) {
+    if (!ec) {
+      sim->log.info_f("Idle timeout expired on N-{:X}", this->network_id);
+      if (this->sock.is_open()) {
+        this->sock.close();
+      }
+    }
+  });
+}
+
+IPSSChannel::IPSSChannel(
+    std::shared_ptr<IPStackSimulator> sim,
+    std::weak_ptr<IPSSClient> ipss_client,
+    std::weak_ptr<IPSSClient::TCPConnection> tcp_conn,
+    Version version,
+    Language language,
+    const std::string& name,
+    phosg::TerminalFormat terminal_send_color,
+    phosg::TerminalFormat terminal_recv_color,
+    bool censor_received_credentials,
+    bool censor_sent_credentials)
+    : Channel(version, language, name, terminal_send_color, terminal_recv_color, censor_received_credentials, censor_sent_credentials),
+      sim(sim),
+      ipss_client(ipss_client),
+      tcp_conn(tcp_conn),
+      data_available_signal(sim->io_context->get_executor()) {}
+
+std::string IPSSChannel::default_name() const {
+  auto ipc = this->ipss_client.lock();
+  if (ipc) {
+    return std::format("ipss:N-{}:{}", ipc->network_id, str_for_endpoint(ipc->sock.remote_endpoint()));
+  } else {
+    return std::format("ipss:N-{}:__unknown_address__", ipc->network_id);
+  }
+}
+
+bool IPSSChannel::connected() const {
+  auto ipss_client = this->ipss_client.lock();
+  auto tcp_conn = this->tcp_conn.lock();
+  return tcp_conn && ipss_client && ipss_client->sock.is_open();
+}
+
+void IPSSChannel::disconnect() {
+  auto c = this->ipss_client.lock();
+  auto conn = this->tcp_conn.lock();
+  if (c && conn) {
+    sim->schedule_send_pending_push_frame(conn, 0);
+    this->tcp_conn.reset();
+    this->ipss_client.reset();
+    this->data_available_signal.set();
+  }
+}
+
+void IPSSChannel::add_inbound_data(const void* data, size_t size) {
+  // If recv_buf is not null, there is a coroutine waiting to receive data, and inbound_data must be empty. Copy the
+  // data directly to the waiting coroutine's buffer, and put the rest in this->inbound_data if needed.
+  if (this->recv_buf) {
+    size_t direct_size = std::min<size_t>(this->recv_buf_size, size);
+    memcpy(this->recv_buf, data, direct_size);
+    data = reinterpret_cast<const uint8_t*>(data) + direct_size;
+    size -= direct_size;
+    this->recv_buf_size -= direct_size;
+    this->recv_buf = this->recv_buf_size ? (reinterpret_cast<uint8_t*>(this->recv_buf) + direct_size) : nullptr;
+  }
+
+  // If there is still data left after the above, add it to the pending inbound data buffer
+  if (size > 0) {
+    this->inbound_data.emplace_back(reinterpret_cast<const char*>(data), size);
+  }
+
+  // Notify the waiting coroutine (if any) that data is available
+  this->data_available_signal.set();
+}
+
+void IPSSChannel::send_raw(std::string&& data) {
+  auto c = this->ipss_client.lock();
+  if (!c) {
+    return;
+  }
+  auto conn = this->tcp_conn.lock();
+  if (!conn) {
+    return;
+  }
+  auto sim = c->sim.lock();
+  if (!sim) {
+    return;
+  }
+
+  conn->outbound_data_bytes += data.size();
+  conn->outbound_data.emplace_back(std::move(data));
+
+  // If we're already waiting for an ACK from the remote client, don't send another PSH right now - we will either send
+  // another PSH when we receive the ACK or will retry sending the PSH soon (which will then include the new data, if
+  // it's within the MTU from the last acked sequence number).
+  if (!conn->awaiting_ack) {
+    sim->schedule_send_pending_push_frame(conn, 0);
+  }
+  c->reschedule_idle_timeout();
+}
+
+asio::awaitable<void> IPSSChannel::recv_raw(void* data, size_t size) {
+  if (this->recv_buf) {
+    throw std::logic_error("recv_raw called again when it was already pending");
+  }
+
+  // Receive as much data as possible from the pending inbound data buffer
+  while (size && !this->inbound_data.empty()) {
+    auto& front_buf = this->inbound_data.front();
+    if (size >= front_buf.size()) {
+      memcpy(data, front_buf.data(), front_buf.size());
+      data = reinterpret_cast<uint8_t*>(data) + front_buf.size();
+      size -= front_buf.size();
+      this->inbound_data.pop_front();
+    } else {
+      memcpy(data, front_buf.data(), size);
+      data = reinterpret_cast<uint8_t*>(data) + size;
+      front_buf = front_buf.substr(size);
+      size = 0;
+    }
+  }
+
+  // If there's still more data to read, block until it's available (add_inbound_data will wake this coroutine)
+  if (size > 0) {
+    this->recv_buf = data;
+    this->recv_buf_size = size;
+    while (this->recv_buf) {
+      if (!this->connected()) {
+        throw std::runtime_error("IPSS channel closed");
+      }
+      this->data_available_signal.clear();
+      co_await this->data_available_signal.wait();
+    }
+  }
+}
+
+IPStackSimulator::IPStackSimulator(std::shared_ptr<ServerState> state)
+    : Server(state->io_context, "[IPStackSimulator] "), state(state) {
   this->host_mac_address_bytes.clear(0x90);
   this->broadcast_mac_address_bytes.clear(0xFF);
 }
 
-IPStackSimulator::~IPStackSimulator() {
-  if (this->pcap_text_log_file) {
-    fclose(this->pcap_text_log_file);
-  }
-}
-
-void IPStackSimulator::listen(const string& name, const string& socket_path, FrameInfo::LinkType link_type) {
-  int fd = ::listen(socket_path, 0, SOMAXCONN);
-  ip_stack_simulator_log.info("Listening on Unix socket %s on fd %d as %s", socket_path.c_str(), fd, name.c_str());
-  this->add_socket(name, fd, link_type);
-}
-
-void IPStackSimulator::listen(const string& name, const string& addr, int port, FrameInfo::LinkType link_type) {
+void IPStackSimulator::listen(const std::string& name, const std::string& addr, int port, VirtualNetworkProtocol protocol) {
   if (port == 0) {
-    this->listen(name, addr, link_type);
-  } else {
-    int fd = ::listen(addr, port, SOMAXCONN);
-    string netloc_str = render_netloc(addr, port);
-    ip_stack_simulator_log.info("Listening on TCP interface %s on fd %d as %s", netloc_str.c_str(), fd, name.c_str());
-    this->add_socket(name, fd, link_type);
+    throw std::runtime_error("Listening port cannot be zero");
   }
-}
-
-void IPStackSimulator::listen(const string& name, int port, FrameInfo::LinkType link_type) {
-  this->listen(name, "", port, link_type);
-}
-
-void IPStackSimulator::add_socket(const string& name, int fd, FrameInfo::LinkType link_type) {
-  unique_listener l(
-      evconnlistener_new(
-          this->base.get(),
-          IPStackSimulator::dispatch_on_listen_accept,
-          this,
-          LEV_OPT_REUSEABLE,
-          0,
-          fd),
-      evconnlistener_free);
-  this->listening_sockets.emplace(piecewise_construct, forward_as_tuple(fd), forward_as_tuple(name, link_type, std::move(l)));
+  asio::ip::address asio_addr = addr.empty() ? asio::ip::address_v4::any() : asio::ip::make_address(addr);
+  auto sock = std::make_shared<IPSSSocket>();
+  sock->name = name;
+  sock->endpoint = asio::ip::tcp::endpoint(asio_addr, port);
+  sock->protocol = protocol;
+  this->add_socket(std::move(sock));
 }
 
 uint32_t IPStackSimulator::connect_address_for_remote_address(uint32_t remote_addr) {
-  // Use an address not on the same subnet as the client, so that PSO Plus and
-  // Episode III will think they're talking to a remote network and won't reject
-  // the connection.
-  if ((remote_addr & 0xFF000000) != 0x23000000) {
-    return 0x23232323;
+  // Use an address not on the same subnet as the client, so that PSO Plus and Episode III will think they're talking
+  // to a remote network and won't reject the connection.
+  return ((remote_addr & 0xFF000000) == 0x23000000) ? 0x24242424 : 0x23232323;
+}
+
+uint64_t IPStackSimulator::tcp_conn_key_for_connection(std::shared_ptr<const IPSSClient::TCPConnection> conn) {
+  return (static_cast<uint64_t>(conn->server_addr) << 32) |
+      (static_cast<uint64_t>(conn->server_port) << 16) |
+      static_cast<uint64_t>(conn->client_port);
+}
+
+uint64_t IPStackSimulator::tcp_conn_key_for_client_frame(const IPv4Header& ipv4, const TCPHeader& tcp) {
+  return (static_cast<uint64_t>(ipv4.dest_addr) << 32) |
+      (static_cast<uint64_t>(tcp.dest_port) << 16) |
+      static_cast<uint64_t>(tcp.src_port);
+}
+
+uint64_t IPStackSimulator::tcp_conn_key_for_client_frame(const FrameInfo& fi) {
+  if (!fi.ipv4 || !fi.tcp) {
+    throw std::logic_error("tcp_conn_key_for_frame called on non-TCP frame");
+  }
+  return IPStackSimulator::tcp_conn_key_for_client_frame(*fi.ipv4, *fi.tcp);
+}
+
+std::string IPStackSimulator::str_for_ipv4_netloc(uint32_t addr, uint16_t port) {
+  be_uint32_t be_addr = addr;
+  char addr_str[INET_ADDRSTRLEN];
+  memset(addr_str, 0, sizeof(addr_str));
+  if (!inet_ntop(AF_INET, &be_addr, addr_str, INET_ADDRSTRLEN)) {
+    return std::format("<UNKNOWN>:{}", port);
   } else {
-    return 0x24242424;
+    return std::format("{}:{}", addr_str, port);
   }
 }
 
-IPStackSimulator::IPClient::IPClient(shared_ptr<IPStackSimulator> sim, FrameInfo::LinkType link_type, struct bufferevent* bev)
-    : sim(sim),
-      bev(bev, bufferevent_free),
-      link_type(link_type),
-      mac_addr(0),
-      ipv4_addr(0),
-      idle_timeout_event(event_new(sim->base.get(), -1, EV_TIMEOUT, &IPStackSimulator::IPClient::dispatch_on_idle_timeout, this), event_free) {
-  struct timeval tv = usecs_to_timeval(60 * 1000 * 1000);
-  event_add(this->idle_timeout_event.get(), &tv);
+std::string IPStackSimulator::str_for_tcp_connection(
+    std::shared_ptr<const IPSSClient> c, std::shared_ptr<const IPSSClient::TCPConnection> conn) {
+  uint64_t key = IPStackSimulator::tcp_conn_key_for_connection(conn);
+  std::string server_netloc_str = str_for_ipv4_netloc(conn->server_addr, conn->server_port);
+  std::string client_netloc_str = str_for_ipv4_netloc(c->ipv4_addr, conn->client_port);
+  return std::format("{:016X} ({} -> {})", key, client_netloc_str, server_netloc_str);
 }
 
-void IPStackSimulator::IPClient::dispatch_on_idle_timeout(evutil_socket_t, short, void* ctx) {
-  reinterpret_cast<IPStackSimulator::IPClient*>(ctx)->on_idle_timeout();
-}
+asio::awaitable<void> IPStackSimulator::send_ethernet_tapserver_frame(
+    std::shared_ptr<IPSSClient> c, FrameInfo::Protocol proto, const void* data, size_t size) const {
 
-void IPStackSimulator::IPClient::on_idle_timeout() {
-  auto sim = this->sim.lock();
-  if (sim) {
-    ip_stack_simulator_log.info("Idle timeout expired on virtual network %d", bufferevent_getfd(this->bev.get()));
-    sim->disconnect_client(this->bev.get());
-  } else {
-    ip_stack_simulator_log.info("Idle timeout expired on virtual network %d, but simulator is missing", bufferevent_getfd(this->bev.get()));
-  }
-}
+  struct TapServerEthernetHeader {
+    phosg::le_uint16_t frame_size;
+    EthernetHeader ether;
+  } __attribute__((packed));
+  static_assert(sizeof(TapServerEthernetHeader) == 0x10, "Ethernet tapserver header size is incorrect");
+  TapServerEthernetHeader header;
 
-static void flush_and_free_bufferevent(struct bufferevent* bev) {
-  bufferevent_flush(bev, EV_READ | EV_WRITE, BEV_FINISHED);
-  bufferevent_free(bev);
-}
-
-IPStackSimulator::IPClient::TCPConnection::TCPConnection()
-    : server_bev(nullptr, flush_and_free_bufferevent),
-      pending_data(evbuffer_new(), evbuffer_free),
-      resend_push_event(nullptr, event_free),
-      awaiting_first_ack(true),
-      server_addr(0),
-      server_port(0),
-      client_port(0),
-      next_client_seq(0),
-      acked_server_seq(0),
-      resend_push_usecs(DEFAULT_RESEND_PUSH_USECS),
-      next_push_max_frame_size(1024),
-      max_frame_size(1024),
-      bytes_received(0),
-      bytes_sent(0) {}
-
-void IPStackSimulator::disconnect_client(struct bufferevent* bev) {
-  ip_stack_simulator_log.info("Virtual network %d disconnected", bufferevent_getfd(bev));
-  this->bev_to_client.erase(bev);
-}
-
-void IPStackSimulator::dispatch_on_listen_accept(
-    struct evconnlistener* listener, evutil_socket_t fd,
-    struct sockaddr* address, int socklen, void* ctx) {
-  reinterpret_cast<IPStackSimulator*>(ctx)->on_listen_accept(
-      listener, fd, address, socklen);
-}
-
-void IPStackSimulator::on_listen_accept(struct evconnlistener* listener,
-    evutil_socket_t fd, struct sockaddr*, int) {
-  int listen_fd = evconnlistener_get_fd(listener);
-
-  const ListeningSocket* listening_socket;
-  try {
-    listening_socket = &this->listening_sockets.at(listen_fd);
-  } catch (const out_of_range&) {
-    ip_stack_simulator_log.info("Virtual network %d connected via unknown listener %d; disconnecting", fd, listen_fd);
-    close(fd);
-    return;
-  }
-
-  ip_stack_simulator_log.info("Virtual network %d connected via %s", fd, listening_socket->name.c_str());
-
-  struct bufferevent* bev = bufferevent_socket_new(this->base.get(), fd,
-      BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
-  auto c = make_shared<IPClient>(this->shared_from_this(), listening_socket->link_type, bev);
-  this->bev_to_client.emplace(make_pair(bev, c));
-
-  bufferevent_setcb(bev, &IPStackSimulator::dispatch_on_client_input, nullptr,
-      &IPStackSimulator::dispatch_on_client_error, this);
-  bufferevent_enable(bev, EV_READ | EV_WRITE);
-}
-
-void IPStackSimulator::dispatch_on_listen_error(
-    struct evconnlistener* listener, void* ctx) {
-  reinterpret_cast<IPStackSimulator*>(ctx)->on_listen_error(listener);
-}
-
-void IPStackSimulator::on_listen_error(struct evconnlistener* listener) {
-  int err = EVUTIL_SOCKET_ERROR();
-  ip_stack_simulator_log.error("Failure on listening socket %d: %d (%s)",
-      evconnlistener_get_fd(listener), err, evutil_socket_error_to_string(err));
-  event_base_loopexit(this->base.get(), nullptr);
-}
-
-void IPStackSimulator::dispatch_on_client_input(
-    struct bufferevent* bev, void* ctx) {
-  reinterpret_cast<IPStackSimulator*>(ctx)->on_client_input(bev);
-}
-
-void IPStackSimulator::on_client_input(struct bufferevent* bev) {
-  struct evbuffer* buf = bufferevent_get_input(bev);
-
-  shared_ptr<IPClient> c;
-  try {
-    c = this->bev_to_client.at(bev);
-  } catch (const out_of_range&) {
-    size_t bytes = evbuffer_get_length(buf);
-    ip_stack_simulator_log.warning("Ignoring data received from unregistered virtual network (0x%zX bytes)",
-        bytes);
-    evbuffer_drain(buf, bytes);
-    return;
-  }
-
-  struct timeval tv = usecs_to_timeval(60 * 1000 * 1000);
-  event_add(c->idle_timeout_event.get(), &tv);
-
-  while (evbuffer_get_length(buf) >= 2) {
-    uint16_t frame_size;
-    evbuffer_copyout(buf, &frame_size, 2);
-    if (evbuffer_get_length(buf) < static_cast<size_t>(frame_size + 2)) {
-      break; // No complete frame available; done for now
-    }
-
-    evbuffer_drain(buf, 2);
-    string frame(frame_size, '\0');
-    evbuffer_remove(buf, frame.data(), frame.size());
-
-    try {
-      this->on_client_frame(c, frame);
-    } catch (const exception& e) {
-      if (ip_stack_simulator_log.warning("Failed to process frame: %s", e.what())) {
-        print_data(stderr, frame);
-      }
-    }
-  }
-}
-
-void IPStackSimulator::dispatch_on_client_error(
-    struct bufferevent* bev, short events, void* ctx) {
-  reinterpret_cast<IPStackSimulator*>(ctx)->on_client_error(bev, events);
-}
-void IPStackSimulator::on_client_error(struct bufferevent* bev, short events) {
-  if (events & BEV_EVENT_ERROR) {
-    int err = EVUTIL_SOCKET_ERROR();
-    ip_stack_simulator_log.warning("Virtual network caused error %d (%s)", err,
-        evutil_socket_error_to_string(err));
-  }
-  if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
-    this->disconnect_client(bev);
-  }
-}
-
-void IPStackSimulator::send_layer3_frame(shared_ptr<IPClient> c, FrameInfo::Protocol proto, const string& data) const {
-  this->send_layer3_frame(c, proto, data.data(), data.size());
-}
-
-void IPStackSimulator::send_layer3_frame(shared_ptr<IPClient> c, FrameInfo::Protocol proto, const void* data, size_t size) const {
-  struct evbuffer* out_buf = bufferevent_get_output(c->bev.get());
-
-  switch (c->link_type) {
-    case FrameInfo::LinkType::ETHERNET: {
-      EthernetHeader ether;
-      ether.dest_mac = c->mac_addr;
-      ether.src_mac = this->host_mac_address_bytes;
-      switch (proto) {
-        case FrameInfo::Protocol::NONE:
-          throw logic_error("layer 3 protocol not specified");
-        case FrameInfo::Protocol::LCP:
-          throw logic_error("cannot send LCP frame over Ethernet");
-        case FrameInfo::Protocol::IPV4:
-          ether.protocol = 0x0800;
-          break;
-        case FrameInfo::Protocol::ARP:
-          ether.protocol = 0x0806;
-          break;
-        default:
-          throw logic_error("unknown layer 3 protocol");
-      }
-
-      le_uint16_t frame_size = size + sizeof(EthernetHeader);
-      evbuffer_add(out_buf, &frame_size, 2);
-      evbuffer_add(out_buf, &ether, sizeof(ether));
-      evbuffer_add(out_buf, data, size);
-      if (this->pcap_text_log_file) {
-        StringWriter w;
-        w.write(&ether, sizeof(ether));
-        w.write(data, size);
-        this->log_frame(w.str());
-      }
+  header.ether.dest_mac = c->mac_addr;
+  header.ether.src_mac = this->host_mac_address_bytes;
+  switch (proto) {
+    case FrameInfo::Protocol::NONE:
+      throw std::logic_error("layer 3 protocol not specified");
+    case FrameInfo::Protocol::LCP:
+      throw std::logic_error("cannot send LCP frame over Ethernet");
+    case FrameInfo::Protocol::IPV4:
+      header.ether.protocol = 0x0800;
       break;
-    }
-
-    case FrameInfo::LinkType::HDLC: {
-      HDLCHeader hdlc;
-      hdlc.start_sentinel1 = 0x7E;
-      hdlc.address = 0xFF;
-      hdlc.control = 0x03;
-      switch (proto) {
-        case FrameInfo::Protocol::NONE:
-          throw logic_error("layer 3 protocol not specified");
-        case FrameInfo::Protocol::LCP:
-          hdlc.protocol = 0xC021;
-          break;
-        case FrameInfo::Protocol::PAP:
-          hdlc.protocol = 0xC023;
-          break;
-        case FrameInfo::Protocol::IPCP:
-          hdlc.protocol = 0x8021;
-          break;
-        case FrameInfo::Protocol::IPV4:
-          hdlc.protocol = 0x0021;
-          break;
-        case FrameInfo::Protocol::ARP:
-          throw runtime_error("cannot send ARP packets over HDLC");
-        default:
-          throw logic_error("unknown layer 3 protocol");
-      }
-
-      StringWriter w;
-      w.put(hdlc);
-      w.write(data, size);
-      w.put_u16l(FrameInfo::computed_hdlc_checksum(w.str().data() + 1, w.size() - 1));
-      w.put_u8(0x7E);
-
-      string escaped = escape_hdlc_frame(w.str(), c->hdlc_escape_control_character_flags);
-      if (ip_stack_simulator_log.debug("Sending HDLC frame to virtual network (escaped to %zX bytes)", escaped.size())) {
-        print_data(stderr, w.str());
-      }
-
-      le_uint16_t frame_size = escaped.size();
-      evbuffer_add(out_buf, &frame_size, 2);
-      evbuffer_add(out_buf, escaped.data(), escaped.size());
-      if (this->pcap_text_log_file) {
-        this->log_frame(escaped);
-      }
+    case FrameInfo::Protocol::ARP:
+      header.ether.protocol = 0x0806;
       break;
-    }
-
     default:
-      throw logic_error("unknown link type");
+      throw std::logic_error("unknown layer 3 protocol");
+  }
+  header.frame_size = size + sizeof(EthernetHeader);
+
+  std::array<asio::const_buffer, 2> bufs{
+      asio::buffer(static_cast<const void*>(&header), sizeof(header)), asio::buffer(data, size)};
+  co_await asio::async_write(c->sock, bufs, asio::use_awaitable);
+}
+
+asio::awaitable<void> IPStackSimulator::send_hdlc_frame(
+    std::shared_ptr<IPSSClient> c, FrameInfo::Protocol proto, const void* data, size_t size, bool is_raw) const {
+
+  HDLCHeader hdlc;
+  hdlc.start_sentinel1 = 0x7E;
+  hdlc.address = 0xFF;
+  hdlc.control = 0x03;
+  switch (proto) {
+    case FrameInfo::Protocol::NONE:
+      throw std::logic_error("layer 3 protocol not specified");
+    case FrameInfo::Protocol::LCP:
+      hdlc.protocol = 0xC021;
+      break;
+    case FrameInfo::Protocol::PAP:
+      hdlc.protocol = 0xC023;
+      break;
+    case FrameInfo::Protocol::IPCP:
+      hdlc.protocol = 0x8021;
+      break;
+    case FrameInfo::Protocol::IPV4:
+      hdlc.protocol = 0x0021;
+      break;
+    case FrameInfo::Protocol::ARP:
+      throw std::runtime_error("cannot send ARP packets over HDLC");
+    default:
+      throw std::logic_error("unknown layer 3 protocol");
+  }
+
+  phosg::StringWriter w;
+  w.put(hdlc);
+  w.write(data, size);
+  w.put_u16l(FrameInfo::computed_hdlc_checksum(w.str().data() + 1, w.size() - 1));
+  w.put_u8(0x7E);
+
+  std::string escaped = escape_hdlc_frame(w.str(), c->hdlc_escape_control_character_flags);
+  if (this->log.debug_f("Sending HDLC frame to virtual network (escaped to {:X} bytes)", escaped.size())) {
+    phosg::print_data(stderr, w.str());
+  }
+
+  if (!is_raw) {
+    phosg::le_uint16_t frame_size = escaped.size();
+    std::array<asio::const_buffer, 2> bufs{
+        asio::buffer(static_cast<const void*>(&frame_size), sizeof(frame_size)),
+        asio::buffer(escaped.data(), escaped.size())};
+    co_await asio::async_write(c->sock, bufs, asio::use_awaitable);
+  } else {
+    co_await asio::async_write(c->sock, asio::buffer(escaped.data(), escaped.size()), asio::use_awaitable);
   }
 }
 
-void IPStackSimulator::on_client_frame(shared_ptr<IPClient> c, const string& frame) {
-  const string* effective_data = &frame;
-  string hdlc_unescaped_data;
-  if (c->link_type == FrameInfo::LinkType::HDLC) {
-    hdlc_unescaped_data = unescape_hdlc_frame(frame);
-    effective_data = &hdlc_unescaped_data;
+asio::awaitable<void> IPStackSimulator::send_layer3_frame(
+    std::shared_ptr<IPSSClient> c, FrameInfo::Protocol proto, const void* data, size_t size) const {
+  switch (c->protocol) {
+    case VirtualNetworkProtocol::ETHERNET_TAPSERVER:
+      co_await this->send_ethernet_tapserver_frame(c, proto, data, size);
+      break;
+    case VirtualNetworkProtocol::HDLC_TAPSERVER:
+      co_await this->send_hdlc_frame(c, proto, data, size, false);
+      break;
+    case VirtualNetworkProtocol::HDLC_RAW:
+      co_await this->send_hdlc_frame(c, proto, data, size, true);
+      break;
+    default:
+      throw std::logic_error("unknown link type");
   }
-  if (ip_stack_simulator_log.debug("Virtual network sent frame")) {
-    print_data(stderr, *effective_data);
-  }
-  this->log_frame(*effective_data);
+}
 
-  FrameInfo fi(c->link_type, *effective_data);
-  if (ip_stack_simulator_log.should_log(LogLevel::DEBUG)) {
-    string fi_header = fi.header_str();
-    ip_stack_simulator_log.debug("Frame header: %s", fi_header.c_str());
+asio::awaitable<void> IPStackSimulator::on_client_frame(std::shared_ptr<IPSSClient> c, const void* data, size_t size) {
+  FrameInfo::LinkType link_type = (c->protocol == VirtualNetworkProtocol::ETHERNET_TAPSERVER)
+      ? FrameInfo::LinkType::ETHERNET
+      : FrameInfo::LinkType::HDLC;
+
+  if (this->log.debug_f("Virtual network sent frame")) {
+    phosg::print_data(stderr, data, size);
+  }
+
+  FrameInfo fi(link_type, data, size);
+  if (this->log.should_log(phosg::LogLevel::L_DEBUG)) {
+    this->log.debug_f("Frame header: {}", fi.header_str());
   }
 
   if (fi.ether) {
     if (c->mac_addr.is_filled_with(0)) {
       c->mac_addr = fi.ether->src_mac;
     } else if ((fi.ether->src_mac != c->mac_addr) && (fi.ether->src_mac != this->broadcast_mac_address_bytes)) {
-      throw runtime_error("client sent IPv4 packet from different MAC address");
+      throw std::runtime_error("client sent IPv4 packet from different MAC address");
     }
   } else if (fi.hdlc) {
     uint16_t expected_checksum = fi.computed_hdlc_checksum();
     uint16_t stored_checksum = fi.stored_hdlc_checksum();
     if (expected_checksum != stored_checksum) {
-      throw runtime_error(string_printf(
-          "HDLC checksum is incorrect (%04hX expected, %04hX received)",
-          expected_checksum, stored_checksum));
+      throw std::runtime_error(std::format(
+          "HDLC checksum is incorrect ({:04X} expected, {:04X} received)", expected_checksum, stored_checksum));
     }
   } else {
-    throw runtime_error("frame is not Ethernet or HDLC");
+    throw std::runtime_error("frame is not Ethernet or HDLC");
   }
 
   if (fi.lcp) {
-    this->on_client_lcp_frame(c, fi);
+    co_await this->on_client_lcp_frame(c, fi);
 
   } else if (fi.pap) {
-    this->on_client_pap_frame(c, fi);
+    co_await this->on_client_pap_frame(c, fi);
 
   } else if (fi.ipcp) {
-    this->on_client_ipcp_frame(c, fi);
+    co_await this->on_client_ipcp_frame(c, fi);
 
   } else if (fi.arp) {
-    this->on_client_arp_frame(c, fi);
+    co_await this->on_client_arp_frame(c, fi);
 
   } else if (fi.ipv4) {
     uint16_t expected_ipv4_checksum = fi.computed_ipv4_header_checksum();
     if (fi.ipv4->checksum != expected_ipv4_checksum) {
-      throw runtime_error(string_printf(
-          "IPv4 header checksum is incorrect (%04hX expected, %04hX received)",
-          expected_ipv4_checksum, fi.ipv4->checksum.load()));
+      throw std::runtime_error(std::format(
+          "IPv4 header checksum is incorrect ({:04X} expected, {:04X} received)", expected_ipv4_checksum, fi.ipv4->checksum));
     }
 
     if ((fi.ipv4->src_addr != c->ipv4_addr) && (fi.ipv4->src_addr != 0)) {
-      throw runtime_error("client sent IPv4 packet from different IPv4 address");
+      throw std::runtime_error("client sent IPv4 packet from different IPv4 address");
     }
 
     if (fi.udp) {
       uint16_t expected_udp_checksum = fi.computed_udp4_checksum();
       if (fi.udp->checksum != expected_udp_checksum) {
-        throw runtime_error(string_printf(
-            "UDP checksum is incorrect (%04hX expected, %04hX received)",
-            expected_udp_checksum, fi.udp->checksum.load()));
+        throw std::runtime_error(std::format(
+            "UDP checksum is incorrect ({:04X} expected, {:04X} received)", expected_udp_checksum, fi.udp->checksum));
       }
-      this->on_client_udp_frame(c, fi);
+      co_await this->on_client_udp_frame(c, fi);
 
     } else if (fi.tcp) {
       uint16_t expected_tcp_checksum = fi.computed_tcp4_checksum();
       if (fi.tcp->checksum != expected_tcp_checksum) {
-        throw runtime_error(string_printf(
-            "TCP checksum is incorrect (%04hX expected, %04hX received)",
-            expected_tcp_checksum, fi.tcp->checksum.load()));
+        throw std::runtime_error(std::format(
+            "TCP checksum is incorrect ({:04X} expected, {:04X} received)", expected_tcp_checksum, fi.tcp->checksum));
       }
-      this->on_client_tcp_frame(c, fi);
+      co_await this->on_client_tcp_frame(c, fi);
 
     } else {
-      throw runtime_error("frame uses unsupported IPv4 protocol");
+      throw std::runtime_error("frame uses unsupported IPv4 protocol");
     }
 
   } else {
-    throw runtime_error("frame is not IPv4");
+    throw std::runtime_error("frame is not IPv4");
   }
 }
 
-void IPStackSimulator::on_client_lcp_frame(shared_ptr<IPClient> c, const FrameInfo& fi) {
+asio::awaitable<void> IPStackSimulator::on_client_lcp_frame(std::shared_ptr<IPSSClient> c, const FrameInfo& fi) {
   switch (fi.lcp->command) {
     case 0x01: { // Configure-Request
       auto opts_r = fi.read_payload();
       while (!opts_r.eof()) {
         uint8_t opt = opts_r.get_u8();
-        string opt_data = opts_r.read(opts_r.get_u8() - 2);
-        StringReader opt_data_r(opt_data);
+        std::string opt_data = opts_r.read(opts_r.get_u8() - 2);
+        phosg::StringReader opt_data_r(opt_data);
         switch (opt) {
           case 0x01: // Maximum receive unit
             // TODO: Currently we ignore this, but we probably should use it.
@@ -535,16 +546,15 @@ void IPStackSimulator::on_client_lcp_frame(shared_ptr<IPClient> c, const FrameIn
           case 0x04: // Quality protocol
           case 0x07: // Protocol field compression
           case 0x08: // Address and control field compression
-            throw runtime_error(string_printf("unimplemented LCP option %02hhX (%zu bytes)", opt, opt_data.size()));
+            throw std::runtime_error(std::format("unimplemented LCP option {:02X} ({} bytes)", opt, opt_data.size()));
           default:
-            throw runtime_error("unknown LCP option");
+            throw std::runtime_error("unknown LCP option");
         }
       }
-      // Technically, we should implement the LCP state machine, but I'm too
-      // lazy to do this right now. In our situation, it should suffice to
-      // simply always send a Configure-Request to the client with a magic
-      // number not equal to the one we received.
-      StringWriter opts_w;
+      // Technically, we should implement the LCP state machine, but I'm too lazy to do this right now. In our
+      // situation, it should suffice to simply always send a Configure-Request to the client with a magic number not
+      // equal to the one we received.
+      phosg::StringWriter opts_w;
       opts_w.put_u8(0x01); // Maximum receive unit
       opts_w.put_u8(0x04);
       opts_w.put_u16b(1500);
@@ -557,23 +567,23 @@ void IPStackSimulator::on_client_lcp_frame(shared_ptr<IPClient> c, const FrameIn
       opts_w.put_u8(0x05); // Magic number (bitwise inverse of the remote end's)
       opts_w.put_u8(0x06);
       opts_w.put_u32b(~c->hdlc_remote_magic_number);
-      StringWriter request_w;
+      phosg::StringWriter request_w;
       request_w.put<LCPHeader>(LCPHeader{
           .command = 0x01, // Configure-Request
           .request_id = fi.lcp->request_id,
           .size = static_cast<uint16_t>(sizeof(LCPHeader) + opts_w.size()),
       });
       request_w.write(opts_w.str());
-      this->send_layer3_frame(c, FrameInfo::Protocol::LCP, request_w.str());
+      co_await this->send_layer3_frame(c, FrameInfo::Protocol::LCP, request_w.str());
 
-      StringWriter ack_w;
+      phosg::StringWriter ack_w;
       ack_w.put<LCPHeader>(LCPHeader{
           .command = 0x02, // Configure-Ack
           .request_id = fi.lcp->request_id,
           .size = fi.lcp->size,
       });
       ack_w.write(fi.payload, fi.payload_size);
-      this->send_layer3_frame(c, FrameInfo::Protocol::LCP, ack_w.str());
+      co_await this->send_layer3_frame(c, FrameInfo::Protocol::LCP, ack_w.str());
 
       break;
     }
@@ -581,16 +591,16 @@ void IPStackSimulator::on_client_lcp_frame(shared_ptr<IPClient> c, const FrameIn
     case 0x05: { // Terminate-Request
       c->ipv4_addr = 0;
       c->tcp_connections.clear();
-      string response(reinterpret_cast<const char*>(fi.payload), fi.payload_size);
+      std::string response(reinterpret_cast<const char*>(fi.payload), fi.payload_size);
       response.at(0) = 0x06; // Terminate-Ack
-      this->send_layer3_frame(c, FrameInfo::Protocol::LCP, response);
+      co_await this->send_layer3_frame(c, FrameInfo::Protocol::LCP, response);
       break;
     }
 
     case 0x09: { // Echo-Request
-      string response(reinterpret_cast<const char*>(fi.payload), fi.payload_size);
+      std::string response(reinterpret_cast<const char*>(fi.payload), fi.payload_size);
       response.at(0) = 0x0A; // Echo-Reply
-      this->send_layer3_frame(c, FrameInfo::Protocol::LCP, response);
+      co_await this->send_layer3_frame(c, FrameInfo::Protocol::LCP, response);
       break;
     }
 
@@ -604,24 +614,24 @@ void IPStackSimulator::on_client_lcp_frame(shared_ptr<IPClient> c, const FrameIn
     case 0x07: // Code-Reject
     case 0x08: // Protocol-Reject
     case 0x0A: // Echo-Reply
-      throw runtime_error("unimplemented LCP command");
+      throw std::runtime_error("unimplemented LCP command");
     default:
-      throw runtime_error("unknown LCP command");
+      throw std::runtime_error("unknown LCP command");
   }
 }
 
-void IPStackSimulator::on_client_pap_frame(shared_ptr<IPClient> c, const FrameInfo& fi) {
+asio::awaitable<void> IPStackSimulator::on_client_pap_frame(std::shared_ptr<IPSSClient> c, const FrameInfo& fi) {
   if (fi.pap->command != 0x01) { // Authenticate-Request
-    throw runtime_error("client sent incorrect PAP command");
+    throw std::runtime_error("client sent incorrect PAP command");
   }
 
   auto r = fi.read_payload();
-  string username = r.read(r.get_u8());
-  string password = r.read(r.get_u8());
-  ip_stack_simulator_log.info("Client logged in with username \"%s\" and password", username.c_str());
+  std::string username = r.read(r.get_u8());
+  std::string password = r.read(r.get_u8());
+  this->log.info_f("Client logged in with username \"{}\" and password", username);
 
-  static const string login_message = "newserv PPP simulator";
-  StringWriter w;
+  static const std::string login_message = "newserv PPP simulator";
+  phosg::StringWriter w;
   w.put<PAPHeader>(PAPHeader{
       .command = 0x02, // Authenticate-Ack
       .request_id = fi.pap->request_id,
@@ -629,10 +639,10 @@ void IPStackSimulator::on_client_pap_frame(shared_ptr<IPClient> c, const FrameIn
   });
   w.put_u8(login_message.size());
   w.write(login_message);
-  this->send_layer3_frame(c, FrameInfo::Protocol::PAP, w.str());
+  co_await this->send_layer3_frame(c, FrameInfo::Protocol::PAP, w.str());
 }
 
-void IPStackSimulator::on_client_ipcp_frame(shared_ptr<IPClient> c, const FrameInfo& fi) {
+asio::awaitable<void> IPStackSimulator::on_client_ipcp_frame(std::shared_ptr<IPSSClient> c, const FrameInfo& fi) {
   switch (fi.ipcp->command) {
     case 0x01: { // Configure-Request
       auto opts_r = fi.read_payload();
@@ -640,14 +650,14 @@ void IPStackSimulator::on_client_ipcp_frame(shared_ptr<IPClient> c, const FrameI
       uint32_t remote_ip = 0;
       uint32_t remote_primary_dns = 0;
       uint32_t remote_secondary_dns = 0;
-      StringWriter rejected_opts_w;
+      phosg::StringWriter rejected_opts_w;
       while (!opts_r.eof()) {
         uint8_t opt = opts_r.get_u8();
-        string opt_data = opts_r.read(opts_r.get_u8() - 2);
-        StringReader opt_data_r(opt_data);
+        std::string opt_data = opts_r.read(opts_r.get_u8() - 2);
+        phosg::StringReader opt_data_r(opt_data);
         switch (opt) {
           case 0x01: // IP addresses (deprecated as of 1992; we don't support it at all)
-            throw runtime_error("IPCP client sent IP-Addresses option");
+            throw std::runtime_error("IPCP client sent IP-Addresses option");
           case 0x02: // IP compression protocol
             rejected_opts_w.put_u8(0x02);
             rejected_opts_w.put_u8(opt_data_r.size() + 2);
@@ -665,29 +675,28 @@ void IPStackSimulator::on_client_ipcp_frame(shared_ptr<IPClient> c, const FrameI
           case 0x82: // Primary NBNS server address
           case 0x84: // Secondary NBNS server address
           case 0x04: // Mobile IP address
-            throw runtime_error(string_printf("unimplemented IPCP option %02hhX (%zu bytes)", opt, opt_data.size()));
+            throw std::runtime_error(std::format("unimplemented IPCP option {:02X} ({} bytes)", opt, opt_data.size()));
           default:
-            throw runtime_error("unknown IPCP option");
+            throw std::runtime_error("unknown IPCP option");
         }
       }
 
       if (!rejected_opts_w.str().empty()) {
         // Send a Configure-Reject if the client specified IP header compression
-        StringWriter reject_w;
+        phosg::StringWriter reject_w;
         reject_w.put<IPCPHeader>(IPCPHeader{
             .command = 0x04, // Configure-Reject
             .request_id = fi.ipcp->request_id,
             .size = sizeof(IPCPHeader) + rejected_opts_w.size(),
         });
         reject_w.write(rejected_opts_w.str());
-        this->send_layer3_frame(c, FrameInfo::Protocol::IPCP, reject_w.str());
+        co_await this->send_layer3_frame(c, FrameInfo::Protocol::IPCP, reject_w.str());
 
       } else if ((remote_ip != 0x1E1E1E1E) ||
           (remote_primary_dns != 0x23232323) ||
           (remote_secondary_dns != 0x24242424)) {
-        // Send a Configure-Nak if the client's request doesn't exactly match
-        // what we want them to use.
-        StringWriter opts_w;
+        // Send a Configure-Nak if the client's request doesn't exactly match what we want them to use.
+        phosg::StringWriter opts_w;
         opts_w.put_u8(0x03); // IP address
         opts_w.put_u8(0x06);
         opts_w.put_u32b(0x1E1E1E1E);
@@ -698,21 +707,20 @@ void IPStackSimulator::on_client_ipcp_frame(shared_ptr<IPClient> c, const FrameI
         opts_w.put_u8(0x06);
         opts_w.put_u32b(0x24242424);
 
-        StringWriter nak_w;
+        phosg::StringWriter nak_w;
         nak_w.put<IPCPHeader>(IPCPHeader{
             .command = 0x03, // Configure-Nak
             .request_id = fi.ipcp->request_id,
             .size = static_cast<uint16_t>(opts_w.size() + sizeof(IPCPHeader)),
         });
         nak_w.write(opts_w.str());
-        this->send_layer3_frame(c, FrameInfo::Protocol::IPCP, nak_w.str());
+        co_await this->send_layer3_frame(c, FrameInfo::Protocol::IPCP, nak_w.str());
 
       } else { // Options OK
         c->ipv4_addr = remote_ip;
 
-        // As with LCP, we technically should implement the state machine, but I
-        // continue to be lazy.
-        StringWriter opts_w;
+        // As with LCP, we technically should implement the state machine, but I continue to be lazy.
+        phosg::StringWriter opts_w;
         opts_w.put_u8(0x03); // IP address
         opts_w.put_u8(0x06);
         opts_w.put_u32b(0x39393939);
@@ -723,23 +731,23 @@ void IPStackSimulator::on_client_ipcp_frame(shared_ptr<IPClient> c, const FrameI
         opts_w.put_u8(0x06);
         opts_w.put_u32b(0x24242424);
 
-        StringWriter request_w;
+        phosg::StringWriter request_w;
         request_w.put<IPCPHeader>(IPCPHeader{
             .command = 0x01, // Configure-Request
             .request_id = fi.ipcp->request_id,
             .size = static_cast<uint16_t>(opts_w.size() + sizeof(IPCPHeader)),
         });
         request_w.write(opts_w.str());
-        this->send_layer3_frame(c, FrameInfo::Protocol::IPCP, request_w.str());
+        co_await this->send_layer3_frame(c, FrameInfo::Protocol::IPCP, request_w.str());
 
-        StringWriter ack_w;
+        phosg::StringWriter ack_w;
         ack_w.put<IPCPHeader>(IPCPHeader{
             .command = 0x02, // Configure-Ack
             .request_id = fi.ipcp->request_id,
             .size = fi.ipcp->size,
         });
         ack_w.write(fi.payload, fi.payload_size);
-        this->send_layer3_frame(c, FrameInfo::Protocol::IPCP, ack_w.str());
+        co_await this->send_layer3_frame(c, FrameInfo::Protocol::IPCP, ack_w.str());
       }
       break;
     }
@@ -747,9 +755,9 @@ void IPStackSimulator::on_client_ipcp_frame(shared_ptr<IPClient> c, const FrameI
     case 0x05: { // Terminate-Request
       c->ipv4_addr = 0;
       c->tcp_connections.clear();
-      string response(reinterpret_cast<const char*>(fi.payload), fi.payload_size);
+      std::string response(reinterpret_cast<const char*>(fi.payload), fi.payload_size);
       response.at(0) = 0x06; // Terminate-Ack
-      this->send_layer3_frame(c, FrameInfo::Protocol::LCP, response);
+      co_await this->send_layer3_frame(c, FrameInfo::Protocol::LCP, response);
       break;
     }
 
@@ -760,30 +768,28 @@ void IPStackSimulator::on_client_ipcp_frame(shared_ptr<IPClient> c, const FrameI
     case 0x04: // Configure-Reject
     case 0x06: // Terminate-Ack
     case 0x07: // Code-Reject
-      throw runtime_error("unimplemented IPCP command");
+      throw std::runtime_error("unimplemented IPCP command");
     default:
-      throw runtime_error("unknown LCP command");
+      throw std::runtime_error("unknown LCP command");
   }
 }
 
-void IPStackSimulator::on_client_arp_frame(
-    shared_ptr<IPClient> c, const FrameInfo& fi) {
+asio::awaitable<void> IPStackSimulator::on_client_arp_frame(std::shared_ptr<IPSSClient> c, const FrameInfo& fi) {
   if (fi.arp->hwaddr_len != 6 ||
       fi.arp->paddr_len != 4 ||
       fi.arp->hardware_type != 0x0001 ||
       fi.arp->protocol_type != 0x0800) {
-    throw runtime_error("unsupported ARP parameters");
+    throw std::runtime_error("unsupported ARP parameters");
   }
   if (fi.payload_size < 20) {
-    throw runtime_error("ARP payload too small");
+    throw std::runtime_error("ARP payload too small");
   }
 
   if (c->ipv4_addr == 0) {
-    c->ipv4_addr = *reinterpret_cast<const be_uint32_t*>(
-        reinterpret_cast<const uint8_t*>(fi.payload) + 6);
+    c->ipv4_addr = *reinterpret_cast<const be_uint32_t*>(reinterpret_cast<const uint8_t*>(fi.payload) + 6);
   }
 
-  StringWriter w;
+  phosg::StringWriter w;
   w.put<ARPHeader>(ARPHeader{
       .hardware_type = fi.arp->hardware_type,
       .protocol_type = fi.arp->protocol_type,
@@ -793,29 +799,27 @@ void IPStackSimulator::on_client_arp_frame(
   });
 
   // The incoming payload is:
-  // uint8_t src_mac[6]; // MAC address of client
-  // uint8_t src_ip[4]; // IP address of client
-  // uint8_t dest_mac[6]; // MAC address of host (all zeroes)
-  // uint8_t dest_ip[4]; // IP address of host
+  //   uint8_t src_mac[6]; // MAC address of client
+  //   uint8_t src_ip[4]; // IP address of client
+  //   uint8_t dest_mac[6]; // MAC address of host (all zeroes)
+  //   uint8_t dest_ip[4]; // IP address of host
   // The outgoing payload is:
-  // uint8_t dest_mac[6]; // MAC address of host (from configuration)
-  // uint8_t dest_ip[4]; // IP address of host
-  // uint8_t src_mac[6]; // MAC address of client
-  // uint8_t src_ip[4]; // IP address of client
+  //   uint8_t dest_mac[6]; // MAC address of host (from configuration)
+  //   uint8_t dest_ip[4]; // IP address of host
+  //   uint8_t src_mac[6]; // MAC address of client
+  //   uint8_t src_ip[4]; // IP address of client
   const char* payload_bytes = reinterpret_cast<const char*>(fi.payload);
   w.write(this->host_mac_address_bytes.data(), 6);
   w.write(payload_bytes + 16, 4);
   w.write(payload_bytes, 10);
 
-  this->send_layer3_frame(c, FrameInfo::Protocol::ARP, w.str());
+  co_await this->send_layer3_frame(c, FrameInfo::Protocol::ARP, w.str());
 }
 
-void IPStackSimulator::on_client_udp_frame(shared_ptr<IPClient> c, const FrameInfo& fi) {
+asio::awaitable<void> IPStackSimulator::on_client_udp_frame(std::shared_ptr<IPSSClient> c, const FrameInfo& fi) {
   // We only implement DHCP and newserv's DNS server here.
 
-  // Every received UDP packet will elicit exactly one UDP response from
-  // newserv, so we prepare the response headers in advance
-
+  // Every received UDP packet will elicit exactly one UDP response from newserv, so we prepare the headers in advance
   IPv4Header r_ipv4;
   r_ipv4.version_ihl = 0x45;
   r_ipv4.tos = 0;
@@ -834,24 +838,24 @@ void IPStackSimulator::on_client_udp_frame(shared_ptr<IPClient> c, const FrameIn
   // r_udp.size filled in later
   // r_udp.checksum filled in later
 
-  string r_data;
+  std::string r_data;
   if (fi.udp->dest_port == 67) { // DHCP
     auto r = fi.read_payload();
     const auto& dhcp = r.get<DHCPHeader>();
     if (dhcp.hardware_type != 1) {
-      throw runtime_error("unknown DHCP hardware type");
+      throw std::runtime_error("unknown DHCP hardware type");
     }
     if (dhcp.hardware_address_length != 6) {
-      throw runtime_error("unknown DHCP hardware address length");
+      throw std::runtime_error("unknown DHCP hardware address length");
     }
     if (dhcp.magic != 0x63825363) {
-      throw runtime_error("incorrect DHCP magic cookie");
+      throw std::runtime_error("incorrect DHCP magic cookie");
     }
     if (dhcp.opcode != 1) { // Request
-      throw runtime_error("DHCP packet is not a request");
+      throw std::runtime_error("DHCP packet is not a request");
     }
 
-    unordered_map<uint8_t, string> option_data;
+    std::unordered_map<uint8_t, std::string> option_data;
     for (;;) {
       uint8_t option = r.get_u8();
       if (option == 0xFF) {
@@ -864,8 +868,8 @@ void IPStackSimulator::on_client_udp_frame(shared_ptr<IPClient> c, const FrameIn
     uint8_t command = 0;
     try {
       command = option_data.at(53).at(0);
-    } catch (const out_of_range&) {
-      throw runtime_error("client did not send a DHCP command option");
+    } catch (const std::out_of_range&) {
+      throw std::runtime_error("client did not send a DHCP command option");
     }
 
     if (command == 7) {
@@ -875,16 +879,16 @@ void IPStackSimulator::on_client_udp_frame(shared_ptr<IPClient> c, const FrameIn
       // Populate the client's addresses
       c->mac_addr = dhcp.client_hardware_address.data();
       c->ipv4_addr = 0x0A000105; // 10.0.1.5
-      // In this case, the client doesn't know its IPv4 address or ours yet,
-      // so we overwrite the existing fields with the appropriate addresses.
+      // In this case, the client doesn't know its IPv4 address or ours yet, so we overwrite the existing fields with
+      // the appropriate addresses.
       r_ipv4.src_addr = 0x0A000101; // 10.0.1.1
       r_ipv4.dest_addr = c->ipv4_addr;
 
       if ((command != 1) && (command != 3)) {
-        throw runtime_error("client sent unknown DHCP command option");
+        throw std::runtime_error("client sent unknown DHCP command option");
       }
 
-      StringWriter w;
+      phosg::StringWriter w;
       DHCPHeader r_dhcp;
       r_dhcp.opcode = 2; // Response
       r_dhcp.hardware_type = 1; // Ethernet
@@ -947,81 +951,58 @@ void IPStackSimulator::on_client_udp_frame(shared_ptr<IPClient> c, const FrameIn
       r_data = std::move(w.str());
 
     } else {
-      throw runtime_error("client sent unknown DHCP command");
+      throw std::runtime_error("client sent unknown DHCP command");
     }
 
   } else if (fi.udp->dest_port == 53) { // DNS
     if (fi.payload_size < 0x0C) {
-      throw runtime_error("DNS payload too small");
+      throw std::runtime_error("DNS payload too small");
     }
 
     uint32_t resolved_address = this->connect_address_for_remote_address(c->ipv4_addr);
     r_data = DNSServer::response_for_query(fi.payload, fi.payload_size, resolved_address);
 
   } else { // Not DHCP or DNS
-    throw runtime_error("UDP packet is not DHCP or DNS");
+    throw std::runtime_error("UDP packet is not DHCP or DNS");
   }
 
   if (!r_data.empty()) {
     r_ipv4.size = sizeof(IPv4Header) + sizeof(UDPHeader) + r_data.size();
     r_udp.size = sizeof(UDPHeader) + r_data.size();
     r_ipv4.checksum = FrameInfo::computed_ipv4_header_checksum(r_ipv4);
-    r_udp.checksum = FrameInfo::computed_udp4_checksum(
-        r_ipv4, r_udp, r_data.data(), r_data.size());
+    r_udp.checksum = FrameInfo::computed_udp4_checksum(r_ipv4, r_udp, r_data.data(), r_data.size());
 
-    if (ip_stack_simulator_log.should_log(LogLevel::DEBUG)) {
-      string remote_str = this->str_for_ipv4_netloc(fi.ipv4->src_addr, fi.udp->src_port);
-      ip_stack_simulator_log.debug("Sending UDP response to %s", remote_str.c_str());
-      print_data(stderr, r_data);
+    if (this->log.should_log(phosg::LogLevel::L_DEBUG)) {
+      std::string remote_str = this->str_for_ipv4_netloc(fi.ipv4->src_addr, fi.udp->src_port);
+      this->log.debug_f("Sending UDP response to {}", remote_str);
+      phosg::print_data(stderr, r_data);
     }
 
-    StringWriter w;
+    phosg::StringWriter w;
     w.put(r_ipv4);
     w.put(r_udp);
     w.write(r_data);
 
-    this->send_layer3_frame(c, FrameInfo::Protocol::IPV4, w.str());
+    co_await this->send_layer3_frame(c, FrameInfo::Protocol::IPV4, w.str());
   }
 }
 
-uint64_t IPStackSimulator::tcp_conn_key_for_connection(
-    const IPClient::TCPConnection& conn) {
-  return (static_cast<uint64_t>(conn.server_addr) << 32) |
-      (static_cast<uint64_t>(conn.server_port) << 16) |
-      static_cast<uint64_t>(conn.client_port);
-}
-
-uint64_t IPStackSimulator::tcp_conn_key_for_client_frame(
-    const IPv4Header& ipv4, const TCPHeader& tcp) {
-  return (static_cast<uint64_t>(ipv4.dest_addr) << 32) |
-      (static_cast<uint64_t>(tcp.dest_port) << 16) |
-      static_cast<uint64_t>(tcp.src_port);
-}
-
-uint64_t IPStackSimulator::tcp_conn_key_for_client_frame(const FrameInfo& fi) {
-  if (!fi.ipv4 || !fi.tcp) {
-    throw logic_error("tcp_conn_key_for_frame called on non-TCP frame");
-  }
-  return IPStackSimulator::tcp_conn_key_for_client_frame(*fi.ipv4, *fi.tcp);
-}
-
-void IPStackSimulator::on_client_tcp_frame(
-    shared_ptr<IPClient> c, const FrameInfo& fi) {
-  ip_stack_simulator_log.debug("Virtual network sent TCP frame (seq=%08" PRIX32 ", ack=%08" PRIX32 ")",
-      fi.tcp->seq_num.load(), fi.tcp->ack_num.load());
+asio::awaitable<void> IPStackSimulator::on_client_tcp_frame(std::shared_ptr<IPSSClient> c, const FrameInfo& fi) {
+  this->log.debug_f("Virtual network sent TCP frame (seq={:08X}, ack={:08X})",
+      fi.tcp->seq_num, fi.tcp->ack_num);
 
   if (fi.tcp->flags & (TCPHeader::Flag::NS | TCPHeader::Flag::CWR | TCPHeader::Flag::ECE | TCPHeader::Flag::URG)) {
-    throw runtime_error("unsupported flag in TCP packet");
+    throw std::runtime_error("unsupported flag in TCP packet");
   }
 
   if (fi.tcp->flags & TCPHeader::Flag::SYN) {
-    // We never make connections back to the client, so we should never receive
-    // a SYN+ACK. Essentially, no other flags should be set in any received SYN.
+    // We never make connections back to the client, so we should never receive a SYN+ACK. Essentially, no other flags
+    // should be set in any received SYN.
     if ((fi.tcp->flags & 0x0FFF) != TCPHeader::Flag::SYN) {
-      throw runtime_error("TCP SYN contains extra flags");
+      throw std::runtime_error("TCP SYN contains extra flags");
     }
 
-    StringReader options_r(fi.tcp + 1, fi.tcp_options_size);
+    phosg::StringReader options_r(fi.tcp + 1, fi.tcp_options_size);
     size_t max_frame_size = 1400;
     while (!options_r.eof()) {
       uint8_t option = options_r.get_u8();
@@ -1034,19 +1015,19 @@ void IPStackSimulator::on_client_tcp_frame(
           break;
         case 2: // Max segment size
           if (option_size != 4) {
-            throw runtime_error("incorrect size for TCP max frame size option");
+            throw std::runtime_error("incorrect size for TCP max frame size option");
           }
           max_frame_size = options_r.get_u16b();
           break;
         case 3: // Window scale (ignored)
           if (option_size != 3) {
-            throw runtime_error("incorrect size for TCP window scale option");
+            throw std::runtime_error("incorrect size for TCP window scale option");
           }
           options_r.skip(option_size);
           break;
         case 4: // Selective ACK supported (ignored)
           if (option_size != 2) {
-            throw runtime_error("incorrect size for TCP selective ACK supported option");
+            throw std::runtime_error("incorrect size for TCP selective ACK supported option");
           }
           break;
         case 5: // Selective ACK (ignored)
@@ -1054,134 +1035,135 @@ void IPStackSimulator::on_client_tcp_frame(
           break;
         case 8: // Timestamps (ignored)
           if (option_size != 10) {
-            throw runtime_error("incorrect size for TCP timestamps option");
+            throw std::runtime_error("incorrect size for TCP timestamps option");
           }
           options_r.skip(8);
           break;
         default:
-          throw runtime_error("invalid TCP option");
+          throw std::runtime_error("invalid TCP option");
       }
     }
 
+    std::shared_ptr<IPSSClient::TCPConnection> conn;
+    std::string conn_str;
     uint64_t key = this->tcp_conn_key_for_client_frame(fi);
-    auto emplace_ret = c->tcp_connections.emplace(key, IPClient::TCPConnection());
-    auto& conn = emplace_ret.first->second;
-    string conn_str;
-
-    if (emplace_ret.second) {
-      // Connection is new; initialize it
-      conn.client = c;
-      conn.resend_push_event.reset(event_new(this->base.get(), -1, EV_TIMEOUT,
-          &IPStackSimulator::dispatch_on_resend_push, &conn));
-      conn.server_addr = fi.ipv4->dest_addr;
-      conn.server_port = fi.tcp->dest_port;
-      conn.client_port = fi.tcp->src_port;
-      conn.next_client_seq = fi.tcp->seq_num + 1;
-      conn.acked_server_seq = random_object<uint32_t>();
-      conn.resend_push_usecs = DEFAULT_RESEND_PUSH_USECS;
-      conn.next_push_max_frame_size = max_frame_size;
-      conn.awaiting_first_ack = true;
-      conn.max_frame_size = max_frame_size;
-      conn.bytes_received = 0;
-      conn.bytes_sent = 0;
+    auto conn_it = c->tcp_connections.find(key);
+    if (conn_it == c->tcp_connections.end()) {
+      conn = std::make_shared<IPSSClient::TCPConnection>(c);
+      c->tcp_connections.emplace(key, conn);
+      conn->server_addr = fi.ipv4->dest_addr;
+      conn->server_port = fi.tcp->dest_port;
+      conn->client_port = fi.tcp->src_port;
+      conn->next_client_seq = fi.tcp->seq_num + 1;
+      conn->acked_server_seq = phosg::random_object<uint32_t>();
+      conn->resend_push_usecs = DEFAULT_RESEND_PUSH_USECS;
+      conn->next_push_max_frame_size = max_frame_size;
+      conn->max_frame_size = max_frame_size;
 
       conn_str = this->str_for_tcp_connection(c, conn);
-      ip_stack_simulator_log.info("Client opened TCP connection %s (acked_server_seq=%08" PRIX32 ", next_client_seq=%08" PRIX32 ")",
-          conn_str.c_str(), conn.acked_server_seq, conn.next_client_seq);
+      this->log.info_f(
+          "Client opened TCP connection {} (acked_server_seq={:08X}, next_client_seq={:08X})",
+          conn_str, conn->acked_server_seq, conn->next_client_seq);
 
     } else {
+      conn = conn_it->second;
+
       // Connection is NOT new; this is probably a resend of an earlier SYN
-      if (!conn.awaiting_first_ack) {
-        throw logic_error("SYN received on already-open connection after initial phase");
+      if (!conn->awaiting_first_ack) {
+        throw std::logic_error("SYN received on already-open connection after initial phase");
       }
-      // TODO: We should check the syn/ack numbers here instead of just assuming
-      // they're correct
+      // TODO: We should check the syn/ack numbers here instead of just assuming they're correct
       conn_str = this->str_for_tcp_connection(c, conn);
-      ip_stack_simulator_log.debug("Client resent SYN for TCP connection %s",
-          conn_str.c_str());
+      this->log.debug_f("Client resent SYN for TCP connection {}", conn_str);
     }
 
     // Send a SYN+ACK (send_tcp_frame always adds the ACK flag)
-    this->send_tcp_frame(c, conn, TCPHeader::Flag::SYN);
-    ip_stack_simulator_log.debug("Sent SYN+ACK on %s (acked_server_seq=%08" PRIX32 ", next_client_seq=%08" PRIX32 ")",
-        conn_str.c_str(), conn.acked_server_seq, conn.next_client_seq);
+    co_await this->send_tcp_frame(c, conn, TCPHeader::Flag::SYN);
+    this->log.debug_f("Sent SYN+ACK on {} (acked_server_seq={:08X}, next_client_seq={:08X})",
+        conn_str, conn->acked_server_seq, conn->next_client_seq);
 
   } else {
-    // This frame isn't a SYN, so a connection object should already exist
+    // This frame isn't a SYN, so a connection object should already exist; ignore the frame if there's no connection
     uint64_t key = this->tcp_conn_key_for_client_frame(fi);
-    IPClient::TCPConnection* conn;
-    try {
-      conn = &c->tcp_connections.at(key);
-    } catch (const out_of_range&) {
-      throw runtime_error("non-SYN frame does not correspond to any open TCP connection");
+    auto conn_it = c->tcp_connections.find(key);
+    if (conn_it == c->tcp_connections.end()) {
+      if (this->log.debug_f("Ignoring non-SYN TCP frame with no active connection")) {
+        phosg::print_data(stderr, fi.payload, fi.payload_size);
+      }
+      co_return;
     }
+    auto& conn = conn_it->second;
     bool conn_valid = true;
+    bool acked_seq_changed = false;
 
     if (fi.tcp->flags & TCPHeader::Flag::ACK) {
-      ip_stack_simulator_log.debug("Client sent ACK %08" PRIX32, fi.tcp->ack_num.load());
+      this->log.debug_f("Client sent ACK {:08X}", fi.tcp->ack_num);
       if (conn->awaiting_first_ack) {
         if (fi.tcp->ack_num != conn->acked_server_seq + 1) {
-          throw runtime_error("first ack_num was not acked_server_seq + 1");
+          throw std::runtime_error("first ack_num was not acked_server_seq + 1");
         }
         conn->acked_server_seq++;
         conn->awaiting_first_ack = false;
 
       } else {
+        conn->awaiting_ack = false;
         if (seq_num_greater(fi.tcp->ack_num, conn->acked_server_seq)) {
-          ip_stack_simulator_log.debug("Advancing acked_server_seq from %08" PRIX32, conn->acked_server_seq);
+          this->log.debug_f("Advancing acked_server_seq from {:08X}", conn->acked_server_seq);
           uint32_t ack_delta = fi.tcp->ack_num - conn->acked_server_seq;
-          size_t pending_bytes = evbuffer_get_length(conn->pending_data.get());
-          if (pending_bytes < ack_delta) {
-            throw runtime_error("client acknowledged beyond end of sent data");
+          if (conn->outbound_data_bytes < ack_delta) {
+            throw std::runtime_error("client acknowledged beyond end of sent data");
           }
 
-          evbuffer_drain(conn->pending_data.get(), ack_delta);
+          conn->drain_outbound_data(ack_delta);
           conn->acked_server_seq += ack_delta;
           conn->resend_push_usecs = DEFAULT_RESEND_PUSH_USECS;
           conn->next_push_max_frame_size = conn->max_frame_size;
+          acked_seq_changed = true;
 
-          ip_stack_simulator_log.debug("Removed %08" PRIX32 " bytes from pending buffer and advanced acked_server_seq to %08" PRIX32,
+          this->log.debug_f(
+              "Removed {:08X} bytes from pending buffer and advanced acked_server_seq to {:08X}",
               ack_delta, conn->acked_server_seq);
 
         } else if (seq_num_less(fi.tcp->ack_num, conn->acked_server_seq)) {
-          throw runtime_error("client sent lower ack num than previous frame");
+          throw std::runtime_error("client sent lower ack num than previous frame");
         }
       }
 
-      if (!conn->server_bev.get()) {
-        this->open_server_connection(c, *conn);
+      if (!conn->server_channel) {
+        co_await this->open_server_connection(c, conn);
       }
     }
 
     if (fi.tcp->flags & (TCPHeader::Flag::RST | TCPHeader::Flag::FIN)) {
       bool is_rst = (fi.tcp->flags & TCPHeader::Flag::RST);
       if (is_rst && (fi.tcp->flags & TCPHeader::Flag::FIN)) {
-        throw runtime_error("client sent TCP FIN+RST");
+        throw std::runtime_error("client sent TCP FIN+RST");
       }
 
-      string conn_str = this->str_for_tcp_connection(c, *conn);
-      ip_stack_simulator_log.info("Client closed TCP connection %s", conn_str.c_str());
+      std::string conn_str = this->str_for_tcp_connection(c, conn);
+      this->log.info_f("Client closed TCP connection {}", conn_str);
+      if (conn->server_channel) {
+        conn->server_channel->disconnect();
+        conn->server_channel.reset();
+      }
 
-      // TODO: Are we supposed to send a response to an RST? Here we do, and the
-      // client probably just ignores it anyway
-      this->send_tcp_frame(c, *conn, fi.tcp->flags & (TCPHeader::Flag::RST | TCPHeader::Flag::FIN));
+      // TODO: Are we supposed to send a response to an RST? Here we do, and the client probably just ignores it anyway
+      co_await this->send_tcp_frame(c, conn, fi.tcp->flags & (TCPHeader::Flag::RST | TCPHeader::Flag::FIN));
 
-      // Delete the connection object. The unique_ptr destructor flushes the
-      // bufferevent, and thereby sends an EOF to the server's end.
+      // Delete the connection object. The unique_ptr destructor flushes the bufferevent, and thereby sends an EOF to
+      // the server's end.
       c->tcp_connections.erase(key);
       conn_valid = false;
 
-      // Note: The PSH flag isn't required to be set on all packets that contain
-      // data. The PSH flag just means "tell the application that data is
-      // available", so some senders only set the PSH flag on the last frame of a
-      // large segment of data, since the application wouldn't be able to process
-      // the segment until all of it is available. newserv can handle incomplete
-      // commands, so we just ignore the PSH flag and forward any data to the
-      // server immediately.
     } else if (fi.payload_size != 0) {
+      // Note: The PSH flag isn't required to be set on all packets that contain data. The PSH flag just means "tell
+      // the application that data is available", so some senders only set the PSH flag on the last frame of a large
+      // segment of data, since the application wouldn't be able to process the segment until all of it is available.
+      // newserv can handle incomplete commands, so we just ignore the PSH flag and forward any data to the server
+      // immediately (hence the lack of a flag check in the above condition).
 
-      string conn_str = ip_stack_simulator_log.should_log(LogLevel::WARNING)
-          ? this->str_for_tcp_connection(c, *conn)
+      std::string conn_str = this->log.should_log(phosg::LogLevel::L_WARNING)
+          ? this->str_for_tcp_connection(c, conn)
           : "";
 
       size_t payload_skip_bytes;
@@ -1189,8 +1171,8 @@ void IPStackSimulator::on_client_tcp_frame(
         payload_skip_bytes = 0;
 
       } else if (seq_num_less(fi.tcp->seq_num, conn->next_client_seq)) {
-        // If the frame overlaps an existing boundary, we'll accept some of the
-        // data; otherwise we'll ignore it entirely (but still send an ACK)
+        // If the frame overlaps an existing boundary, we'll accept some of the data; otherwise we'll ignore it
+        // entirely (but still send an ACK)
         uint32_t end_seq = fi.tcp->seq_num + fi.payload_size;
         if (seq_num_less_or_equal(end_seq, conn->next_client_seq)) { // Fully "in the past"
           payload_skip_bytes = fi.payload_size;
@@ -1199,17 +1181,16 @@ void IPStackSimulator::on_client_tcp_frame(
         }
 
       } else {
-        // Payload is in the future - we must have missed a data frame. We'll
-        // ignore it (but warn) and send an ACK later, and the client should
-        // retransmit the lost data
-        ip_stack_simulator_log.warning(
-            "Client sent out-of-order sequence number (expected %08" PRIX32 ", received %08" PRIX32 ", 0x%zX data bytes)",
-            conn->next_client_seq, fi.tcp->seq_num.load(), fi.payload_size);
+        // Payload is in the future - we must have missed a data frame. We'll ignore it (but warn) and send an ACK
+        // later, and the client should retransmit the lost data
+        this->log.warning_f(
+            "Client sent out-of-order sequence number (expected {:08X}, received {:08X}, 0x{:X} data bytes)",
+            conn->next_client_seq, fi.tcp->seq_num, fi.payload_size);
         payload_skip_bytes = fi.payload_size;
       }
 
       if (payload_skip_bytes > fi.payload_size) {
-        throw logic_error("payload skip bytes too large");
+        throw std::logic_error("payload skip bytes too large");
       }
 
       if (payload_skip_bytes < fi.payload_size) {
@@ -1218,135 +1199,118 @@ void IPStackSimulator::on_client_tcp_frame(
 
         bool was_logged;
         if (payload_skip_bytes) {
-          was_logged = ip_stack_simulator_log.debug("Client sent data on TCP connection %s, overlapping existing ack'ed data (0x%zX bytes ignored)",
-              conn_str.c_str(), payload_skip_bytes);
+          was_logged = this->log.debug_f(
+              "Client sent data on TCP connection {}, overlapping existing ack'ed data (0x{:X} bytes ignored)",
+              conn_str, payload_skip_bytes);
         } else {
-          was_logged = ip_stack_simulator_log.debug("Client sent data on TCP connection %s",
-              conn_str.c_str());
+          was_logged = this->log.debug_f("Client sent data on TCP connection {}", conn_str);
         }
         if (was_logged) {
-          print_data(stderr, payload, payload_size);
+          phosg::print_data(stderr, payload, payload_size);
         }
 
         // Send the new data to the server
-        struct evbuffer* server_out_buf = bufferevent_get_output(
-            conn->server_bev.get());
-        evbuffer_add(server_out_buf, payload, payload_size);
+        if (!conn->server_channel) {
+          this->log.warning_f("Client sent data on TCP connection {}, but server channel is missing", conn_str);
+        } else if (!conn->server_channel->connected()) {
+          this->log.warning_f("Client sent data on TCP connection {}, but server channel is disconnected", conn_str);
+        } else {
+          conn->server_channel->add_inbound_data(payload, payload_size);
+        }
 
         // Update the sequence number and stats
         conn->next_client_seq += payload_size;
         conn->bytes_received += payload_size;
         if (conn->next_client_seq < payload_size) {
-          ip_stack_simulator_log.warning("Client sequence number has wrapped (next=%08" PRIX32 ", bytes=%zX)",
-              fi.tcp->seq_num.load(), payload_size);
+          this->log.warning_f("Client sequence number has wrapped (next={:08X}, bytes={:X})", fi.tcp->seq_num, payload_size);
         }
       }
 
       // Send an ACK
-      this->send_tcp_frame(c, *conn);
-      ip_stack_simulator_log.debug("Sent PSH ACK on %s (acked_server_seq=%08" PRIX32 ", next_client_seq=%08" PRIX32 ", bytes_received=0x%zX)",
-          conn_str.c_str(), conn->acked_server_seq, conn->next_client_seq, conn->bytes_received);
+      co_await this->send_tcp_frame(c, conn);
+      this->log.debug_f("Sent PSH ACK on {} (acked_server_seq={:08X}, next_client_seq={:08X}, bytes_received=0x{:X})",
+          conn_str, conn->acked_server_seq, conn->next_client_seq, conn->bytes_received);
     }
 
-    if (conn_valid) {
+    if (conn_valid && acked_seq_changed) {
       // Try to send some more data if the client is waiting on it
-      this->send_pending_push_frame(c, *conn);
+      this->schedule_send_pending_push_frame(conn, 0);
     }
   }
 }
 
-void IPStackSimulator::open_server_connection(shared_ptr<IPClient> c, IPClient::TCPConnection& conn) {
-  if (conn.server_bev.get()) {
-    throw logic_error("server connection is already open");
-  }
-
-  struct bufferevent* bevs[2];
-  bufferevent_pair_new(this->base.get(), 0, bevs);
-
-  // Set up the IPStackSimulator end of the virtual connection
-  bufferevent_setcb(bevs[0], &IPStackSimulator::dispatch_on_server_input,
-      nullptr, &IPStackSimulator::dispatch_on_server_error, &conn);
-  bufferevent_enable(bevs[0], EV_READ | EV_WRITE);
-  conn.server_bev.reset(bevs[0]);
-
-  // Link the client to the server - the server sees this as a normal TCP
-  // connection and treats it as if the client connected to one of its listening
-  // sockets
-  shared_ptr<const PortConfiguration> port_config;
-  try {
-    port_config = this->state->number_to_port_config.at(conn.server_port);
-  } catch (const out_of_range&) {
-    bufferevent_free(bevs[1]);
-    throw logic_error("client connected to port missing from configuration");
-  }
-
-  string conn_str = this->str_for_tcp_connection(c, conn);
-  if (port_config->behavior == ServerBehavior::PROXY_SERVER) {
-    if (!this->state->proxy_server.get()) {
-      ip_stack_simulator_log.error("TCP connection %s is to non-running proxy server",
-          conn_str.c_str());
-      flush_and_free_bufferevent(bevs[1]);
-    } else {
-      this->state->proxy_server->connect_client(bevs[1], conn.server_port);
-      ip_stack_simulator_log.info("Connected TCP connection %s to proxy server",
-          conn_str.c_str());
+void IPStackSimulator::schedule_send_pending_push_frame(std::shared_ptr<IPSSClient::TCPConnection> conn, uint64_t delay_usecs) {
+  conn->resend_push_timer.expires_after(std::chrono::microseconds(delay_usecs));
+  conn->resend_push_timer.async_wait([wconn = std::weak_ptr<IPSSClient::TCPConnection>(conn)](std::error_code ec) {
+    if (ec) {
+      return;
     }
-  } else if (this->state->game_server.get()) {
-    this->state->game_server->connect_client(bevs[1], c->ipv4_addr,
-        conn.client_port, conn.server_port, port_config->version,
-        port_config->behavior);
-    ip_stack_simulator_log.info("Connected TCP connection %s to game server",
-        conn_str.c_str());
-  } else {
-    ip_stack_simulator_log.error("No server available for TCP connection %s",
-        conn_str.c_str());
-    flush_and_free_bufferevent(bevs[1]);
-  }
+    auto conn = wconn.lock();
+    if (!conn) {
+      return;
+    }
+    auto c = conn->client.lock();
+    if (!c) {
+      return;
+    }
+    auto sim = c->sim.lock();
+    if (!sim) {
+      return;
+    }
+    asio::co_spawn(*sim->get_io_context(), sim->send_pending_push_frame(c, conn), asio::detached);
+  });
 }
 
-void IPStackSimulator::send_pending_push_frame(shared_ptr<IPClient> c, IPClient::TCPConnection& conn) {
-  size_t pending_bytes = evbuffer_get_length(conn.pending_data.get());
-  if (!pending_bytes) {
-    return;
+asio::awaitable<void> IPStackSimulator::send_pending_push_frame(
+    std::shared_ptr<IPSSClient> c, std::shared_ptr<IPSSClient::TCPConnection> conn) {
+  if (!conn->outbound_data_bytes) {
+    if (!conn->server_channel || !conn->server_channel->connected()) {
+      co_await this->close_tcp_connection(c, conn);
+    }
+    co_return;
   }
 
-  size_t bytes_to_send = min<size_t>(pending_bytes, conn.next_push_max_frame_size);
-  if ((c->link_type == FrameInfo::LinkType::HDLC) && (bytes_to_send > 200)) {
-    // There is a bug in Dolphin's modem implementation (which I wrote, so it's
-    // my fault) that causes commands to be dropped when too much data is sent
-    // at once. To work around this, we only send up to 200 bytes in each push
-    // frame.
-    bytes_to_send = 200;
+  size_t bytes_to_send = std::min<size_t>(conn->outbound_data_bytes, conn->next_push_max_frame_size);
+  if (c->protocol == VirtualNetworkProtocol::HDLC_TAPSERVER) {
+    // There is a bug in Dolphin's modem implementation (which I wrote, so it's my fault) that causes commands to be
+    // dropped when too much data is sent. To work around this, we only send up to 200 bytes in each push frame.
+    bytes_to_send = std::min<size_t>(bytes_to_send, 200);
   }
 
-  ip_stack_simulator_log.debug("Sending PSH frame with seq_num %08" PRIX32 ", 0x%zX/0x%zX data bytes",
-      conn.acked_server_seq, bytes_to_send, pending_bytes);
+  this->log.debug_f("Sending PSH frame with seq_num {:08X}, 0x{:X}/0x{:X} data bytes",
+      conn->acked_server_seq, bytes_to_send, conn->outbound_data_bytes);
 
-  this->send_tcp_frame(c, conn, TCPHeader::Flag::PSH, conn.pending_data.get(), bytes_to_send);
-  struct timeval resend_push_timeout = usecs_to_timeval(conn.resend_push_usecs);
-  event_add(conn.resend_push_event.get(), &resend_push_timeout);
-
-  // If the client isn't responding to our PSHes, back off exponentially up to
-  // a limit of 5 seconds between PSH frames. This window is reset when
-  // acked_server_seq changes (that is, when the client has acknowledged any new
-  // data). It seems some situations cause GameCube clients to drop packets more
-  // often; to alleviate this, we also try to resend less data.
-  conn.resend_push_usecs *= 2;
-  if (conn.resend_push_usecs > 5000000) {
-    conn.resend_push_usecs = 5000000;
+  conn->linearize_outbound_data(bytes_to_send);
+  if (conn->outbound_data.empty() || conn->outbound_data.front().size() < bytes_to_send) {
+    // This should never happen because bytes_to_send should always be less than or equal to conn->outbound_data_bytes,
+    // which itself should be equal to the number of bytes that can be linearized
+    throw std::logic_error("failed to linearize enough bytes before sending TCP PSH");
   }
-  conn.next_push_max_frame_size = max<size_t>(
-      0x100, conn.next_push_max_frame_size - 0x100);
+  co_await this->send_tcp_frame(c, conn, TCPHeader::Flag::PSH, conn->outbound_data.front().data(), bytes_to_send);
+  conn->awaiting_ack = true;
+
+  // Schedule the timer for sending another PSH, in case the client doesn't respond quickly enough
+  this->schedule_send_pending_push_frame(conn, conn->resend_push_usecs);
+
+  // If the client isn't responding to our PSHes, back off exponentially up to a limit of 5 seconds between PSH frames.
+  // This window is reset when acked_server_seq changes (that is, when the client has acknowledged any new data). It
+  // seems some situations cause GameCube clients to drop packets more often; to alleviate this, we also try to resend
+  // less data.
+  conn->resend_push_usecs *= 2;
+  if (conn->resend_push_usecs > 5000000) {
+    conn->resend_push_usecs = 5000000;
+  }
+  conn->next_push_max_frame_size = std::max<size_t>(0x100, conn->next_push_max_frame_size - 0x100);
 }
 
-void IPStackSimulator::send_tcp_frame(
-    shared_ptr<IPClient> c,
-    IPClient::TCPConnection& conn,
+asio::awaitable<void> IPStackSimulator::send_tcp_frame(
+    std::shared_ptr<IPSSClient> c,
+    std::shared_ptr<IPSSClient::TCPConnection> conn,
     uint16_t flags,
-    struct evbuffer* src_buf,
-    size_t src_bytes) {
-  if (!src_bytes != !(flags & TCPHeader::Flag::PSH)) {
-    throw logic_error("data should be given if and only if PSH is given");
+    const void* payload_data,
+    size_t payload_size) {
+  if (!payload_data != !(flags & TCPHeader::Flag::PSH)) {
+    throw std::logic_error("data should be given if and only if PSH is given");
   }
 
   IPv4Header ipv4;
@@ -1358,123 +1322,201 @@ void IPStackSimulator::send_tcp_frame(
   ipv4.ttl = 20;
   ipv4.protocol = 6; // TCP
   // ipv4.checksum filled in later
-  ipv4.src_addr = conn.server_addr;
+  ipv4.src_addr = conn->server_addr;
   ipv4.dest_addr = c->ipv4_addr;
 
   TCPHeader tcp;
-  tcp.src_port = conn.server_port;
-  tcp.dest_port = conn.client_port;
-  tcp.seq_num = conn.acked_server_seq;
-  tcp.ack_num = conn.next_client_seq;
+  tcp.src_port = conn->server_port;
+  tcp.dest_port = conn->client_port;
+  tcp.seq_num = conn->acked_server_seq;
+  tcp.ack_num = conn->next_client_seq;
   tcp.flags = (5 << 12) | TCPHeader::Flag::ACK | flags;
   tcp.window = 0x1000;
   tcp.urgent_ptr = 0;
   // tcp.checksum filled in later
 
-  ipv4.size = sizeof(IPv4Header) + sizeof(TCPHeader) + src_bytes;
+  ipv4.size = sizeof(IPv4Header) + sizeof(TCPHeader) + payload_size;
   ipv4.checksum = FrameInfo::computed_ipv4_header_checksum(ipv4);
+  tcp.checksum = FrameInfo::computed_tcp4_checksum(ipv4, tcp, payload_data, payload_size);
 
-  const void* linear_data = src_bytes ? evbuffer_pullup(src_buf, src_bytes) : nullptr;
-  tcp.checksum = FrameInfo::computed_tcp4_checksum(ipv4, tcp, linear_data, src_bytes);
-
-  StringWriter w;
+  phosg::StringWriter w;
   w.put(ipv4);
   w.put(tcp);
-  if (src_bytes) {
-    w.write(linear_data, src_bytes);
+  if (payload_data) {
+    w.write(payload_data, payload_size);
   }
 
-  this->send_layer3_frame(c, FrameInfo::Protocol::IPV4, w.str());
+  co_await this->send_layer3_frame(c, FrameInfo::Protocol::IPV4, w.str());
 }
 
-void IPStackSimulator::dispatch_on_resend_push(evutil_socket_t, short, void* ctx) {
-  auto* conn = reinterpret_cast<IPClient::TCPConnection*>(ctx);
-  auto c = conn->client.lock();
-  if (!c.get()) {
-    ip_stack_simulator_log.warning("Resend push event triggered for deleted client; ignoring");
+asio::awaitable<void> IPStackSimulator::open_server_connection(
+    std::shared_ptr<IPSSClient> c, std::shared_ptr<IPSSClient::TCPConnection> conn) {
+  if (conn->server_channel) {
+    throw std::logic_error("server connection is already open");
+  }
+
+  std::string conn_str = this->str_for_tcp_connection(c, conn);
+
+  // Figure out which logical port the connection should go to
+  auto port_config_it = this->state->data->number_to_port_config.find(conn->server_port);
+  if (port_config_it == this->state->data->number_to_port_config.end()) {
+    this->log.error_f("TCP connection {} is to undefined port {}", conn_str, conn->server_port);
+    co_await this->close_tcp_connection(c, conn);
+    co_return;
+  }
+  const auto& port_config = port_config_it->second;
+
+  conn->server_channel = std::make_shared<IPSSChannel>(
+      this->shared_from_this(),
+      c,
+      conn,
+      port_config.version,
+      Language::ENGLISH,
+      "",
+      phosg::TerminalFormat::END,
+      phosg::TerminalFormat::END,
+      false,
+      this->state->data->censor_credentials);
+
+  if (!this->state->game_server.get()) {
+    this->log.error_f("No server available for TCP connection {}", conn_str);
+    co_await this->close_tcp_connection(c, conn);
+    co_return;
   } else {
-    auto sim = c->sim.lock();
-    if (!sim) {
-      ip_stack_simulator_log.warning("Resend push event triggered for client on deleted simulator; ignoring");
+    this->state->game_server->connect_channel(conn->server_channel, conn->server_port, port_config.behavior);
+    this->log.info_f("Connected TCP connection {} to game server", conn_str);
+  }
+}
+
+asio::awaitable<void> IPStackSimulator::close_tcp_connection(
+    std::shared_ptr<IPSSClient> c, std::shared_ptr<IPSSClient::TCPConnection> conn) {
+  // Send an RST to the client. This is kind of rude (we really should use FIN) but the PSO network stack always sends
+  // an RST to us when disconnecting, so whatever
+  co_await this->send_tcp_frame(c, conn, TCPHeader::Flag::RST);
+
+  // Delete the connection object
+  std::string conn_str = this->str_for_tcp_connection(c, conn);
+  this->log.info_f("Server closed TCP connection {}", conn_str);
+  c->tcp_connections.erase(this->tcp_conn_key_for_connection(conn));
+}
+
+std::shared_ptr<IPSSClient> IPStackSimulator::create_client(
+    std::shared_ptr<IPSSSocket> listen_sock, asio::ip::tcp::socket&& client_sock) {
+  uint32_t addr = ipv4_addr_for_asio_addr(client_sock.remote_endpoint().address());
+  if (this->state->data->banned_ipv4_ranges->check(addr)) {
+    if (client_sock.is_open()) {
+      client_sock.close();
+    }
+    return nullptr;
+  }
+
+  uint64_t network_id = this->next_network_id++;
+  this->log.info_f("Virtual network N-{:X} connected via {}", network_id, listen_sock->name);
+  return std::make_shared<IPSSClient>(this->shared_from_this(), network_id, listen_sock->protocol, std::move(client_sock));
+}
+
+asio::awaitable<void> IPStackSimulator::handle_tapserver_client(std::shared_ptr<IPSSClient> c) {
+  for (;;) {
+    le_uint16_t frame_size;
+    co_await asio::async_read(c->sock, asio::buffer(&frame_size, sizeof(frame_size)), asio::use_awaitable);
+    std::string frame(frame_size, '\0');
+    co_await asio::async_read(c->sock, asio::buffer(frame.data(), frame.size()), asio::use_awaitable);
+
+    if (c->protocol == VirtualNetworkProtocol::HDLC_TAPSERVER) {
+      frame.resize(unescape_hdlc_frame_inplace(frame.data(), frame.size()));
+    }
+
+    try {
+      co_await this->on_client_frame(c, frame.data(), frame.size());
+    } catch (const std::exception& e) {
+      if (this->log.warning_f("Failed to process frame: {}", e.what())) {
+        phosg::print_data(stderr, frame);
+      }
+    }
+
+    c->reschedule_idle_timeout();
+  }
+}
+
+asio::awaitable<void> IPStackSimulator::handle_hdlc_raw_client(std::shared_ptr<IPSSClient> c) {
+  std::string buffer(0x1000, 0);
+  size_t buffer_bytes = 0;
+  for (;;) {
+    size_t req_buffer_size = buffer_bytes + 0x400;
+    if (buffer.size() < req_buffer_size) {
+      buffer.resize(req_buffer_size);
+    }
+
+    auto buf = asio::buffer(buffer.data() + buffer_bytes, buffer.size() - buffer_bytes);
+    buffer_bytes += co_await c->sock.async_read_some(buf, asio::use_awaitable);
+
+    // Process as many packets as possible
+    size_t frame_start_offset = 0;
+    while (buffer.size() > frame_start_offset) {
+      if (buffer[frame_start_offset] != 0x7E) {
+        throw std::runtime_error("HDLC frame does not begin with 7E");
+      }
+      size_t frame_end_offset = buffer.find(0x7E, frame_start_offset + 1);
+      if (frame_end_offset == std::string::npos) {
+        break;
+      }
+      frame_end_offset++;
+
+      // Unescaping a frame can't make it longer, so we just do it in-place
+      void* frame_data = buffer.data() + frame_start_offset;
+      size_t unescaped_size = unescape_hdlc_frame_inplace(frame_data, frame_end_offset - frame_start_offset);
+
+      try {
+        co_await this->on_client_frame(c, frame_data, unescaped_size);
+      } catch (const std::exception& e) {
+        if (this->log.warning_f("Failed to process frame: {}", e.what())) {
+          phosg::print_data(stderr, frame_data, unescaped_size);
+        }
+      }
+
+      frame_start_offset = frame_end_offset;
+    }
+
+    // Delete the processed packets from the beginning of the buffer
+    if (frame_start_offset > buffer_bytes) {
+      throw std::logic_error("frame start offset is beyond buffer bounds");
+    } else if (frame_start_offset == buffer_bytes) {
+      buffer_bytes = 0;
+    } else if (frame_start_offset > 0) {
+      memcpy(buffer.data(), buffer.data() + frame_start_offset, buffer_bytes - frame_start_offset);
+      buffer_bytes -= frame_start_offset;
+    }
+
+    // Reset the idle timer, since the client has sent something valid
+    c->reschedule_idle_timeout();
+  }
+}
+
+asio::awaitable<void> IPStackSimulator::handle_client(std::shared_ptr<IPSSClient> c) {
+  switch (c->protocol) {
+    case VirtualNetworkProtocol::ETHERNET_TAPSERVER:
+    case VirtualNetworkProtocol::HDLC_TAPSERVER:
+      co_await this->handle_tapserver_client(c);
+      break;
+    case VirtualNetworkProtocol::HDLC_RAW:
+      co_await this->handle_hdlc_raw_client(c);
+      break;
+    default:
+      throw std::logic_error("unknown virtual network protocol");
+  }
+}
+
+asio::awaitable<void> IPStackSimulator::destroy_client(std::shared_ptr<IPSSClient> c) {
+  this->log.info_f("Virtual network N-{:X} disconnected ({} TCP connections to close)", c->network_id, c->tcp_connections.size());
+  for (const auto& [conn_id, conn] : c->tcp_connections) {
+    if (conn->server_channel) {
+      this->log.info_f("Closing TCP connection {:016X} on N-{:X}", conn_id, c->network_id);
+      conn->server_channel->disconnect();
+      conn->server_channel.reset();
     } else {
-      sim->on_resend_push(c, *conn);
+      this->log.info_f("TCP connection {:016X} on N-{:X} has no server channel", conn_id, c->network_id);
     }
   }
-}
 
-void IPStackSimulator::on_resend_push(shared_ptr<IPClient> c, IPClient::TCPConnection& conn) {
-  this->send_pending_push_frame(c, conn);
-}
-
-void IPStackSimulator::dispatch_on_server_input(struct bufferevent*, void* ctx) {
-  auto* conn = reinterpret_cast<IPClient::TCPConnection*>(ctx);
-  auto c = conn->client.lock();
-  if (!c.get()) {
-    ip_stack_simulator_log.warning("Server input event triggered for deleted client; ignoring");
-  } else {
-    auto sim = c->sim.lock();
-    if (!sim) {
-      ip_stack_simulator_log.warning("Server input event triggered for client on deleted simulator; ignoring");
-    } else {
-      sim->on_server_input(c, *conn);
-    }
-  }
-}
-
-void IPStackSimulator::on_server_input(shared_ptr<IPClient> c, IPClient::TCPConnection& conn) {
-  struct evbuffer* buf = bufferevent_get_input(conn.server_bev.get());
-  ip_stack_simulator_log.debug("Server input event: 0x%zX bytes to read",
-      evbuffer_get_length(buf));
-
-  struct timeval tv = usecs_to_timeval(60 * 1000 * 1000);
-  event_add(c->idle_timeout_event.get(), &tv);
-
-  evbuffer_add_buffer(conn.pending_data.get(), buf);
-  this->send_pending_push_frame(c, conn);
-}
-
-void IPStackSimulator::dispatch_on_server_error(
-    struct bufferevent*, short events, void* ctx) {
-  auto* conn = reinterpret_cast<IPClient::TCPConnection*>(ctx);
-  auto c = conn->client.lock();
-  if (!c.get()) {
-    ip_stack_simulator_log.warning("Server error event triggered for deleted client; ignoring");
-  } else {
-    auto sim = c->sim.lock();
-    if (!sim) {
-      ip_stack_simulator_log.warning("Server error event triggered for client on deleted simulator; ignoring");
-    } else {
-      sim->on_server_error(c, *conn, events);
-    }
-  }
-}
-
-void IPStackSimulator::on_server_error(
-    shared_ptr<IPClient> c, IPClient::TCPConnection& conn, short events) {
-  if (events & BEV_EVENT_ERROR) {
-    int err = EVUTIL_SOCKET_ERROR();
-    ip_stack_simulator_log.warning("Received error %d from virtual connection (%s)", err,
-        evutil_socket_error_to_string(err));
-  }
-  if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
-    // Send an RST to the client. Kind of rude (we really should use FIN) but
-    // the PSO network stack always sends an RST to us when disconnecting, so
-    // whatever
-    this->send_tcp_frame(c, conn, TCPHeader::Flag::RST);
-
-    // Delete the connection object (this also flushes and frees the server
-    // virtual connection bufferevent)
-    string conn_str = this->str_for_tcp_connection(c, conn);
-    ip_stack_simulator_log.info("Server closed TCP connection %s", conn_str.c_str());
-    c->tcp_connections.erase(this->tcp_conn_key_for_connection(conn));
-  }
-}
-
-void IPStackSimulator::log_frame(const string& data) const {
-  if (this->pcap_text_log_file) {
-    print_data(this->pcap_text_log_file, data, 0, nullptr,
-        PrintDataFlags::SKIP_SEPARATOR);
-    fputc('\n', this->pcap_text_log_file);
-    fflush(this->pcap_text_log_file);
-  }
+  co_return;
 }

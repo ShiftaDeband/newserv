@@ -1,84 +1,70 @@
 #pragma once
 
-#include <netinet/in.h>
-
+#include <asio.hpp>
 #include <memory>
 #include <string>
 
+#include "AsyncUtils.hh"
 #include "PSOEncryption.hh"
 #include "PSOProtocol.hh"
 #include "Version.hh"
 
-struct Channel {
-  std::unique_ptr<struct bufferevent, void (*)(struct bufferevent*)> bev;
-  struct sockaddr_storage local_addr;
-  struct sockaddr_storage remote_addr;
-  bool is_virtual_connection;
-
+class Channel {
+public:
   Version version;
-  uint8_t language;
+  Language language;
   std::shared_ptr<PSOEncryption> crypt_in;
   std::shared_ptr<PSOEncryption> crypt_out;
 
   std::string name;
-  TerminalFormat terminal_send_color;
-  TerminalFormat terminal_recv_color;
+  phosg::TerminalFormat terminal_send_color;
+  phosg::TerminalFormat terminal_recv_color;
+  bool censor_received_credentials;
+  bool censor_sent_credentials;
 
   struct Message {
     uint16_t command;
     uint32_t flag;
     std::string data;
+
+    template <typename T>
+    const T& check_size_t(size_t min_size, size_t max_size) const {
+      return ::check_size_t<const T>(this->data.data(), this->data.size(), min_size, max_size);
+    }
+    template <typename T>
+    T& check_size_t(size_t min_size, size_t max_size) {
+      return ::check_size_t<T>(this->data.data(), this->data.size(), min_size, max_size);
+    }
+
+    template <typename T>
+    const T& check_size_t(size_t max_size) const {
+      return ::check_size_t<const T>(this->data.data(), this->data.size(), sizeof(T), max_size);
+    }
+    template <typename T>
+    T& check_size_t(size_t max_size) {
+      return ::check_size_t<T>(this->data.data(), this->data.size(), sizeof(T), max_size);
+    }
+
+    template <typename T>
+    const T& check_size_t() const {
+      return ::check_size_t<const T>(this->data.data(), this->data.size(), sizeof(T), sizeof(T));
+    }
+    template <typename T>
+    T& check_size_t() {
+      return ::check_size_t<T>(this->data.data(), this->data.size(), sizeof(T), sizeof(T));
+    }
   };
 
-  typedef void (*on_command_received_t)(Channel&, uint16_t, uint32_t, std::string&);
-  typedef void (*on_error_t)(Channel&, short);
+  virtual ~Channel() = default;
 
-  on_command_received_t on_command_received;
-  on_error_t on_error;
-  void* context_obj;
+  virtual std::string default_name() const = 0;
 
-  // Creates an unconnected channel
-  Channel(
-      Version version,
-      uint8_t language,
-      on_command_received_t on_command_received,
-      on_error_t on_error,
-      void* context_obj,
-      const std::string& name,
-      TerminalFormat terminal_send_color = TerminalFormat::END,
-      TerminalFormat terminal_recv_color = TerminalFormat::END);
-  // Creates a connected channel
-  Channel(
-      struct bufferevent* bev,
-      Version version,
-      uint8_t language,
-      on_command_received_t on_command_received,
-      on_error_t on_error,
-      void* context_obj,
-      const std::string& name = "",
-      TerminalFormat terminal_send_color = TerminalFormat::END,
-      TerminalFormat terminal_recv_color = TerminalFormat::END);
-  Channel(const Channel& other) = delete;
-  Channel(Channel&& other) = delete;
-  Channel& operator=(const Channel& other) = delete;
-  Channel& operator=(Channel&& other) = delete;
+  // Returns whether the channel is connected or not.
+  virtual bool connected() const = 0;
 
-  void replace_with(
-      Channel&& other,
-      on_command_received_t on_command_received,
-      on_error_t on_error,
-      void* context_obj,
-      const std::string& name = "");
-
-  void set_bufferevent(struct bufferevent* bev);
-
-  inline bool connected() const {
-    return this->bev.get() != nullptr;
-  }
-  void disconnect();
-
-  // Receives a message. Throws std::out_of_range if no messages are available.
-  Message recv();
+  // Disconnects the channel. Any pending data will still be sent before the underlying transport (e.g. socket) is
+  // closed, but further send calls will do nothing.
+  virtual void disconnect() = 0;
 
   // Sends a message with an automatically-constructed header.
   void send(uint16_t cmd, uint32_t flag = 0, bool silent = false);
@@ -91,12 +77,106 @@ struct Channel {
     this->send(cmd, flag, &data, sizeof(data), silent);
   }
 
-  // Sends a message with a pre-existing header (as the first few bytes in the
-  // data)
+  // Sends a message with a pre-existing header (as the first few bytes in the data)
   void send(const void* data, size_t size, bool silent = false);
   void send(const std::string& data, bool silent = false);
 
+  // Receives a message. Throws std::out_of_range if no messages are available.
+  asio::awaitable<Message> recv();
+
+protected:
+  Channel(
+      Version version,
+      Language language,
+      const std::string& name,
+      phosg::TerminalFormat terminal_send_color,
+      phosg::TerminalFormat terminal_recv_color,
+      bool censor_received_credentials,
+      bool censor_sent_credentials);
+  Channel(const Channel& other) = delete;
+  Channel(Channel&& other) = delete;
+  Channel& operator=(const Channel& other) = delete;
+  Channel& operator=(Channel&& other) = delete;
+
+  // Sends raw data on the underlying transport. If the channel is already disconnected, silently drops the data.
+  virtual void send_raw(std::string&& data) = 0;
+  // Receives raw data on the underlying transport. Raises when the channel is disconnected.
+  virtual asio::awaitable<void> recv_raw(void* data, size_t size) = 0;
+};
+
+// Standard channel type, used for most PSO clients. Represents an open TCP socket.
+class SocketChannel : public Channel, public std::enable_shared_from_this<SocketChannel> {
+public:
+  std::unique_ptr<asio::ip::tcp::socket> sock;
+  asio::ip::tcp::endpoint local_addr;
+  asio::ip::tcp::endpoint remote_addr;
+
+  // SocketChannel has a static constructor because it has an internal task, which is necessary to support flushing
+  // before disconnection (for example) and also to make send_raw not a coroutine, which keeps the rest of the code
+  // cleaner.
+  static std::shared_ptr<SocketChannel> create(std::shared_ptr<asio::io_context> io_context,
+      std::unique_ptr<asio::ip::tcp::socket>&& sock,
+      Version version,
+      Language language,
+      const std::string& name,
+      phosg::TerminalFormat terminal_send_color,
+      phosg::TerminalFormat terminal_recv_color,
+      bool censor_received_credentials,
+      bool censor_sent_credentials);
+
+  virtual std::string default_name() const;
+
+  virtual bool connected() const;
+  virtual void disconnect();
+
+  virtual void send_raw(std::string&& data);
+  virtual asio::awaitable<void> recv_raw(void* data, size_t size);
+
 private:
-  static void dispatch_on_input(struct bufferevent*, void* ctx);
-  static void dispatch_on_error(struct bufferevent*, short events, void* ctx);
+  SocketChannel(
+      std::shared_ptr<asio::io_context> io_context,
+      std::unique_ptr<asio::ip::tcp::socket>&& sock,
+      Version version,
+      Language language,
+      const std::string& name,
+      phosg::TerminalFormat terminal_send_color,
+      phosg::TerminalFormat terminal_recv_color,
+      bool censor_received_credentials,
+      bool censor_sent_credentials);
+
+  std::deque<std::string> outbound_data;
+  bool should_disconnect = false;
+  AsyncEvent send_buffer_nonempty_signal;
+
+  asio::awaitable<void> send_task();
+};
+
+// In-process peer channel, used for replay testing.
+class PeerChannel : public Channel {
+public:
+  std::weak_ptr<PeerChannel> peer;
+
+  PeerChannel(
+      std::shared_ptr<asio::io_context> io_context,
+      Version version,
+      Language language,
+      const std::string& name,
+      phosg::TerminalFormat terminal_send_color,
+      phosg::TerminalFormat terminal_recv_color,
+      bool censor_received_credentials,
+      bool censor_sent_credentials);
+
+  static void link_peers(std::shared_ptr<PeerChannel> peer1, std::shared_ptr<PeerChannel> peer2);
+
+  virtual std::string default_name() const;
+
+  virtual bool connected() const;
+  virtual void disconnect();
+
+  virtual void send_raw(std::string&& data);
+  virtual asio::awaitable<void> recv_raw(void* data, size_t size);
+
+private:
+  AsyncEvent send_buffer_nonempty_signal;
+  std::deque<std::string> inbound_data;
 };

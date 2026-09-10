@@ -10,30 +10,32 @@
 namespace Episode3 {
 
 struct MapState {
-  le_uint16_t width;
-  le_uint16_t height;
-  parray<parray<uint8_t, 0x10>, 0x10> tiles;
-  parray<parray<uint8_t, 6>, 2> start_tile_definitions;
+  /* 0000 */ le_uint16_t width = 0;
+  /* 0002 */ le_uint16_t height = 0;
+  /* 0004 */ parray<parray<uint8_t, 0x10>, 0x10> tiles;
+  /* 0104 */ parray<parray<uint8_t, 6>, 2> start_tile_definitions;
+  /* 0110 */
 
   MapState();
   void clear();
 
   void print(FILE* stream) const;
-} __attribute__((packed));
+} __packed_ws__(MapState, 0x110);
 
 struct MapAndRulesState {
-  MapState map;
-  uint8_t num_players;
-  uint8_t unused1;
-  uint8_t environment_number;
-  uint8_t num_players_per_team;
-  uint8_t num_team0_players;
-  uint8_t unused2;
-  le_uint16_t start_facing_directions;
-  uint32_t unused3;
-  le_uint32_t map_number;
-  uint32_t unused4;
-  Rules rules;
+  /* 0000 */ MapState map;
+  /* 0110 */ uint8_t num_players = 0;
+  /* 0111 */ uint8_t unused1 = 0;
+  /* 0112 */ uint8_t environment_number = 0;
+  /* 0113 */ uint8_t num_players_per_team = 0;
+  /* 0114 */ uint8_t num_team0_players = 0;
+  /* 0115 */ uint8_t unused2 = 0;
+  /* 0116 */ le_uint16_t start_facing_directions = 0;
+  /* 0118 */ be_uint32_t unknown_a3 = 0;
+  /* 011C */ le_uint32_t map_number = 0;
+  /* 0120 */ be_uint32_t unused4 = 0;
+  /* 0124 */ Rules rules;
+  /* 0138 */
 
   MapAndRulesState();
   void clear();
@@ -43,16 +45,26 @@ struct MapAndRulesState {
 
   void set_occupied_bit_for_tile(uint8_t x, uint8_t y);
   void clear_occupied_bit_for_tile(uint8_t x, uint8_t y);
-} __attribute__((packed));
+} __packed_ws__(MapAndRulesState, 0x138);
 
-struct OverlayState {
-  parray<parray<uint8_t, 0x10>, 0x10> tiles;
-  parray<le_uint32_t, 5> unused1;
-  parray<le_uint32_t, 0x10> unused2;
-  parray<le_uint16_t, 0x10> unused3;
+struct MapAndRulesStateTrial {
+  /* 0000 */ MapState map;
+  /* 0110 */ uint8_t num_players = 0;
+  /* 0111 */ uint8_t unused1 = 0;
+  /* 0112 */ uint8_t environment_number = 0;
+  /* 0113 */ uint8_t num_players_per_team = 0;
+  /* 0114 */ uint8_t num_team0_players = 0;
+  /* 0115 */ uint8_t unused2 = 0;
+  /* 0116 */ le_uint16_t unused5 = 0;
+  /* 0118 */ be_uint32_t unknown_a3 = 0;
+  /* 011C */ le_uint32_t map_number = 0;
+  /* 0120 */ be_uint32_t unused4 = 0;
+  /* 0124 */ RulesTrial rules;
+  /* 0130 */
 
-  OverlayState();
-  void clear();
-} __attribute__((packed));
+  MapAndRulesStateTrial() = default;
+  MapAndRulesStateTrial(const MapAndRulesState& state);
+  operator MapAndRulesState() const;
+} __packed_ws__(MapAndRulesStateTrial, 0x130);
 
 } // namespace Episode3

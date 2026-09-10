@@ -1,6 +1,5 @@
 #pragma once
 
-#include <event2/event.h>
 #include <stdint.h>
 
 #include <memory>
@@ -14,7 +13,7 @@
 
 struct Lobby;
 class Client;
-struct ServerState;
+class ServerState;
 
 namespace Episode3 {
 
@@ -33,23 +32,23 @@ public:
   };
 
   struct PlayerEntry {
-    // Invariant: (serial_number == 0) != (com_deck == nullptr)
+    // Invariant: (account_id == 0) != (com_deck == nullptr)
     // (that is, exactly one of the following must be valid)
-    uint32_t serial_number;
+    uint32_t account_id;
     std::shared_ptr<const COMDeckDefinition> com_deck;
 
-    // client is valid if serial_number is nonzero and the client is connected
+    // client is valid if account_id is nonzero and the client is connected
     std::weak_ptr<Client> client;
     std::string player_name; // Not used for COM decks
 
-    explicit PlayerEntry(uint32_t serial_number, const std::string& player_name = "");
+    explicit PlayerEntry(uint32_t account_id, const std::string& player_name = "");
     explicit PlayerEntry(std::shared_ptr<Client> c);
     explicit PlayerEntry(std::shared_ptr<const COMDeckDefinition> com_deck);
 
     bool is_com() const;
     bool is_human() const;
 
-    JSON json() const;
+    phosg::JSON json() const;
   };
 
   struct Team : public std::enable_shared_from_this<Team> {
@@ -63,17 +62,11 @@ public:
     size_t num_rounds_cleared;
     bool is_active;
 
-    Team(
-        std::shared_ptr<Tournament> tournament,
-        size_t index,
-        size_t max_players);
+    Team(std::shared_ptr<Tournament> tournament, size_t index, size_t max_players);
     std::string str() const;
 
-    void register_player(
-        std::shared_ptr<Client> c,
-        const std::string& team_name,
-        const std::string& password);
-    bool unregister_player(uint32_t serial_number);
+    void register_player(std::shared_ptr<Client> c, const std::string& team_name, const std::string& password);
+    bool unregister_player(uint32_t account_id);
 
     bool has_any_human_players() const;
     size_t num_human_players() const;
@@ -92,9 +85,7 @@ public:
         std::shared_ptr<Tournament> tournament,
         std::shared_ptr<Match> preceding_a,
         std::shared_ptr<Match> preceding_b);
-    Match(
-        std::shared_ptr<Tournament> tournament,
-        std::shared_ptr<Team> winner_team);
+    Match(std::shared_ptr<Tournament> tournament, std::shared_ptr<Team> winner_team);
     std::string str() const;
 
     bool resolve_if_skippable();
@@ -115,11 +106,11 @@ public:
   Tournament(
       std::shared_ptr<const MapIndex> map_index,
       std::shared_ptr<const COMDeckIndex> com_deck_index,
-      const JSON& json);
+      const phosg::JSON& json);
   ~Tournament() = default;
   void init();
 
-  JSON json() const;
+  phosg::JSON json() const;
 
   inline const std::string& get_name() const {
     return this->name;
@@ -152,24 +143,24 @@ public:
   std::shared_ptr<Team> get_winner_team() const;
   std::shared_ptr<Match> next_match_for_team(std::shared_ptr<Team> team) const;
   std::shared_ptr<Match> get_final_match() const;
-  std::shared_ptr<Team> team_for_serial_number(uint32_t serial_number) const;
-  const std::set<uint32_t>& get_all_player_serial_numbers() const;
+  std::shared_ptr<Team> team_for_account_id(uint32_t account_id) const;
+  const std::set<uint32_t>& get_all_player_account_ids() const;
 
   void start();
 
   void send_all_state_updates() const;
   void send_all_state_updates_on_deletion() const;
 
-  void print_bracket(FILE* stream) const;
+  std::string bracket_str() const;
 
 private:
   void create_bracket_matches();
 
-  PrefixedLogger log;
+  phosg::PrefixedLogger log;
 
   std::shared_ptr<const MapIndex> map_index;
   std::shared_ptr<const COMDeckIndex> com_deck_index;
-  JSON source_json;
+  phosg::JSON source_json;
   std::string name;
   std::shared_ptr<const MapIndex::Map> map;
   Rules rules;
@@ -178,17 +169,15 @@ private:
   State current_state;
   uint32_t menu_item_id;
 
-  std::set<uint32_t> all_player_serial_numbers;
+  std::set<uint32_t> all_player_account_ids;
   std::unordered_set<std::shared_ptr<Match>> pending_matches;
 
-  // This vector contains all teams in the original starting order of the
-  // tournament (that is, all teams in the first round). The order within this
-  // vector determines which team will play against which other team in the
-  // first round: [0] will play against [1], [2] will play against [3], etc.
+  // This vector contains all teams in the original starting order of the tournament (that is, all teams in the first
+  // round). The order within this vector determines which team will play against which other team in the first round:
+  // [0] will play against [1], [2] will play against [3], etc.
   std::vector<std::shared_ptr<Team>> teams;
-  // The tournament begins with a "zero round", in which each team automatically
-  // "wins" a match, putting them into the first round. This is just to make the
-  // data model easier to manage, so we don't have to have a type of match with
+  // The tournament begins with a "zero round", in which each team automatically "wins" a match, putting them into the
+  // first round. This is just to make the data model easier to manage, so we don't have to have a type of match with
   // no preceding round.
   std::vector<std::shared_ptr<Match>> zero_round_matches;
   std::shared_ptr<Match> final_match;
@@ -231,7 +220,7 @@ public:
       uint8_t flags);
   bool delete_tournament(const std::string& name);
 
-  std::shared_ptr<Tournament::Team> team_for_serial_number(uint32_t serial_number) const;
+  std::shared_ptr<Tournament::Team> team_for_account_id(uint32_t account_id) const;
 
   void link_client(std::shared_ptr<Client> c);
   void link_all_clients(std::shared_ptr<ServerState> s);

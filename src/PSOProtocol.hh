@@ -1,6 +1,5 @@
 #pragma once
 
-#include <event2/bufferevent.h>
 #include <inttypes.h>
 
 #include <functional>
@@ -13,19 +12,19 @@ struct PSOCommandHeaderPC {
   le_uint16_t size;
   uint8_t command;
   uint8_t flag;
-} __attribute__((packed));
+} __packed_ws__(PSOCommandHeaderPC, 4);
 
 struct PSOCommandHeaderDCV3 {
   uint8_t command;
   uint8_t flag;
   le_uint16_t size;
-} __attribute__((packed));
+} __packed_ws__(PSOCommandHeaderDCV3, 4);
 
 struct PSOCommandHeaderBB {
   le_uint16_t size;
   le_uint16_t command;
   le_uint32_t flag;
-} __attribute__((packed));
+} __packed_ws__(PSOCommandHeaderBB, 8);
 
 union PSOCommandHeader {
   PSOCommandHeaderDCV3 dc;
@@ -45,25 +44,18 @@ union PSOCommandHeader {
   }
 
   PSOCommandHeader();
-} __attribute__((packed));
+} __packed_ws__(PSOCommandHeader, 8);
 
-// This function is used in a lot of places to check received command sizes and
-// cast them to the appropriate type
+// This function is used in a lot of places to check received command sizes and cast them to the appropriate type
 template <typename RetT, typename PtrT>
-RetT& check_size_generic(
-    PtrT data,
-    size_t size,
-    size_t min_size,
-    size_t max_size) {
+RetT& check_size_generic(PtrT data, size_t size, size_t min_size, size_t max_size) {
   if (size < min_size) {
-    throw std::runtime_error(string_printf(
-        "command too small (expected at least 0x%zX bytes, received 0x%zX bytes)",
-        min_size, size));
+    throw std::runtime_error(std::format(
+        "command too small (expected at least 0x{:X} bytes, received 0x{:X} bytes)", min_size, size));
   }
   if (size > max_size) {
-    throw std::runtime_error(string_printf(
-        "command too large (expected at most 0x%zX bytes, received 0x%zX bytes)",
-        max_size, size));
+    throw std::runtime_error(std::format(
+        "command too large (expected at most 0x{:X} bytes, received 0x{:X} bytes)", max_size, size));
   }
   return *reinterpret_cast<RetT*>(data);
 }
@@ -120,11 +112,13 @@ T& check_size_t(void* data, size_t size) {
   return check_size_generic<T, void*>(data, size, sizeof(T), sizeof(T));
 }
 
+template <typename T>
+T* check_size_vec_t(std::string& data, size_t count, bool allow_extra = false) {
+  size_t expected_size = count * sizeof(T);
+  return &check_size_generic<T, void*>(data.data(), data.size(), expected_size, allow_extra ? 0xFFFF : expected_size);
+}
+
 void check_size_v(size_t size, size_t min_size, size_t max_size = 0);
 
 std::string prepend_command_header(
-    Version version,
-    bool encryption_enabled,
-    uint16_t cmd,
-    uint32_t flag,
-    const std::string& data);
+    Version version, bool encryption_enabled, uint16_t cmd, uint32_t flag, const std::string& data);

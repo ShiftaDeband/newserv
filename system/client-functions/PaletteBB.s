@@ -1,0 +1,205 @@
+# Original patch by Soly, in Blue Burst Patch Project
+# https://github.com/Solybum/Blue-Burst-Patch-Project
+
+.meta visibility="all"
+.meta key="Palette"
+.meta name="Palette"
+.meta description="Enables the alternate action\npalette for number keys"
+
+.versions 50YJ 59NJ 59NL
+
+entry_ptr:
+reloc0:
+  .data     start
+
+write_call_func:
+  .include  WriteCallToCode
+
+start:
+  mov       al, 0xEB
+  mov       [<VERS 0x0068515D 0x0068A7A5 0x0068A739>], al                  # SecondaryPaletteAttack1
+  xor       al, al
+  mov       [<VERS 0x0069B53B 0x006A11B7 0x006A114F>], al                  # SecondaryPaletteAttack2
+  mov       [<VERS 0x0069B047 0x006A0CB7 0x006A0C4F>], al                  # SecondaryPaletteAttack3
+
+  call      patch_func_1                      # GetCurrentPalette
+  call      patch_func_2                      # CheckHotkey1_1
+  call      patch_func_3                      # CheckHotkey1_2
+  call      patch_func_4                      # CheckHotkey2_1
+  call      patch_func_5                      # CheckHotkey2_2
+  call      patch_func_6                      # CheckHotkey3_1
+  call      patch_func_7                      # CheckHotkey3_2
+  jmp       write_code_blocks                 # UnsetHotkey1, UnsetHotkey2, SetHotkey
+
+# GetCurrentPalette
+patch_func_1:
+  pop       ecx
+  push      8
+  push      <VERS 0x0074196B 0x00748990 0x00748944>
+  push      patch_code_end1 - patch_code1
+  call      patch_code_end1
+patch_code1:
+  mov       edx, [ebp - 0x14]
+  mov       edx, [edx + 0x2C]
+  movzx     edx, byte [edx + 0x62]
+  test      edx, edx
+  setnz     byte [<VERS 0x00741B59 0x00748B1B 0x00748ACF>]
+  mov       edx, edi
+  and       edx, 0xFF
+  ret
+patch_code_end1:
+  push      ecx
+  jmp       write_call_func
+
+# CheckHotkey1_1
+patch_func_2:
+  pop       ecx
+  push      5
+  push      <VERS 0x007419B9 0x007489DE 0x00748992>
+  push      patch_code_end2 - patch_code2
+  call      patch_code_end2
+patch_code2:
+  cmp       byte [<VERS 0x00741B59 0x00748B1B 0x00748ACF>], 0
+  jnz       +0x06
+  movzx     edx, byte [eax + esi * 4 + 0x04]  # main palette
+  ret
+  movzx     edx, byte [eax + esi * 4 + 0x3C]  # alt palette
+  ret
+patch_code_end2:
+  push      ecx
+  jmp       write_call_func
+
+# CheckHotkey1_2
+patch_func_3:
+  pop       ecx
+  push      5
+  push      <VERS 0x007419C8 0x007489ED 0x007489A1>
+  push      patch_code_end3 - patch_code3
+  call      patch_code_end3
+patch_code3:
+  cmp       byte [<VERS 0x00741B59 0x00748B1B 0x00748ACF>], 0
+  jnz       +0x06
+  movzx     ecx, byte [eax + ecx * 2 + 0x05]  # main palette
+  ret
+  movzx     ecx, byte [eax + ecx * 2 + 0x3D]  # alt palette
+  ret
+patch_code_end3:
+  push      ecx
+  jmp       write_call_func
+
+# CheckHotkey2_1
+patch_func_4:
+  pop       ecx
+  push      5
+  push      <VERS 0x00741A63 0x00748A88 0x00748A3C>
+  push      patch_code_end4 - patch_code4
+  call      patch_code_end4
+patch_code4:
+  cmp       byte [<VERS 0x00741B59 0x00748B1B 0x00748ACF>], 0
+  jnz       +0x06
+  movzx     edx, byte [edx + ebx * 4 + 0x04]  # main palette
+  ret
+  movzx     edx, byte [edx + ebx * 4 + 0x3C]  # alt palette
+  ret
+patch_code_end4:
+  push      ecx
+  jmp       write_call_func
+
+# CheckHotkey2_2
+patch_func_5:
+  pop       ecx
+  push      5
+  push      <VERS 0x00741A72 0x00748A97 0x00748A4B>
+  push      patch_code_end5 - patch_code5
+  call      patch_code_end5
+patch_code5:
+  cmp       byte [<VERS 0x00741B59 0x00748B1B 0x00748ACF>], 0
+  jnz       +0x06
+  movzx     ecx, byte [edx + eax * 2 + 0x05]  # main palette
+  ret
+  movzx     ecx, byte [edx + eax * 2 + 0x3D]  # alt palette
+  ret
+patch_code_end5:
+  push      ecx
+  jmp       write_call_func
+
+# CheckHotkey3_1
+patch_func_6:
+  pop       ecx
+  push      5
+  push      <VERS 0x0070A11F 0x007103D3 0x007103B7>
+  push      patch_code_end6 - patch_code6
+  call      patch_code_end6
+patch_code6:
+  cmp       byte [<VERS 0x00741B59 0x00748B1B 0x00748ACF>], 0
+  jnz       +0x06
+  movzx     ecx, byte [eax + edx * 4 + 0x04]  # main palette
+  ret
+  movzx     ecx, byte [eax + edx * 4 + 0x3C]  # alt palette
+  ret
+patch_code_end6:
+  push      ecx
+  jmp       write_call_func
+
+# CheckHotkey3_2
+patch_func_7:
+  pop       ecx
+  push      5
+  push      <VERS 0x0070A128 0x007103DC 0x007103C0>
+  push      patch_code_end7 - patch_code7
+  call      patch_code_end7
+patch_code7:
+  cmp       byte [<VERS 0x00741B59 0x00748B1B 0x00748ACF>], 0
+  jnz       +0x06
+  movzx     ecx, byte [eax + edx * 4 + 0x05]  # main palette
+  ret
+  movzx     ecx, byte [eax + edx * 4 + 0x3D]  # alt palette
+  ret
+patch_code_end7:
+  push      ecx
+  jmp       write_call_func
+
+write_code_blocks:
+  .include  WriteCodeBlocks
+
+# UnsetHotkey1
+  .data     <VERS 0x007419E0 0x00748A05 0x007489B9>
+  .data     code_block1_end - code_block1_start
+code_block1_start:
+  push      dword [<VERS 0x00741B59 0x00748B1B 0x00748ACF>]
+  push      eax
+  mov       eax, <VERS 0x00687710 0x0068CE4C 0x0068CDE0>                   # SetPaletteHotkey
+  call      eax
+  .binary   909090909090909090
+code_block1_end:
+
+# UnsetHotkey2
+  .data     <VERS 0x00741A86 0x00748AAB 0x00748A5F>
+  .data     code_block2_end - code_block2_start
+code_block2_start:
+  push      dword [<VERS 0x00741B59 0x00748B1B 0x00748ACF>]
+  push      eax
+  mov       eax, <VERS 0x00687710 0x0068CE4C 0x0068CDE0>                   # SetPaletteHotkey
+  call      eax
+  .binary   909090909090909090
+code_block2_end:
+
+# SetHotkey
+  .data     <VERS 0x00741B48 0x00748B0A 0x00748ABE>
+  .data     code_block3_end - code_block3_start
+code_block3_start:
+  mov       eax, [ebp - 0x24]
+  mov       ecx, [ebp - 0x28]
+  movzx     ebx, word [eax]
+  movzx     edx, word [eax + 0x02]
+  push      edx
+  push      ebx
+  push      esi
+  .binary   6800000000                        # tmpCurrentPalette = <VERS 0x00741B59 0x00748B1B 0x00748ACF>
+  push      0
+  mov       eax, <VERS 0x00687710 0x0068CE4C 0x0068CDE0>                   # SetPaletteHotkey
+  call      eax
+  .binary   90909090909090909090909090909090
+code_block3_end:
+  .data     0x00000000
+  .data     0x00000000

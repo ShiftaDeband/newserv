@@ -1,6 +1,5 @@
 #pragma once
 
-#include <event2/event.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -14,18 +13,18 @@
 
 class ReplaySession {
 public:
-  ReplaySession(
-      std::shared_ptr<struct event_base> base,
-      FILE* input_log,
-      std::shared_ptr<ServerState> state,
-      bool require_basic_credentials);
+  ReplaySession(std::shared_ptr<ServerState> state, FILE* input_log);
   ReplaySession(const ReplaySession&) = delete;
   ReplaySession(ReplaySession&&) = delete;
   ReplaySession& operator=(const ReplaySession&) = delete;
   ReplaySession& operator=(ReplaySession&&) = delete;
   ~ReplaySession() = default;
 
-  void start();
+  asio::awaitable<void> run();
+
+  inline std::string failure_str() const {
+    return this->failure;
+  }
 
 private:
   struct Event {
@@ -36,64 +35,52 @@ private:
       RECEIVE,
     };
     Type type;
-    uint64_t client_id;
+    size_t event_number = 0;
+    size_t next_event_number = 0;
+    uint64_t client_id = 0;
     std::string data; // Only used for SEND and RECEIVE
     std::string mask; // Only used for RECEIVE
-    bool allow_size_disparity;
-    bool complete;
-    size_t line_num;
+    bool allow_size_disparity = false;
+    bool complete = false;
+    size_t line_num = 0;
 
-    std::shared_ptr<Event> next_event;
-
-    Event(Type type, uint64_t client_id, size_t line_num);
+    Event(Type type, size_t event_number, uint64_t client_id, size_t line_num);
 
     std::string str() const;
   };
 
   struct Client {
-    uint64_t id;
-    uint16_t port;
-    Version version;
-    Channel channel;
-    std::deque<std::shared_ptr<Event>> receive_events;
-    std::shared_ptr<Event> disconnect_event;
+    uint64_t id = 0;
+    uint16_t port = 0;
+    Version version = Version::UNKNOWN;
+    std::shared_ptr<PeerChannel> channel;
+    std::deque<size_t> pending_receive_event_numbers;
+    size_t disconnect_event_number = 0;
 
-    Client(ReplaySession* session, uint64_t id, uint16_t port, Version version);
+    Client(std::shared_ptr<asio::io_context> io_context, uint64_t id, uint16_t port, Version version);
 
     std::string str() const;
   };
 
   std::shared_ptr<ServerState> state;
-  bool require_basic_credentials;
+  bool use_psov2_rand_crypt = false;
+  bool use_legacy_item_random_behavior = false;
 
   std::unordered_map<uint64_t, std::shared_ptr<Client>> clients;
-  std::unordered_map<Channel*, std::shared_ptr<Client>> channel_to_client;
 
-  std::shared_ptr<Event> first_event;
-  std::shared_ptr<Event> last_event;
+  std::map<size_t, Event> events;
 
-  std::shared_ptr<struct event_base> base;
-  std::shared_ptr<struct event> timeout_ev;
+  size_t commands_sent = 0;
+  size_t bytes_sent = 0;
+  size_t commands_received = 0;
+  size_t bytes_received = 0;
 
-  size_t commands_sent;
-  size_t bytes_sent;
-  size_t commands_received;
-  size_t bytes_received;
+  asio::steady_timer idle_timeout_timer;
+  std::string failure;
 
-  std::shared_ptr<ReplaySession::Event> create_event(
-      Event::Type type, std::shared_ptr<Client> c, size_t line_num);
-  void update_timeout_event();
+  ReplaySession::Event& create_event(Event::Type type, std::shared_ptr<Client> c, size_t line_num);
 
-  void apply_default_mask(std::shared_ptr<Event> ev);
-  void check_for_password(std::shared_ptr<const Event> ev) const;
+  void apply_default_mask(Event& ev) const;
 
-  static void dispatch_on_timeout(evutil_socket_t fd, short events, void* ctx);
-  static void dispatch_on_command_received(
-      Channel& ch, uint16_t command, uint32_t flag, std::string& data);
-  static void dispatch_on_error(Channel& ch, short events);
-  void on_command_received(
-      std::shared_ptr<Client> c, uint16_t command, uint32_t flag, std::string& data);
-  void on_error(std::shared_ptr<Client> c, short events);
-
-  void execute_pending_events();
+  void reschedule_idle_timeout();
 };

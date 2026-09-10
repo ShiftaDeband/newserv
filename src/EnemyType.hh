@@ -3,16 +3,25 @@
 #include <inttypes.h>
 
 #include <phosg/Tools.hh>
+#include <set>
 
 #include "StaticGameData.hh"
+#include "Types.hh"
 
-enum class EnemyType {
-  UNKNOWN = -1,
-  NONE = 0,
+// We don't know what the actual maximum was, since it was presumably only stored server-side on Sega's servers. The
+// client uses values up to 0x6C (Kondrieu), so we just choose a value larger than that.
+static constexpr size_t NUM_RT_INDEXES_V3 = 0x64;
+static constexpr size_t NUM_RT_INDEXES_V4 = 0x70;
+
+enum class EnemyType : uint8_t {
+  MIN_VALUE = 0,
+  UNKNOWN = 0,
+  NONE,
   NON_ENEMY_NPC,
   AL_RAPPY,
   ASTARK,
   BA_BOOTA,
+  BARBA_RAY_JOINT,
   BARBA_RAY,
   BARBAROUS_WOLF,
   BEE_L,
@@ -20,8 +29,9 @@ enum class EnemyType {
   BOOMA,
   BOOTA,
   BULCLAW,
-  CANADINE,
+  BULK,
   CANADINE_GROUP,
+  CANADINE,
   CANANE,
   CHAOS_BRINGER,
   CHAOS_SORCERER,
@@ -30,32 +40,32 @@ enum class EnemyType {
   DARK_FALZ_1,
   DARK_FALZ_2,
   DARK_FALZ_3,
+  DARK_GUNNER_CONTROL,
   DARK_GUNNER,
   DARVANT,
-  DARVANT_ULTIMATE,
-  DE_ROL_LE,
   DE_ROL_LE_BODY,
   DE_ROL_LE_MINE,
+  DE_ROL_LE,
   DEATH_GUNNER,
   DEL_LILY,
-  DEL_RAPPY,
-  DEL_RAPPY_ALT,
+  DEL_RAPPY_CRATER,
+  DEL_RAPPY_DESERT,
   DELBITER,
   DELDEPTH,
   DELSABER,
   DIMENIAN,
   DOLMDARL,
   DOLMOLM,
-  DORPHON,
   DORPHON_ECLAIR,
+  DORPHON,
   DRAGON,
   DUBCHIC,
   DUBWITCH, // Has no entry in battle params
   EGG_RAPPY,
-  EPSIGUARD,
+  EPSIGARD,
   EPSILON,
   EVIL_SHARK,
-  GAEL,
+  GAEL_OR_GIEL,
   GAL_GRYPHON,
   GARANZ,
   GEE,
@@ -66,8 +76,8 @@ enum class EnemyType {
   GIRTABLULU,
   GOBOOMA,
   GOL_DRAGON,
-  GORAN,
   GORAN_DETONATOR,
+  GORAN,
   GRASS_ASSASSIN,
   GUIL_SHARK,
   HALLO_RAPPY,
@@ -75,9 +85,11 @@ enum class EnemyType {
   HILDEBEAR,
   HILDEBLUE,
   ILL_GILL,
+  KONDRIEU_SPINNER,
   KONDRIEU,
   LA_DIMENIAN,
   LOVE_RAPPY,
+  MERICARAND,
   MERICAROL,
   MERICUS,
   MERIKLE,
@@ -95,23 +107,25 @@ enum class EnemyType {
   OLGA_FLOW_2,
   PAL_SHARK,
   PAN_ARMS,
-  PAZUZU,
-  PAZUZU_ALT,
+  PAZUZU_CRATER,
+  PAZUZU_DESERT,
   PIG_RAY,
   POFUILLY_SLIME,
-  POUILLY_SLIME,
   POISON_LILY,
+  POUILLY_SLIME,
   PYRO_GORAN,
   RAG_RAPPY,
   RECOBOX,
   RECON,
-  SAINT_MILLION,
+  SAINT_MILION_SPINNER,
+  SAINT_MILION,
   SAINT_RAPPY,
-  SAND_RAPPY,
-  SAND_RAPPY_ALT,
-  SATELLITE_LIZARD,
-  SATELLITE_LIZARD_ALT,
+  SAND_RAPPY_CRATER,
+  SAND_RAPPY_DESERT,
+  SATELLITE_LIZARD_CRATER,
+  SATELLITE_LIZARD_DESERT,
   SAVAGE_WOLF,
+  SHAMBERTIN_SPINNER,
   SHAMBERTIN,
   SINOW_BEAT,
   SINOW_BERILL,
@@ -121,27 +135,74 @@ enum class EnemyType {
   SINOW_ZOA,
   SO_DIMENIAN,
   UL_GIBBON,
+  UL_RAY,
   VOL_OPT_1,
   VOL_OPT_2,
   VOL_OPT_AMP,
   VOL_OPT_CORE,
   VOL_OPT_MONITOR,
   VOL_OPT_PILLAR,
-  YOWIE,
-  YOWIE_ALT,
+  YOWIE_CRATER,
+  YOWIE_DESERT,
   ZE_BOOTA,
   ZOL_GIBBON,
-  ZU,
-  ZU_ALT,
-  MAX_ENEMY_TYPE,
+  ZU_CRATER,
+  ZU_DESERT,
+  MAX_VALUE,
 };
 
-template <>
-const char* name_for_enum<EnemyType>(EnemyType type);
-template <>
-EnemyType enum_for_name<EnemyType>(const char* name);
+struct EnemyTypeDefinition {
+  enum Flag : uint8_t {
+    VALID_EP1 = 0x01,
+    VALID_EP2 = 0x02,
+    VALID_EP4 = 0x04,
+    IS_RARE = 0x08,
+    IS_BOSS = 0x10,
+  };
+  EnemyType type;
+  uint8_t flags;
+  uint8_t rt_index; // 0xFF if not valid (e.g. not an enemy, or has no drops)
+  uint8_t legacy_rt_index; // Index used by Schtserv in their Ep4 .rel format
+  std::vector<uint8_t> bp_stats_indexes;
+  std::vector<uint8_t> bp_attack_data_indexes;
+  std::vector<uint8_t> bp_resist_data_indexes;
+  std::vector<uint8_t> bp_movement_data_indexes;
+  // Note: movement data isn't bound as strongly to the enemy types; some enemies use many entries and some use none at
+  // all, so we don't list them here. See notes/movement-data.txt for a listing of which enemies use which entries.
+  const char* enum_name;
+  const char* in_game_name;
+  const char* ultimate_name; // May be null if same as in_game_name
 
-bool enemy_type_valid_for_episode(Episode episode, EnemyType enemy_type);
-uint8_t battle_param_index_for_enemy_type(Episode episode, EnemyType enemy_type);
-uint8_t rare_table_index_for_enemy_type(EnemyType enemy_type);
+  inline bool valid_in_episode(Episode ep) const {
+    switch (ep) {
+      case Episode::EP1:
+        return (this->flags & Flag::VALID_EP1);
+      case Episode::EP2:
+        return (this->flags & Flag::VALID_EP2);
+      case Episode::EP4:
+        return (this->flags & Flag::VALID_EP4);
+      default:
+        throw std::logic_error("invalid episode number");
+    }
+  }
+  inline bool is_rare() const {
+    return (this->flags & Flag::IS_RARE);
+  }
+  inline bool is_boss() const {
+    return (this->flags & Flag::IS_BOSS);
+  }
+  EnemyType rare_type(uint8_t area, uint8_t event) const;
+};
+
+const EnemyTypeDefinition& type_definition_for_enemy(EnemyType type);
+
+template <>
+const char* phosg::name_for_enum<EnemyType>(EnemyType type);
+template <>
+EnemyType phosg::enum_for_name<EnemyType>(const char* name);
+
 const std::vector<EnemyType>& enemy_types_for_rare_table_index(Episode episode, uint8_t rt_index);
+const std::set<EnemyType>& enemy_types_for_battle_param_stats_index(Episode episode, uint8_t bp_index);
+const std::set<EnemyType>& enemy_types_for_battle_param_attack_data_index(Episode episode, uint8_t bp_index);
+const std::set<EnemyType>& enemy_types_for_battle_param_resist_data_index(Episode episode, uint8_t bp_index);
+const std::set<EnemyType>& enemy_types_for_battle_param_movement_data_index(Episode episode, uint8_t bp_index);

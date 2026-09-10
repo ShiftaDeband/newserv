@@ -5,49 +5,48 @@
 #include <stdexcept>
 
 #include "Text.hh"
+#include "Types.hh"
 
-using namespace std;
-
-template <bool IsBigEndian>
-struct BMLHeader {
-  using U32T = typename std::conditional<IsBigEndian, be_uint32_t, le_uint32_t>::type;
-
+template <bool BE>
+struct BMLHeaderT {
   parray<uint8_t, 0x04> unknown_a1;
-  U32T num_entries;
+  U32T<BE> num_entries;
   parray<uint8_t, 0x38> unknown_a2;
-} __attribute__((packed));
+} __packed_ws_be__(BMLHeaderT, 0x40);
+using BMLHeader = BMLHeaderT<false>;
+using BMLHeaderBE = BMLHeaderT<true>;
 
-template <bool IsBigEndian>
-struct BMLHeaderEntry {
-  using U32T = typename std::conditional<IsBigEndian, be_uint32_t, le_uint32_t>::type;
-
+template <bool BE>
+struct BMLHeaderEntryT {
   pstring<TextEncoding::ASCII, 0x20> filename;
-  U32T compressed_size;
+  U32T<BE> compressed_size;
   parray<uint8_t, 0x04> unknown_a1;
-  U32T decompressed_size;
-  U32T compressed_gvm_size;
-  U32T decompressed_gvm_size;
+  U32T<BE> decompressed_size;
+  U32T<BE> compressed_gvm_size;
+  U32T<BE> decompressed_gvm_size;
   parray<uint8_t, 0x0C> unknown_a2;
-} __attribute__((packed));
+} __packed_ws_be__(BMLHeaderEntryT, 0x40);
+using BMLHeaderEntry = BMLHeaderEntryT<false>;
+using BMLHeaderEntryBE = BMLHeaderEntryT<true>;
 
-template <bool IsBigEndian>
+template <bool BE>
 void BMLArchive::load_t() {
-  StringReader r(*this->data);
+  phosg::StringReader r(*this->data);
 
-  const auto& header = r.get<BMLHeader<IsBigEndian>>();
+  const auto& header = r.get<BMLHeaderT<BE>>();
 
   size_t offset = 0x800;
   while (this->entries.size() < header.num_entries) {
-    const auto& entry = r.get<BMLHeaderEntry<IsBigEndian>>();
+    const auto& entry = r.get<BMLHeaderEntryT<BE>>();
 
     if (offset + entry.compressed_size > this->data->size()) {
-      throw runtime_error("BML data entry extends beyond end of data");
+      throw std::runtime_error("BML data entry extends beyond end of data");
     }
     size_t data_offset = offset;
     offset = (offset + entry.compressed_size + 0x1F) & (~0x1F);
 
     if (offset + entry.compressed_gvm_size > this->data->size()) {
-      throw runtime_error("BML GVM entry extends beyond end of data");
+      throw std::runtime_error("BML GVM entry extends beyond end of data");
     }
     size_t gvm_offset = offset;
     offset = (offset + entry.compressed_gvm_size + 0x1F) & (~0x1F);
@@ -56,8 +55,7 @@ void BMLArchive::load_t() {
   }
 }
 
-BMLArchive::BMLArchive(shared_ptr<const string> data, bool big_endian)
-    : data(data) {
+BMLArchive::BMLArchive(std::shared_ptr<const std::string> data, bool big_endian) : data(data) {
   if (big_endian) {
     this->load_t<true>();
   } else {
@@ -65,42 +63,42 @@ BMLArchive::BMLArchive(shared_ptr<const string> data, bool big_endian)
   }
 }
 
-const unordered_map<string, BMLArchive::Entry> BMLArchive::all_entries() const {
+const std::unordered_map<std::string, BMLArchive::Entry> BMLArchive::all_entries() const {
   return this->entries;
 }
 
-pair<const void*, size_t> BMLArchive::get(const std::string& name) const {
+std::pair<const void*, size_t> BMLArchive::get(const std::string& name) const {
   try {
     const auto& entry = this->entries.at(name);
-    return make_pair(this->data->data() + entry.offset, entry.size);
-  } catch (const out_of_range&) {
-    throw out_of_range("BML does not contain file: " + name);
+    return std::make_pair(this->data->data() + entry.offset, entry.size);
+  } catch (const std::out_of_range&) {
+    throw std::out_of_range("BML does not contain file: " + name);
   }
 }
 
-pair<const void*, size_t> BMLArchive::get_gvm(const std::string& name) const {
+std::pair<const void*, size_t> BMLArchive::get_gvm(const std::string& name) const {
   try {
     const auto& entry = this->entries.at(name);
-    return make_pair(this->data->data() + entry.gvm_offset, entry.gvm_size);
-  } catch (const out_of_range&) {
-    throw out_of_range("BML does not contain file: " + name);
+    return std::make_pair(this->data->data() + entry.gvm_offset, entry.gvm_size);
+  } catch (const std::out_of_range&) {
+    throw std::out_of_range("BML does not contain file: " + name);
   }
 }
 
-string BMLArchive::get_copy(const string& name) const {
+std::string BMLArchive::get_copy(const std::string& name) const {
   try {
     const auto& entry = this->entries.at(name);
     return this->data->substr(entry.offset, entry.size);
-  } catch (const out_of_range&) {
-    throw out_of_range("BML does not contain file: " + name);
+  } catch (const std::out_of_range&) {
+    throw std::out_of_range("BML does not contain file: " + name);
   }
 }
 
-StringReader BMLArchive::get_reader(const string& name) const {
+phosg::StringReader BMLArchive::get_reader(const std::string& name) const {
   try {
     const auto& entry = this->entries.at(name);
-    return StringReader(this->data->data() + entry.offset, entry.size);
-  } catch (const out_of_range&) {
-    throw out_of_range("BML does not contain file: " + name);
+    return phosg::StringReader(this->data->data() + entry.offset, entry.size);
+  } catch (const std::out_of_range&) {
+    throw std::out_of_range("BML does not contain file: " + name);
   }
 }

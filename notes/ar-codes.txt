@@ -1,266 +1,1161 @@
-(Ep1&2 USA) Unlock all songs in BGM test
-(Note: sadly, there are no secret/unused ones)
-04368960 38600001
-04368964 4E800020
+This file contains client patches I've made for various versions of PSO.
 
-(Ep1&2 USA v1.01) Play lobby (and event) music on Pioneer 2 also
-0417E0F0 60000000
+Places to find more codes/patches:
+- GC-Forever: https://www.gc-forever.com/forums/viewtopic.php?t=2050 (3OE0, 3OE2)
+- GC-Forever: https://www.gc-forever.com/forums/viewtopic.php?t=2049 (3OP0)
+- BB Patch Project: https://github.com/Solybum/Blue-Burst-Patch-Project (59NL)
 
-(Ep3 USA) Play lobby (and event) music in Morgue also
-040B7028 60000000
+Version codes (from README.md):
+  1OJ1: PSO DC Network Trial Edition
+  1OJ2: PSO DC 11/2000 prototype
+  1OJ3: PSO DC 12/2000 prototype
+  1OJ4: PSO DC 01/2001 prototype
+  1OJF: PSO DC v1 JP
+  1OEF: PSO DC v1 US
+  1OPF: PSO DC v1 EU
+  2OJ4: PSO DC 08/2001 prototype
+  2OJ5: PSO DC 08/2001 prototype
+  2OJF: PSO DC v2 JP
+  2OEF: PSO DC v2 US
+  2OPF: PSO DC v2 EU
+  2OJT: PSO PC Trial Edition
+  2OJW: PSO PC (v2) 04/2002
+  2OJZ: PSO PC (v2) 02/2003
+  3OJT: PSO GC Trial Edition
+  3OJ2: PSO GC v1.2 JP
+  3OJ3: PSO GC v1.3 JP
+  3OJ4: PSO GC v1.4 (Plus) JP
+  3OJ5: PSO GC v1.5 (Plus) JP
+  3OE0: PSO GC v1.0 US
+  3OE1: PSO GC v1.1 US
+  3OE2: PSO GC v1.2 (Plus) US
+  3OP0: PSO GC v1.0 EU
+  3SJT: PSO GC Ep3 Trial Edition
+  3SJ0: PSO GC Ep3 JP
+  3SE0: PSO GC Ep3 US
+  3SP0: PSO GC Ep3 EU
+  4OJB: PSO Xbox Beta
+  4OJD: PSO Xbox JP Disc
+  4OJU: PSO Xbox JP TU
+  4OED: PSO Xbox US Disc
+  4OEU: PSO Xbox US TU
+  4OPD: PSO Xbox EU Disc
+  4OPU: PSO Xbox EU TU
+  50YJ: PSO BB US 1.24.3
+  59NJ: PSO BB JP 1.25.11
+  59NL: PSO BB JP 1.25.13 (including the Tethealla client)
 
-(Ep3 USA) Skip white logo screens during startup
-0409D774 38000007
-(Episodes 1&2 USA v1.01) Skip white logo screens during startup
-0413F190 38000007
+The menu code
+This code makes all disabled items in menus selectable, which allows you to e.g. use items you can't normally use
+3OJ2 => 04263B80 48000028
+        042AC548 48000020
+3OJ3 => 04264758 48000028
+        042AD3F0 48000020
+3OJ4 => 042657B4 48000028
+        042AE51C 48000020
+3OJ5 => 04265554 48000028
+        042AE2D0 48000020
+3OE0 => 04264458 48000028
+        042ACF04 48000020
+3OE1 => 04264458 48000028
+        042ACF48 48000020
+3OE2 => 04265818 48000028
+        042AE484 48000020
+3OP0 => 04265060 48000028
+        042ADC18 48000020
+3SJT => 0417ADD0 48000028
+3SJ0 => 0416B5A4 48000028
+3SE0 => 0416B458 48000028
+3SP0 => 0416B904 48000028
 
-(Ep3 USA) Skip agreement prompts before online game
-041B50C8 38000003
-(Episodes 1&2 USA v1.01) Skip agreement prompt before online game
-04327D80 38000003
+Disable serial number validation (untested)
+2OEF => 8C1E743E 01E0
+        8C2670B6 01E0
 
-(Ep3 USA) Disable rate limit for pressing A during loading screens
-042F9B30 38000000
+Disable item equip restrictions ("God of equip")
+3OE0 => 0410521C 38000005
+3OE1 => 0410521C 38000005
+3OE2 => 041050E4 38000005
+3OJ2 => 04104F78 38000005
+3OJ3 => 04105154 38000005
+3OJ4 => 04105240 38000005
+3OJ5 => 041050D4 38000005
+3OJT => 0415BF50 38000005
+3OP0 => 041052D4 38000005
+50YJ => 005C8C8F E9A7000000
+59NJ => 005C9F35 E9A7000000
+59NL => 005C9F31 E9A7000000
 
-(Ep3 USA) Auto-press A as fast as possible during loading screens
-042F9AC0 60000000
+All items visible in Pioneer 2
+3OE1 => 04102D88 38600000
 
-(Ep3 USA) Replace loading screen A button sounds with random sounds
-042F9B18 4804BB19
-042F9B1C 5463063E
-042F9B20 60631400
-042F9B24 64630005
-042F9B28 38800000
+Mags visible in Pioneer 2
+50YJ => 005D7053 EB04
+59NJ => 005D8F27 EB04
+59NL => 005D8F4B EB04
 
-(Ep3 USA) Change color of loading screens
-(Replace AA, RR, GG, BB appropriately)
-042FA704 3CC0AARR
-042FA708 60C6GGBB
+Disable pause menu background + offset
+3OE1 => 0424BD5C 48000370
+        0428735C 4800000C
+3OE2 => 0424CED8 48000370
+        042887D8 4800000C
+50YJ => 00713758 9090
+        0072D417 9090
+        0072D27E 90E9
+59NJ => 00719C58 9090
+        00733C57 9090
+        00733ABE 90E9
+59NL => 00719B54 9090
+        00733BA7 9090
+        00733A0E 90E9
 
-(Ep3 USA) Use 16:9 aspect ratio
-04383DC8 4BC87F99
-0400BD60 C042DED0
-0400BD64 EC5D00B2
-0400BD68 4E800020
+All rareable enemies are rare
+3OE0 => 040AC944 60000000 // Hildeblue
+        040C1B70 60000000 // Rappies
+        040C3FC8 60000000 // Nar Lily
+        040EB050 48000010 // Pouilly Slime
+3OE1 => 040AC944 60000000 // Hildeblue
+        040C1B70 60000000 // Rappies
+        040C3FC8 60000000 // Nar Lily
+        040EB050 48000010 // Pouilly Slime
+3OE2 => 040ACAFC 60000000 // Hildeblue
+        040C1D08 60000000 // Rappies
+        040C4160 60000000 // Nar Lily
+        040EB1E8 48000010 // Pouilly Slime
+3OJ2 => 040AC6B8 60000000 // Hildeblue
+        040C18CC 60000000 // Rappies
+        040C3D24 60000000 // Nar Lily
+        040EADAC 48000010 // Pouilly Slime
+3OJ3 => 040AC9C4 60000000 // Hildeblue
+        040C1BD0 60000000 // Rappies
+        040C4028 60000000 // Nar Lily
+        040EB0B0 48000010 // Pouilly Slime
+3OJ4 => 040ACB3C 60000000 // Hildeblue
+        040C1E04 60000000 // Rappies
+        040C41A0 60000000 // Nar Lily
+        040EB374 48000010 // Pouilly Slime
+3OJ5 => 040ACAEC 60000000 // Hildeblue
+        040C1CF8 60000000 // Rappies
+        040C4150 60000000 // Nar Lily
+        040EB1D8 48000010 // Pouilly Slime
+3OP0 => 040ACAC4 60000000 // Hildeblue
+        040C1CD0 60000000 // Rappies
+        040C4128 60000000 // Nar Lily
+        040EB1B0 48000010 // Pouilly Slime
 
-(Ep3 USA) Disable darkening effect during battle details mode
-042F951C 4E800020
+Unlock all songs in BGM test
+Note: sadly, there are no secret/unused ones
+3OJ2 => 04367A68 38600001
+        04367A6C 4E800020
+3OJ3 => 04368ED8 38600001
+        04368EDC 4E800020
+3OJ4 => 0436A434 38600001
+        0436A438 4E800020
+3OJ5 => 0436A1E8 38600001
+        0436A1EC 4E800020
+3OE0 => 0436891C 38600001
+        04368920 4E800020
+3OE1 => 04368960 38600001
+        04368964 4E800020
+3OE2 => 0436A5B4 38600001
+        0436A5B8 4E800020
+3OP0 => 043699A8 38600001
+        043699AC 4E800020
+3SJT => 041EA948 38600001
+        041EA94C 4E800020
+3SJ0 => 041D8CF0 38600001
+        041D8CF4 4E800020
+3SE0 => 041D8D7C 38600001
+        041D8D80 4E800020
+3SP0 => 041D93F0 38600001
+        041D93F4 4E800020
 
-(Ep3 USA) Unlock all COM decks
-042CA908 38600001
+Play lobby (and event) music in Morgue also
+3OJ2 => 0417DD34 60000000
+3OJ3 => 0417E0E8 60000000
+3OJ4 => 0417E24C 60000000
+3OJ5 => 0417E1AC 60000000
+3OE0 => 0417E0F0 60000000
+3OE1 => 0417E0F0 60000000
+3OE2 => 0417E210 60000000
+3OP0 => 0417E6D4 60000000
+3SJT => 040B8C7C 60000000
+3SE0 => 040B7028 60000000
+3SJ0 => 040B7044 60000000
+3SP0 => 040B746C 60000000
 
-(Ep3 USA) Enable all lobby counter options in non-CARD lobbies
-04096A8C 480000C0
-04096B4C 38800007
-04096BFC 4BFFFF2C
+Skip white logo screens during startup
+3OJ2 => 0413EE54 38000007
+3OJ3 => 0413F1DC 38000007
+3OJ4 => 0413F338 38000007
+3OJ5 => 0413F298 38000007
+3OE0 => 0413F190 38000007
+3OE1 => 0413F190 38000007
+3OE2 => 0413F2A8 38000007
+3OP0 => 0413F524 38000007
+3SJT => 0409E10C 38000007
+3SJ0 => 0409D810 38000007
+3SE0 => 0409D774 38000007
+3SP0 => 0409D9A4 38000007
 
-(Ep3 USA) Change HUD color mask
-0438CA8C 3C00RRGG
-0438CA90 6000BBAA
+Skip agreement prompts before online game
+3OJ2 => 0432737C 38000003
+3OJ3 => 043283CC 38000003
+3OJ4 => 043298E8 38000003
+3OJ5 => 04329690 38000003
+3OE0 => 04327D3C 38000003
+3OE1 => 04327D80 38000003
+3OE2 => 0432984C 38000003
+3OP0 => 04328C58 38000003
+3SJT => 041C67D0 38000003
+3SJ0 => 041B5234 38000003
+3SE0 => 041B50C8 38000003
+3SP0 => 041B574C 38000003
 
-(Ep3 USA) Disable lobby event music (but keep the visuals)
-040B705C 38000000
+Disable rate limit for pressing A during loading screens
+3SJT => 042E1030 38000000
+3SJ0 => 042F8BE4 38000000
+3SE0 => 042F9B30 38000000
+3SP0 => 042FA734 38000000
 
-(Ep3 USA) Enable Pinz's Shop Super Card Capsule Machine as a fourth option
-043101C0 38800004
-04310238 2C1D0004
-04487E8C 000000C8
+Auto-press A as fast as possible during loading screens
+3SP0 => 042FA6C4 60000000
+3SE0 => 042F9AC0 60000000
+3SJT => 040C2C48 60000000
+3SJ0 => 042F8B74 60000000
 
-(Ep3 USA) Change color of pulsing orange text (e.g. card ability names)
-0457EE18 RRRRRRRR  // Phase 1 (long) red component as 32-bit float (0.0-255.0)
-0457EE20 GGGGGGGG  // Phase 1 (long) green component as 32-bit float (0.0-255.0)
-0457EE10 BBBBBBBB  // Phase 1 (long) blue component as 32-bit float (0.0-255.0)
-0457EE1C RRRRRRRR  // Phase 2 (short) red component as 32-bit float (0.0-255.0)
-0457EE24 GGGGGGGG  // Phase 2 (short) green component as 32-bit float (0.0-255.0)
-0457EE14 BBBBBBBB  // Phase 2 (short) blue component as 32-bit float (0.0-255.0)
+CARD lobby battle tables react immediately
+3SE0 => 042C04D4 60000000
 
-(Ep3 USA) Change color of pulsing orange text to be random every frame
-04155D78 7CA802A6
-04155D7C 7C661B78
-04155D80 481EF8B1
-04155D84 7C671B78
-04155D88 481EF8A9
-04155D8C 50677822
-04155D90 64E7FF00
-04155D94 90E60024
-04155D98 7CA803A6
-04155D9C 4E800020
+Change type of all loading screens
+Values for X: 0 = lobby/game join, 1 = quest load, 3 = pipe up, 4 = pipe down, anything else = silent black screen
+3OE1 => 0401CA04 3BE0000X
+        0401CA08 48000038
 
-(Ep3 USA) Enable color and symbol codes in info board text
-(Use codes like e.g. $CG to change text colors, as described in CommandFormats.hh)
-040F2E80 4BF0D41D
-040F0274 4BF10025
-040EFC58 4BF10641
-04000298 38810008
-0400029C 38C3FFFF
-040002A0 8CA60001
-040002A4 28050024
-040002A8 4082000C
-040002AC 38000009
-040002B0 98060000
-040002B4 28050000
-040002B8 4082FFE8
-040002BC 7C633050
-040002C0 4E800020
+Replace loading screen A button sounds with random sounds
+3SJT => 042E1018 480309A9
+        042E101C 5463063E
+        042E1020 60631400
+        042E1024 64630005
+        042E1028 38800000
+3SE0 => 042F9B18 4804BB19
+        042F9B1C 5463063E
+        042F9B20 60631400
+        042F9B24 64630005
+        042F9B28 38800000
 
-(Ep3 USA) Unlock all offline free battle maps
-042CAA00 38600001
-(This unlocks ALL maps, including a bunch of maps with garbage names that crash if you try to play them)
+Change color of loading screens
+Replace AA, RR, GG, BB appropriately
+3SE0 => 042FA704 3CC0AARR
+        042FA708 60C6GGBB
 
-(Ep3 USA) Talk to auction counter offline to get all cards
-042F5D18 4BD160E8
-0400BE00 9421FFE0
-0400BE04 7C0802A6
-0400BE08 90010024
-0400BE0C 93E10010
-0400BE10 93C10014
-0400BE14 93A10018
-0400BE18 9381001C
-0400BE1C 3C60802A
-0400BE20 60631BAC
-0400BE24 7C6903A6
-0400BE28 38600000
-0400BE2C 4E800421
-0400BE30 7C7F1B78
-0400BE34 3C60802A
-0400BE38 606315BC
-0400BE3C 7C6903A6
-0400BE40 7FE3FB78
-0400BE44 4E800421
-0400BE48 3F80802A
-0400BE4C 639C17AC
-0400BE50 3BC00001
-0400BE54 3BA00063
-0400BE58 7FE3FB78
-0400BE5C 7FC4F378
-0400BE60 7F8903A6
-0400BE64 4E800421
-0400BE68 3BBDFFFF
-0400BE6C 281D0000
-0400BE70 4082FFE8
-0400BE74 3BDE0001
-0400BE78 281E02F0
-0400BE7C 4081FFD8
-0400BE80 3C60802A
-0400BE84 6063160C
-0400BE88 7C6903A6
-0400BE8C 7FE3FB78
-0400BE90 4E800421
-0400BE94 83E10010
-0400BE98 83C10014
-0400BE9C 83A10018
-0400BEA0 8381001C
-0400BEA4 80010024
-0400BEA8 38210020
-0400BEAC 7C0803A6
-0400BEB0 482E9FC0
+Use 16:9 aspect ratio
+3SE0 => 04383DC8 4BC87F99
+        0400BD60 C042DED0
+        0400BD64 EC5D00B2
+        0400BD68 4E800020
 
-(Episodes 1&2 USA v1.01) Press L for enemy debug; enable various other debug messages
-040FD9D8 38600001  # Various enemy debug messages
-00153E53 00000001  # Poison fog debug 1
-00153E4B 00000001  # Poison fog debug 2
-040FDA18 60000000  # TObjRoomId
-025CB6AA 00000000
-4A588EA0 00000040
-025CB6AA 00000001
+Disable darkening effect during battle details mode
+3SJT => 042E09D8 4E800020
+3SJ0 => 042F85D0 4E800020
+3SE0 => 042F951C 4E800020
+3SP0 => 042FA120 4E800020
+
+Unlock all COM decks
+3SJ0 => 042C9B34 38600001
+3SP0 => 042CB414 38600001
+3SE0 => 042CA908 38600001
+
+Enable all lobby counter options in non-CARD lobbies
+3SE0 => 04096A8C 480000C0
+        04096B4C 38800007
+        04096BFC 4BFFFF2C
+
+Enable Change Marker option in all lobbies
+3OJ2 => 04138208 4800004C
+3OJ3 => 04138510 4800004C
+3OJ4 => 041390B4 4800004C
+3OJ5 => 041385B8 4800004C
+3OE0 => 041384C4 4800004C
+3OE1 => 041384C4 4800004C
+3OE2 => 041385C8 4800004C
+3OP0 => 04138848 4800004C
+
+Lobby arrows rotation speed modifier
+3OE1 => 041C6B64 3804XXXX (default 0800)
+
+Change lobby arrow colors
+Note: All values as floats in [0, 1]
+3OE1 => 04443780 AAAAAAAA (slot 0)
+        04443784 RRRRRRRR (slot 0)
+        04443788 GGGGGGGG (slot 0)
+        0444378C BBBBBBBB (slot 0)
+        04443790 AAAAAAAA (slot 1)
+        04443794 RRRRRRRR (slot 1)
+        04443798 GGGGGGGG (slot 1)
+        0444379C BBBBBBBB (slot 1)
+        ...
+
+Change HUD color mask
+3SE0 => 0438CA8C 3C00RRGG
+        0438CA90 6000BBAA
+
+Disable lobby event music (but keep the visuals)
+3OJT => 040B2394 38000000
+3SE0 => 040B705C 38000000
+3SJ0 => 040B7078 38000000
+3SP0 => 040B74A0 38000000
+
+Disable rate limit for lobby chair movement
+3OJ2 => 041C73B0 60000000
+3OJ3 => 041C786C 60000000
+3OJ4 => 041C7DA8 60000000
+3OJ5 => 041C7938 60000000
+3OE0 => 041C77CC 60000000
+3OE1 => 041C77CC 60000000
+3OE2 => 041C799C 60000000
+3OP0 => 041C7E58 60000000
+3SJT => 040E290C 60000000
+3SJ0 => 040DE6C4 60000000
+3SE0 => 040DE6A8 60000000
+3SP0 => 040DEAEC 60000000
+
+Make lobby chairs fast (client-side only)
+3SE0 => 0457E618 40000000
+
+Enable Pinz's Shop Super Card Capsule Machine as a fourth option
+3SE0 => 043101C0 38800004
+        04310238 2C1D0004
+        04487E8C 000000C8
+
+Change color of pulsing orange text (e.g. card ability names)
+3SE0 => 0457EE18 RRRRRRRR  // Phase 1 (long) red component as 32-bit float (0.0-255.0)
+        0457EE20 GGGGGGGG  // Phase 1 (long) green component as 32-bit float (0.0-255.0)
+        0457EE10 BBBBBBBB  // Phase 1 (long) blue component as 32-bit float (0.0-255.0)
+        0457EE1C RRRRRRRR  // Phase 2 (short) red component as 32-bit float (0.0-255.0)
+        0457EE24 GGGGGGGG  // Phase 2 (short) green component as 32-bit float (0.0-255.0)
+        0457EE14 BBBBBBBB  // Phase 2 (short) blue component as 32-bit float (0.0-255.0)
+
+Change color of pulsing orange text to be random every frame
+3SE0 => 04155D78 7CA802A6
+        04155D7C 7C661B78
+        04155D80 481EF8B1
+        04155D84 7C671B78
+        04155D88 481EF8A9
+        04155D8C 50677822
+        04155D90 64E7FF00
+        04155D94 90E60024
+        04155D98 7CA803A6
+        04155D9C 4E800020
+
+Enable color and symbol codes in info board text
+Use codes like e.g. $CG to change text colors, as described in CommandFormats.hh
+3SE0 => 040F2E80 4BF0D41D
+        040F0274 4BF10025
+        040EFC58 4BF10641
+        04000298 38810008
+        0400029C 38C3FFFF
+        040002A0 8CA60001
+        040002A4 28050024
+        040002A8 4082000C
+        040002AC 38000009
+        040002B0 98060000
+        040002B4 28050000
+        040002B8 4082FFE8
+        040002BC 7C633050
+        040002C0 4E800020
+
+Unlock all offline free battle maps
+This unlocks ALL maps, including a bunch of maps with garbage names that crash if you try to play them
+3SJT => 042BE538 38600001
+3SJ0 => 042C9C2C 38600001
+3SE0 => 042CAA00 38600001
+3SP0 => 042CB50C 38600001
+
+Card auctions accessible with fewer than 4 players
+3SJT => 042DD618 38600004
+3SJ0 => 042F4F20 38600004
+3SE0 => 042F5D88 38600004
+3SP0 => 042F698C 38600004
+
+Talk to auction counter offline to get all cards
+3SE0 => 042F5D18 4BD160E8
+        0400BE00 9421FFE0
+        0400BE04 7C0802A6
+        0400BE08 90010024
+        0400BE0C 93E10010
+        0400BE10 93C10014
+        0400BE14 93A10018
+        0400BE18 9381001C
+        0400BE1C 3C60802A
+        0400BE20 60631BAC
+        0400BE24 7C6903A6
+        0400BE28 38600000
+        0400BE2C 4E800421
+        0400BE30 7C7F1B78
+        0400BE34 3C60802A
+        0400BE38 606315BC
+        0400BE3C 7C6903A6
+        0400BE40 7FE3FB78
+        0400BE44 4E800421
+        0400BE48 3F80802A
+        0400BE4C 639C17AC
+        0400BE50 3BC00001
+        0400BE54 3BA00063
+        0400BE58 7FE3FB78
+        0400BE5C 7FC4F378
+        0400BE60 7F8903A6
+        0400BE64 4E800421
+        0400BE68 3BBDFFFF
+        0400BE6C 281D0000
+        0400BE70 4082FFE8
+        0400BE74 3BDE0001
+        0400BE78 281E02F0
+        0400BE7C 4081FFD8
+        0400BE80 3C60802A
+        0400BE84 6063160C
+        0400BE88 7C6903A6
+        0400BE8C 7FE3FB78
+        0400BE90 4E800421
+        0400BE94 83E10010
+        0400BE98 83C10014
+        0400BE9C 83A10018
+        0400BEA0 8381001C
+        0400BEA4 80010024
+        0400BEA8 38210020
+        0400BEAC 7C0803A6
+        0400BEB0 482E9FC0
+
+Press L for enemy debug; enable various other debug messages
 TODO: Figure out more debug message conditionals (vars/functions) and add them here
+3OE1 => 040FD9D8 38600001  # Various enemy debug messages
+        00153E53 00000001  # Poison fog debug 1
+        00153E4B 00000001  # Poison fog debug 2
+        040FDA18 60000000  # TObjRoomId
+        025CB6AA 00000000  # disable enemy debug
+        4A588EA0 00000040  # if L is held...
+        025CB6AA 00000001  # enable enemy debug
 
-(Episode 3 USA) Able to find VIP cards offline (but they're still rare)
-042C0B20 4800000C
+Able to find VIP cards offline (but they're still rare)
+3SP0 => 042C15DC 4800000C
+3SJ0 => 042BFE24 4800000C
+3SE0 => 042C0B20 4800000C
 
-(Ep3 USA) Hold L when starting battle to enter debug menu
-042C5460 4BD3AF78
-040003D8 3C60804A
-040003DC 60630518
-040003E0 3C800002
-040003E4 480C9F35
-040003E8 2C030000
-040003EC 4082000C
-040003F0 8801001A
-040003F4 48000008
-040003F8 3800001A
-040003FC 482C5068
+Hold L when starting battle to enter debug menu
+3SE0 => 042C5460 4BD3AF78
+        040003D8 3C60804A
+        040003DC 60630518
+        040003E0 3C800002
+        040003E4 480C9F35
+        040003E8 2C030000
+        040003EC 4082000C
+        040003F0 8801001A
+        040003F4 48000008
+        040003F8 3800001A
+        040003FC 482C5068
 
-(Ep3 USA) Dressing room always accessible
-041A16FC 38600001
+Dressing room always accessible
+3SJT => 041B2A2C 38600001
+3SJ0 => 041A1920 38600001
+3SP0 => 041A1C84 38600001
+3SE0 => 041A16FC 38600001
 
-(Ep3 USA) Full dressing room v1
+Full dressing room v1
+Original Ep1&2 code by Ralf @ GC-Forever
 Can't change your class, but you start with your existing appearance
 Go online with this code on after using the dressing room to fully save changes
-0418EB5C 60000000
-042A0184 389D0370
-042A0188 387E2120
+3SE0 => 0418EB5C 60000000
+        042A0184 389D0370
+        042A0188 387E2120
 
-(Ep3 USA) Full dressing room v2
+Full dressing room v2
+Original Ep1&2 code by Ralf @ GC-Forever
 Can change your class, but you start with the default appearance
 Go online with this code on after using the dressing room to fully save changes
-04186ECC 4BFFFFD8
-042A0184 389D0370
-042A0188 387E2120
+3SE0 => 04186ECC 4BFFFFD8
+        042A0184 389D0370
+        042A0188 387E2120
 
-(Ep3 USA) Replace Options menu with debug menu
-04149E70 38600019
+Replace Options menu with debug menu
+3SE0 => 04149E70 38600019
 
-(Ep3 USA) Jukebox is free
-0430D1DC 48000024
+Jukebox is free
+3SJT => 042248C4 48000024 (useless because the jukebox isn't loaded in NTE, but apparently the code for it exists)
+3SJ0 => 0430C178 48000024
+3SE0 => 0430D1DC 48000024
+3SP0 => 0430DE3C 48000024
 
-(Ep3 USA) Use own character in battle (online only)
-041FFAB0 4800001C
-042A54D8 4BD5B0F9
-04200A34 4BDFFB9D
-041FFA9C 4BE00B35
-040005D0 38600000
-040005D4 3CA08049
-040005D8 80A54160
-040005DC 2805000F
-040005E0 41820008
-040005E4 481E8E24
-040005E8 80ADA448
-040005EC 7C042800
-040005F0 41820008
-040005F4 481E8E14
-040005F8 38600001
-040005FC 4E800020
+Use own character in battle (online only)
+3SE0 => 041FFAB0 4800001C
+        042A54D8 4BD5B0F9
+        04200A34 4BDFFB9D
+        041FFA9C 4BE00B35
+        040005D0 38600000
+        040005D4 3CA08049
+        040005D8 80A54160
+        040005DC 2805000F
+        040005E0 41820008
+        040005E4 481E8E24
+        040005E8 80ADA448
+        040005EC 7C042800
+        040005F0 41820008
+        040005F4 481E8E14
+        040005F8 38600001
+        040005FC 4E800020
 
-(Ep3 USA) Disable chat smut filter
-0412F8B8 7D0802A6
-0412F8BC 7C661B78
-0412F8C0 7C872378
-0412F8C4 48217285
-0412F8C8 38A30001
-0412F8CC 7CE33B78
-0412F8D0 7CC43378
-0412F8D4 7D0803A6
-0412F8D8 4BEDEBF4
+Disable chat smut filter
+3SE0 => 0412FA4C 60000000
 
-(Ep3 USA) Metal tiles don't appear in Simulator map
-04296904 4E800020
+Metal tiles don't appear in Simulator (Cyber) map
+3SJT => 0428FED8 4E800020
+3SJ0 => 04296054 4E800020
+3SE0 => 04296904 4E800020
+3SP0 => 04297278 4E800020
 
-(Ep3 USA) Enable Boooo and Laughter soundchat sounds
+Enable Boooo and Laughter soundchat sounds
 Note: Without a TextEnglish.pr2/pr3 patch, the menu items for these sounds will be blank (but they will still work)
-0430B734 38800029
-0430B770 2C1F0029
-0430B59C 2C030029
-0430B5A8 5460083C
-0430B5B4 7C63022E
-0442B690 80258026
-0442B694 8227852D
-0442B698 80308031
-0442B69C 8A3F8532
-0442B6A0 8A408533
-0442B6A4 8A418A28
-0442B6A8 8A388A29
-0442B6AC 8A39852E
-0442B6B0 802F853D
-0442B6B4 85348535
-0442B6B8 853B8536
-0442B6BC 8537852B
-0442B6C0 853A853C
-0442B6C4 853E8044
-0442B6C8 80458046
-0442B6CC 80478048
-0442B6D0 8049804A
-0442B6D4 804B804C
-0442B6D8 804D804E
-0442B6DC 804F802A
-0442B6E0 802C0000
+3SE0 => 0430B734 38800029
+        0430B770 2C1F0029
+        0430B59C 2C030029
+        0430B5A8 5460083C
+        0430B5B4 7C63022E
+        0442B690 80258026
+        0442B694 8227852D
+        0442B698 80308031
+        0442B69C 8A3F8532
+        0442B6A0 8A408533
+        0442B6A4 8A418A28
+        0442B6A8 8A388A29
+        0442B6AC 8A39852E
+        0442B6B0 802F853D
+        0442B6B4 85348535
+        0442B6B8 853B8536
+        0442B6BC 8537852B
+        0442B6C0 853A853C
+        0442B6C4 853E8044
+        0442B6C8 80458046
+        0442B6CC 80478048
+        0442B6D0 8049804A
+        0442B6D4 804B804C
+        0442B6D8 804D804E
+        0442B6DC 804F802A
+        0442B6E0 802C0000
+
+Use English language files
+3OJT => 04189FE8 38000001
+        0418A010 38000001
+        0418A0A0 38000001
+        0418A0C8 38000001
+        04189EC4 3BC00001
+3SJT => 0408E414 38600001
+        0408E448 38000001
+        0408E44C 900DA62C
+        0408E450 4E800020
+
+Replace all sound effects with specified sound effect
+3OE1 => 042256E4 3F40XXXX
+        042256E8 635AYYYY
+        042256EC 4800000C
+
+Enable seasonal rappies offline (Ep2 only)
+X = 1: Saint Rappy
+X = 4: Egg Rappy
+X = 5: Hallo Rappy
+X = anything else: Love Rappy
+3OE0 => 040C1658 60000000
+        040C165C 3800000X
+3OE1 => 040C1658 60000000
+        040C165C 3800000X
+3OE2 => 040C17F0 60000000
+        040C17F4 3800000X
+3OJ2 => 040C13B4 60000000
+        040C13B8 3800000X
+3OJ3 => 040C16B8 60000000
+        040C16BC 3800000X
+3OJ4 => 040C18EC 60000000
+        040C18F0 3800000X
+3OJ5 => 040C17E0 60000000
+        040C17E4 3800000X
+3OP0 => 040C17B8 60000000
+        040C17BC 3800000X
+
+Heaven Punisher's special always works
+3OJ2 => 0412AB98 38800001
+3OJ3 => 0412ADDC 38800001
+3OJ4 => 0412AE6C 38800001
+3OJ5 => 0412AD74 38800001
+3OE0 => 0412AE3C 38800001
+3OE1 => 0412AE3C 38800001
+3OE2 => 0412AD84 38800001
+3OP0 => 0412AF5C 38800001
+
+Fast tekker (skips wind-up jingle)
+1OJ1 => 8C15B0CA mov    r1, 1
+        8C15B0E6 nop
+1OJ2 => 8C162302 mov    r1, 1
+        8C16231E nop
+1OJ3 => 8C175E66 mov    r1, 1
+        8C175E82 nop
+1OJ4 => 8C1780AE mov    r1, 1
+        8C1780CA nop
+1OJF => 8C17600E mov    r1, 1
+        8C17602A nop
+1OEF => 8C17863E mov    r1, 1
+        8C17865A nop
+1OPF => 8C1783FA mov    r1, 1
+        8C178416 nop
+2OJ5 => 8C19BD4A mov    r1, 1
+        8C19BD66 nop
+2OJF => 8C19ADB6 mov    r1, 1
+        8C19ADD2 nop
+2OEF => 8C19BD4A mov    r1, 1
+        8C19BD66 nop
+2OPF => 8C19B7E2 mov    r1, 1
+        8C19B7FE nop
+2OJW => 005B14A3 mov    dword [ebx + 0x150], 1
+        005B14BF jmp    +0x0D
+2OJZ => 005B0193 mov    dword [ebx + 0x150], 1
+        005B01AF jmp    +0x0D
+3OJT => 0426FAE8 38000001
+        0426FB10 60000000
+3OJ2 => 0421F8CC 38000001
+        0421F8F4 60000000
+3OJ3 => 04220250 38000001
+        04220278 60000000
+3OJ4 => 04221154 38000001
+        0422117C 60000000
+3OJ5 => 04220EF0 38000001
+        04220F18 60000000
+3OE0 => 04220170 38000001
+        04220198 60000000
+3OE1 => 04220170 38000001
+        04220198 60000000
+3OE2 => 04221224 38000001
+        0422124C 60000000
+3OP0 => 04220ABC 38000001
+        04220AE4 60000000
+4OED => 0023EF3C mov    dword [ebp + 0x14C], 1
+        0023EF57 jmp    +0x0A
+4OEU => 0023F0BC mov    dword [ebp + 0x14C], 1
+        0023F0D7 jmp    +0x0A
+4OJB => 0023EC5C mov    dword [ebp + 0x14C], 1
+        0023EC77 jmp    +0x0A
+4OJD => 0023EEAC mov    dword [ebp + 0x14C], 1
+        0023EEC7 jmp    +0x0A
+4OJU => 0023F21C mov    dword [ebp + 0x14C], 1
+        0023F237 jmp    +0x0A
+4OPD => 0023EF5C mov    dword [ebp + 0x14C], 1
+        0023EF77 jmp    +0x0A
+4OPU => 0023F14C mov    dword [ebp + 0x14C], 1
+        0023F167 jmp    +0x0A
+50YJ => 006D3F7B mov    dword [edi + 0x14C], 1
+        006D3F98 jmp    +0x0B
+59NJ => 006DA14B mov    dword [edi + 0x14C], 1
+        006DA168 jmp    +0x0B
+59NL => 006DA113 mov    dword [edi + 0x14C], 1
+        006DA130 jmp    +0x0B
+
+Allow loading corrupted save files
+3OJ2 => 041FC784 38600007
+        041FC788 4E800020
+3OJ3 => 041FCF98 38600007
+        041FCF9C 4E800020
+3OJ4 => 041FDED4 38600007
+        041FDED8 4E800020
+3OJ5 => 041FD504 38600007
+        041FD508 4E800020
+3OE0 => 041FCDE8 38600007
+        041FCDEC 4E800020
+3OE1 => 041FCDE8 38600007
+        041FCDEC 4E800020
+3OE2 => 041FD770 38600007
+        041FD774 4E800020
+3OP0 => 041FD66C 38600007
+        041FD670 4E800020
+3SE0 => 04115244 38600007
+        04115248 4E800020
+3SJ0 => 041152E8 38600007
+        041152EC 4E800020
+3SJT => 04117AA0 38600007
+        04117AA4 4E800020
+3SP0 => 041156D0 38600007
+        041156D4 4E800020
+
+60 frames per second
+This doesn't adjust any logic or animations; everything just runs faster
+3OJT => 043F5AC0 38800001
+3OJ2 => 043D8550 38800001
+3OJ3 => 043DAF58 38800001
+3OJ4 => 043DCDF8 38800001
+3OJ5 => 043DCBA8 38800001
+3OE0 => 043D9820 38800001
+3OE1 => 043D9878 38800001
+3OE2 => 043DCF78 38800001
+3OP0 => 043DBA68 38800001
+3SJT => 043567AC 38800001
+3SE0 => 0438A804 38800001
+3SJ0 => 043897B4 38800001
+3SP0 => 0438B6D4 38800001
+
+Show extended item info when targeting a dropped item
+(Compiled from the ExtendedItemInfo patch, also written by me)
+3OE1 => 044CB088 00000023
+        04262270 4BDA1E15
+        04262580 4BDA1AB8
+        0426224C 4BDA1DFD
+        04262294 4BDA1DC9
+        042874C0 4BD7CB50
+        04287424 4BD7CBF8
+        04004008 41F00000
+        0400400C 43480000
+        04004010 3C808000
+        04004014 90644004
+        04004018 4E800020
+        0400401C 3C808000
+        04004020 80044004
+        04004024 7C001840
+        04004028 4082000C
+        0400402C 38000000
+        04004030 90044004
+        04004034 4E800020
+        04004038 9421FFE0
+        0400403C 7C0802A6
+        04004040 90010024
+        04004044 48000028
+        04004048 9421FFE0
+        0400404C 7C0802A6
+        04004050 90010024
+        04004054 4825E0D5
+        04004058 48000014
+        0400405C 9421FFE0
+        04004060 7C0802A6
+        04004064 90010024
+        04004068 4825DBED
+        0400406C 38600000
+        04004070 48000049
+        04004074 80010024
+        04004078 7C0803A6
+        0400407C 38210020
+        04004080 4E800020
+        04004084 9421FFE0
+        04004088 7C0802A6
+        0400408C 90010024
+        04004090 90810008
+        04004094 93E1000C
+        04004098 4825DF19
+        0400409C 80610008
+        040040A0 48000019
+        040040A4 83E1000C
+        040040A8 80010024
+        040040AC 38210020
+        040040B0 7C0803A6
+        040040B4 4E800020
+        040040B8 9421FFE0
+        040040BC 7C0802A6
+        040040C0 90010024
+        040040C4 90610008
+        040040C8 93E1000C
+        040040CC 3FE08000
+        040040D0 28030000
+        040040D4 41820094
+        040040D8 A08300EC
+        040040DC 28040103
+        040040E0 41820088
+        040040E4 28040300
+        040040E8 40800080
+        040040EC 480155DD
+        040040F0 28030000
+        040040F4 40820074
+        040040F8 3C608000
+        040040FC 80634004
+        04004100 28030000
+        04004104 41820010
+        04004108 8063004C
+        0400410C 546307FF
+        04004110 40820058
+        04004114 807F4000
+        04004118 28030000
+        0400411C 4082002C
+        04004120 386000BC
+        04004124 48225419
+        04004128 907F4000
+        0400412C 28030000
+        04004130 41820050
+        04004134 63E34008
+        04004138 7C641B78
+        0400413C 807F4000
+        04004140 80ADAD80
+        04004144 482509B1
+        04004148 807F4000
+        0400414C 8003002C
+        04004150 60000020
+        04004154 9003002C
+        04004158 80810008
+        0400415C 808400D8
+        04004160 48250519
+        04004164 4800001C
+        04004168 807F4000
+        0400416C 28030000
+        04004170 41820010
+        04004174 38000000
+        04004178 901F4000
+        0400417C 4823F76D
+        04004180 83E1000C
+        04004184 80010024
+        04004188 38210020
+        0400418C 7C0803A6
+        04004190 4E800020
+3OE2 => 044CF6F0 00000023
+        04263630 4BDA1A55
+        04263940 4BDA16F8
+        0426360C 4BDA1A3D
+        04263654 4BDA1A09
+        0428893C 4BD7C6D4
+        042888A0 4BD7C77C
+        04005008 41F00000
+        0400500C 43480000
+        04005010 3C808000
+        04005014 90645004
+        04005018 4E800020
+        0400501C 3C808000
+        04005020 80045004
+        04005024 7C001840
+        04005028 4082000C
+        0400502C 38000000
+        04005030 90045004
+        04005034 4E800020
+        04005038 9421FFE0
+        0400503C 7C0802A6
+        04005040 90010024
+        04005044 48000028
+        04005048 9421FFE0
+        0400504C 7C0802A6
+        04005050 90010024
+        04005054 4825E495
+        04005058 48000014
+        0400505C 9421FFE0
+        04005060 7C0802A6
+        04005064 90010024
+        04005068 4825DFAD
+        0400506C 38600000
+        04005070 48000049
+        04005074 80010024
+        04005078 7C0803A6
+        0400507C 38210020
+        04005080 4E800020
+        04005084 9421FFE0
+        04005088 7C0802A6
+        0400508C 90010024
+        04005090 90810008
+        04005094 93E1000C
+        04005098 4825E2D9
+        0400509C 80610008
+        040050A0 48000019
+        040050A4 83E1000C
+        040050A8 80010024
+        040050AC 38210020
+        040050B0 7C0803A6
+        040050B4 4E800020
+        040050B8 9421FFE0
+        040050BC 7C0802A6
+        040050C0 90010024
+        040050C4 90610008
+        040050C8 93E1000C
+        040050CC 3FE08000
+        040050D0 28030000
+        040050D4 41820094
+        040050D8 A08300EC
+        040050DC 28040103
+        040050E0 41820088
+        040050E4 28040300
+        040050E8 40800080
+        040050EC 480145A5
+        040050F0 28030000
+        040050F4 40820074
+        040050F8 3C608000
+        040050FC 80635004
+        04005100 28030000
+        04005104 41820010
+        04005108 8063004C
+        0400510C 546307FF
+        04005110 40820058
+        04005114 807F5000
+        04005118 28030000
+        0400511C 4082002C
+        04005120 386000BC
+        04005124 482254CD
+        04005128 907F5000
+        0400512C 28030000
+        04005130 41820050
+        04005134 63E35008
+        04005138 7C641B78
+        0400513C 807F5000
+        04005140 80ADADA0
+        04005144 48250B89
+        04005148 807F5000
+        0400514C 8003002C
+        04005150 60000020
+        04005154 9003002C
+        04005158 80810008
+        0400515C 808400D8
+        04005160 482506F1
+        04005164 4800001C
+        04005168 807F5000
+        0400516C 28030000
+        04005170 41820010
+        04005174 38000000
+        04005178 901F5000
+        0400517C 4823F899
+        04005180 83E1000C
+        04005184 80010024
+        04005188 38210020
+        0400518C 7C0803A6
+        04005190 4E800020
+
+All weapons can do 3-hit combos
+3OE0 => 041D3248 38000001
+3OE1 => 041D3248 38000001
+3OE2 => 041D3448 38000001
+3OJ2 => 041D2DEC 38000001
+3OJ3 => 041D3318 38000001
+3OJ4 => 041D3144 38000001
+3OJ5 => 041D33E4 38000001
+3OP0 => 041D3904 38000001
+
+Disable save file signature validation (for moving Xbox saves across consoles)
+4OJB => 002F01CB 9090
+4OJD => 002F0CDB 9090
+4OJU => 002F22DB 9090
+4OED => 002F212B 9090
+4OEU => 002F22DB 9090
+4OPD => 002F215B 9090
+4OPU => 002F234B 9090
+
+Enable UDP test mode online
+3OE1 => 041A3D60 38600001
+
+Main warp door opens in Challenge mode
+3OE1 => 041820A4 38600001
+        041820A8 4E800020
+
+Allow arbitrary tech disk levels
+3OE1 => 0410EBE8 60000000
+        04100D18 60000000
+        041D6C0C 60000000
+        041D6C5C 60000000
+        0422CB50 60000000
+        042CD74C 4E800020
+
+Change particle colors in quest loading screen
+3OE1 => 04472C20 AARRGGBB // Default color
+        04472C24 AARRGGBB // Color after 1 A press
+        04472C28 AARRGGBB // Color after 2 A presses
+        04472C2C AARRGGBB // Color after 3 A presses
+        04472C30 AARRGGBB // Color after 4 A presses
+        04472C34 AARRGGBB // Color after 5 A presses
+
+Floor warp loading screen speed modifier
+// XXXX = speed; default is 01B4; 0800 = very fast/wobbly; 0020 = very slow
+3OE1 => 0434A350 3863XXXX
+
+Slow Gibbles fix
+3OJ2 => 042D6A48 C022FD98
+        042D6A6C C022FD98
+3OJ3 => 042D7A00 C022FDA0
+        042D7A24 C022FDA0
+3OJ4 => 042D8B34 C022FDA0
+        042D8B58 C022FDA0
+3OJ5 => 042D88E0 C022FDA0
+        042D8904 C022FDA0
+3OE0 => 042D7428 C022FDA8
+        042D744C C022FDA8
+3OE1 => 042D746C C022FDA8
+        042D7490 C022FDA8
+3OE2 => 042D8A94 C022FDA8
+        042D8AB8 C022FDA8
+3OP0 => 042D8228 C022FDA8
+        042D824C C022FDA8
+
+Override Challenge mode random enemy location tables limit
+2OJ5 => 8C2501B2 XXE5 (count as byte)
+2OJF => 8C24E98E XXE5 (count as byte)
+2OEF => 8C2501A2 XXE5 (count as byte)
+2OPF => 8C244C7E XXE5 (count as byte)
+2OJW => 005AA2FE XXXXXXXX (count * 4 as little-endian dword)
+        005AA30C XXXXXXXX (count as little-endian dword)
+2OJZ => 005A908E XXXXXXXX (count * 4 as little-endian dword)
+        005A909D XXXXXXXX (count as little-endian dword)
+3OE0 => 04209448 3880XXXX (count as big-endian word)
+3OE1 => 04209448 3880XXXX (count as big-endian word)
+3OE2 => 0420A330 3880XXXX (count as big-endian word)
+3OJ2 => 04208C4C 3880XXXX (count as big-endian word)
+3OJ3 => 042094C0 3880XXXX (count as big-endian word)
+3OJ4 => 0420A5A8 3880XXXX (count as big-endian word)
+3OJ5 => 04209FFC 3880XXXX (count as big-endian word)
+3OP0 => 04209D2C 3880XXXX (count as big-endian word)
+4OJB => 002E527C XXXXXXXX (count as little-endian dword)
+4OJD => 002E5DFC XXXXXXXX (count as little-endian dword)
+4OJU => 002E740C XXXXXXXX (count as little-endian dword)
+4OED => 002E71DC XXXXXXXX (count as little-endian dword)
+4OEU => 002E742C XXXXXXXX (count as little-endian dword)
+4OPD => 002E720C XXXXXXXX (count as little-endian dword)
+4OPU => 002E745C XXXXXXXX (count as little-endian dword)
+50YJ => 008075C3 XXXXXXXX (count * 4 as little-endian dword)
+        008075DC XXXXXXXX (count as little-endian dword)
+59NJ => 0080FA3F XXXXXXXX (count * 4 as little-endian dword)
+        0080FA58 XXXXXXXX (count as little-endian dword)
+59NL => 0080ECB7 XXXXXXXX (count * 4 as little-endian dword)
+        0080ECD0 XXXXXXXX (count as little-endian dword)
+
+Disable dust effect in CCA
+3OJT => 042F4EE8 48000010
+3OJ2 => 04297ECC 48000010
+3OJ3 => 04298C94 48000010
+3OJ4 => 04299DAC 48000010
+3OJ5 => 04299B60 48000010
+3OE0 => 042987EC 48000010
+3OE1 => 04298830 48000010
+3OE2 => 04299D14 48000010
+3OP0 => 042994BC 48000010
+
+Inventory debugging code
+(makes a copy of player 1's inventory at 8000A04C, updated every frame)
+3OE2 => 0400A000 9421FFE0  // stwu    [r1 - 0x20], r1
+        0400A004 7C0802A6  // mflr    r0
+        0400A008 90010024  // stw     [r1 + 0x24], r0
+        0400A00C 3C608051  // lis     r3, 0x8051
+        0400A010 8063EA10  // lwz     r3, [r3 - 0x15F0] // r3 = TObjPlayer_objs[0]
+        0400A014 3C808000  // lis     r4, 0x8000
+        0400A018 6084A050  // ori     r4, r4, 0xA050
+        0400A01C 9064FFFC  // stw     [r4 - 4], r3 // 8000A04C = 0 (in case player is null)
+        0400A020 28030000  // cmplwi  r3, 0
+        0400A024 41820014  // beq     +0x10
+        0400A028 481AE2E9  // bl      TObjPlayer_export_inventory // (TObjPlayer_objs[0], 0x8000A050)
+        0400A02C 3C808000  // lis     r4, 0x8000
+        0400A030 6084A04C  // ori     r4, r4, 0xA04C
+        0400A034 90640000  // stw     [r4], r3 // 8000A04C = inventory item count
+        0400A038 80010024  // lwz     r0, [r1 + 0x24]
+        0400A03C 7C0803A6  // mtlr    r0
+        0400A040 38210020  // addi    r1, r1, 0x20
+        0400A044 4E800020  // blr
+        041A39B8 4BE66648  // b       8000A000 // main_phase_0E_exec_frame return - chain to hook at 8000A000
+
+Load qdefault.bin quest script from disk in offline free play
+(Don't use this on a disc image where qdefault.bin doesn't exist; there is a bug in the quest script environment constructor that will leave the current directory set incorrectly if the file doesn't exist, and the game will softlock)
+3OE1 => 041A3A30 4BE6656D
+        041A3088 4BE66F1D
+        04009F9C 38600002
+        04009FA0 48000008
+        04009FA4 38600000
+        04009FA8 7C0802A6
+        04009FAC 9421FFE0
+        04009FB0 90010024
+        04009FB4 90610008
+        04009FB8 386001A4
+        04009FBC 4821F581
+        04009FC0 28030000
+        04009FC4 41820018
+        04009FC8 808DBD20
+        04009FCC 3CA08000
+        04009FD0 60A59FF0
+        04009FD4 38C00000
+        04009FD8 481EC171
+        04009FDC 80610008
+        04009FE0 80010024
+        04009FE4 38210020
+        04009FE8 7C0803A6
+        04009FEC 4E800020
+        04009FF0 71646566
+        04009FF4 61756C74
+        04009FF8 2E62696E
+        04009FFC 00000000
+3OE2 => 041A3B5C 4BE66441
+        041A31B0 4BE66DF5
+        04009F9C 38600002
+        04009FA0 48000008
+        04009FA4 38600000
+        04009FA8 7C0802A6
+        04009FAC 9421FFE0
+        04009FB0 90010024
+        04009FB4 90610008
+        04009FB8 386001A4
+        04009FBC 48220635
+        04009FC0 28030000
+        04009FC4 41820018
+        04009FC8 808DBD40
+        04009FCC 3CA08000
+        04009FD0 60A59FF0
+        04009FD4 38C00000
+        04009FD8 481EC309
+        04009FDC 80610008
+        04009FE0 80010024
+        04009FE4 38210020
+        04009FE8 7C0803A6
+        04009FEC 4E800020
+        04009FF0 71646566
+        04009FF4 61756C74
+        04009FF8 2E62696E
+        04009FFC 00000000
+
+Enable quest board menu in free play (for use with the above code)
+3OE0 => 04262B44 38600001
+3OE1 => 04262B44 38600001
+3OE2 => 04263F04 38600001
+3OJ2 => 0426226C 38600001
+3OJ3 => 04262E44 38600001
+3OJ4 => 04263EB8 38600001
+3OP0 => 0426374C 38600001
+
+All classes' footsteps sound like RAcast's
+(Change the 2 in 38600002 to 0 for human/Newman, 1 for lighter androids, or 3 if you want to be annoyed)
+3OE0 => 041B3ED0 38600002
+        041B3ED4 4E800020
+3OE1 => 041B3ED0 38600002
+        041B3ED4 4E800020
+3OE2 => 041B4068 38600002
+        041B406C 4E800020
+3OJ2 => 041B3AE4 38600002
+        041B3AE8 4E800020
+3OJ3 => 041B3F38 38600002
+        041B3F3C 4E800020
+3OJ4 => 041B552C 38600002
+        041B5530 4E800020
+3OJ5 => 041B4004 38600002
+        041B4008 4E800020
+3OJT => 0420A120 38600002
+        0420A124 4E800020
+3OP0 => 041B4524 38600002
+        041B4528 4E800020
+3SE0 => 040D0378 38600002
+        040D037C 4E800020
+3SJ0 => 040D0394 38600002
+        040D0398 4E800020
+3SJT => 040D431C 38600002
+        040D4320 4E800020
+3SP0 => 040D07BC 38600002
+        040D07C0 4E800020
+
+Rappy size modifier
+3OE1 => 040C1E24 48000020 // Disable flag check in render
+        045D0718 40800000 // X/Z scale as float (here, 4.0)
+        045D071C 40800000 // Y scale as float (here, 4.0)
+
+Disable HP reduction warning sound in Challenge mode
+3OE1 => 04076A28 4E800020
+
+Mag invincibility effect sparkliness modifier
+(Default 003C; smaller values are more sparkly)
+3OE1 => 801131C4 3860XXXX
+
+Menu backgrounds animate really fast
+3OE1 => 0429A62C 60000000
+        0429A674 2C040004
+
+Remove menu background text effect
+3OE1 => 0429A5C4 4E800020
+
+Remove menu background grid effect
+3OE1 => 042992B8 4E800020
+
+Full dressing room
+3OE1 => 04297750 60000000

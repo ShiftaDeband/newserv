@@ -1,12 +1,681 @@
 #include "CommonItemSet.hh"
 
 #include "AFSArchive.hh"
+#include "EnemyType.hh"
 #include "GSLArchive.hh"
 #include "StaticGameData.hh"
+#include "Types.hh"
 
-using namespace std;
+template <typename IntT, size_t Count>
+phosg::JSON to_json(const parray<IntT, Count>& v) {
+  auto ret = phosg::JSON::list();
+  for (size_t z = 0; z < Count; z++) {
+    ret.emplace_back(v[z]);
+  }
+  return ret;
+}
 
-CommonItemSet::Table::Table(const StringReader& r, bool is_big_endian, bool is_v3) {
+template <typename IntT, size_t Count>
+void from_json_into(const phosg::JSON& json, parray<IntT, Count>& ret) {
+  if (json.size() != Count) {
+    throw std::runtime_error("incorrect array length");
+  }
+  for (size_t z = 0; z < Count; z++) {
+    ret[z] = json.at(z).as_int();
+  }
+}
+
+template <typename IntT, size_t Count>
+phosg::JSON to_json(const parray<CommonItemSet::Table::Range<IntT>, Count>& v) {
+  auto ret = phosg::JSON::list();
+  for (size_t z = 0; z < Count; z++) {
+    ret.emplace_back(to_json(v[z]));
+  }
+  return ret;
+}
+
+template <typename IntT, size_t Count>
+void from_json_into(const phosg::JSON& json, parray<CommonItemSet::Table::Range<IntT>, Count>& ret) {
+  if (json.size() != Count) {
+    throw std::runtime_error("incorrect array length");
+  }
+  for (size_t z = 0; z < Count; z++) {
+    from_json_into(json.at(z), ret[z]);
+  }
+}
+
+template <typename IntT>
+phosg::JSON to_json(const CommonItemSet::Table::Range<IntT>& v) {
+  return (v.min == v.max) ? phosg::JSON(v.min) : phosg::JSON::list({v.min, v.max});
+}
+
+template <typename IntT>
+void from_json_into(const phosg::JSON& json, CommonItemSet::Table::Range<IntT>& ret) {
+  if (json.is_int()) {
+    IntT v = json.as_int();
+    ret.min = v;
+    ret.max = v;
+  } else {
+    const auto& l = json.as_list();
+    if (l.size() != 2) {
+      throw std::runtime_error("incorrect range list length");
+    }
+    ret.min = l.at(0)->as_int();
+    ret.max = l.at(1)->as_int();
+  }
+}
+
+template <typename IntT, size_t Count1, size_t Count2>
+phosg::JSON to_json(const parray<parray<IntT, Count2>, Count1>& v) {
+  auto ret = phosg::JSON::list();
+  for (size_t z = 0; z < Count1; z++) {
+    ret.emplace_back(to_json(v[z]));
+  }
+  return ret;
+}
+
+template <typename IntT, size_t Count1, size_t Count2>
+void from_json_into(const phosg::JSON& json, parray<parray<IntT, Count2>, Count1>& ret) {
+  if (json.size() != Count1) {
+    throw std::runtime_error("incorrect array length");
+  }
+  for (size_t z = 0; z < Count1; z++) {
+    from_json_into(json.at(z), ret[z]);
+  }
+}
+
+template <typename IntT, size_t Count1, size_t Count2>
+void from_json_into(const phosg::JSON& json, parray<parray<CommonItemSet::Table::Range<IntT>, Count2>, Count1>& ret) {
+  if (json.size() != Count1) {
+    throw std::runtime_error("incorrect array length");
+  }
+  for (size_t z = 0; z < Count1; z++) {
+    from_json_into(json.at(z), ret[z]);
+  }
+}
+
+CommonItemSet::Table::Table(std::shared_ptr<const Table> prev_table, const phosg::JSON& json, Episode episode)
+    : episode(episode) {
+  auto parse_field = [&]<typename T>(const std::string& key, T& field, const T* prev_field) {
+    if (json.count(key)) {
+      from_json_into(json.at(key), field);
+    } else if (prev_field) {
+      field = *prev_field;
+    }
+  };
+
+  parse_field("BaseWeaponTypeProbTable", this->base_weapon_type_prob_table, prev_table ? &prev_table->base_weapon_type_prob_table : nullptr);
+  parse_field("SubtypeBaseTable", this->subtype_base_table, prev_table ? &prev_table->subtype_base_table : nullptr);
+  parse_field("SubtypeAreaLengthTable", this->subtype_area_length_table, prev_table ? &prev_table->subtype_area_length_table : nullptr);
+  parse_field("GrindProbTable", this->grind_prob_table, prev_table ? &prev_table->grind_prob_table : nullptr);
+  parse_field("ArmorShieldTypeIndexProbTable", this->armor_shield_type_index_prob_table, prev_table ? &prev_table->armor_shield_type_index_prob_table : nullptr);
+  parse_field("ArmorSlotCountProbTable", this->armor_slot_count_prob_table, prev_table ? &prev_table->armor_slot_count_prob_table : nullptr);
+  parse_field("BoxMesetaRanges", this->box_meseta_ranges, prev_table ? &prev_table->box_meseta_ranges : nullptr);
+  if (json.count("HasRareBonusValueProbTable")) {
+    this->has_rare_bonus_value_prob_table = json.at("HasRareBonusValueProbTable").as_bool();
+  } else if (prev_table) {
+    this->has_rare_bonus_value_prob_table = prev_table->has_rare_bonus_value_prob_table;
+  }
+  parse_field("BonusValueProbTable", this->bonus_value_prob_table, prev_table ? &prev_table->bonus_value_prob_table : nullptr);
+  parse_field("NonRareBonusProbSpec", this->nonrare_bonus_prob_spec, prev_table ? &prev_table->nonrare_bonus_prob_spec : nullptr);
+  parse_field("BonusTypeProbTable", this->bonus_type_prob_table, prev_table ? &prev_table->bonus_type_prob_table : nullptr);
+  parse_field("SpecialMult", this->special_mult, prev_table ? &prev_table->special_mult : nullptr);
+  parse_field("SpecialPercent", this->special_percent, prev_table ? &prev_table->special_percent : nullptr);
+  parse_field("ToolClassProbTable", this->tool_class_prob_table, prev_table ? &prev_table->tool_class_prob_table : nullptr);
+  parse_field("TechniqueIndexProbTable", this->technique_index_prob_table, prev_table ? &prev_table->technique_index_prob_table : nullptr);
+  parse_field("TechniqueLevelRanges", this->technique_level_ranges, prev_table ? &prev_table->technique_level_ranges : nullptr);
+  if (json.count("ArmorOrShieldTypeBias")) {
+    this->armor_or_shield_type_bias = json.at("ArmorOrShieldTypeBias").as_int();
+  } else if (prev_table) {
+    this->armor_or_shield_type_bias = prev_table->armor_or_shield_type_bias;
+  }
+  parse_field("UnitMaxStarsTable", this->unit_max_stars_table, prev_table ? &prev_table->unit_max_stars_table : nullptr);
+  parse_field("BoxItemClassProbTable", this->box_item_class_prob_table, prev_table ? &prev_table->box_item_class_prob_table : nullptr);
+
+  if (json.count("EnemyMesetaRanges")) {
+    const auto& dict = json.at("EnemyMesetaRanges").as_dict();
+    for (auto enemy_type : phosg::EnumRange<EnemyType>()) {
+      try {
+        from_json_into(*dict.at(phosg::name_for_enum(enemy_type)), this->enemy_type_meseta_ranges[enemy_type]);
+      } catch (const std::out_of_range&) {
+      }
+    }
+  } else {
+    this->enemy_type_meseta_ranges = prev_table->enemy_type_meseta_ranges;
+  }
+
+  if (json.count("EnemyTypeDropProbs")) {
+    const auto& dict = json.at("EnemyTypeDropProbs").as_dict();
+    for (auto enemy_type : phosg::EnumRange<EnemyType>()) {
+      try {
+        this->enemy_type_drop_probs[enemy_type] = dict.at(phosg::name_for_enum(enemy_type))->as_int();
+      } catch (const std::out_of_range&) {
+      }
+    }
+  } else {
+    this->enemy_type_drop_probs = prev_table->enemy_type_drop_probs;
+  }
+
+  if (json.count("EnemyItemClasses")) {
+    const auto& dict = json.at("EnemyItemClasses").as_dict();
+    for (auto enemy_type : phosg::EnumRange<EnemyType>()) {
+      try {
+        this->enemy_type_item_classes[enemy_type] = dict.at(phosg::name_for_enum(enemy_type))->as_int();
+      } catch (const std::out_of_range&) {
+      }
+    }
+  } else {
+    this->enemy_type_item_classes = prev_table->enemy_type_item_classes;
+  }
+}
+
+static const char* name_for_common_item_class(uint8_t item_class) {
+  switch (item_class) {
+    case 0x00:
+      return "WEAPON";
+    case 0x01:
+      return "ARMOR";
+    case 0x02:
+      return "SHIELD";
+    case 0x03:
+      return "UNIT";
+    case 0x04:
+      return "TOOL";
+    case 0x05:
+      return "MESETA";
+    case 0x06:
+      return "NOTHING";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+void CommonItemSet::Table::print(FILE* stream) const {
+  const auto& meseta_ranges = this->enemy_type_meseta_ranges;
+  const auto& drop_probs = this->enemy_type_drop_probs;
+  const auto& item_classes = this->enemy_type_item_classes;
+  phosg::fwrite_fmt(stream, "Enemy tables:\n");
+  phosg::fwrite_fmt(stream, "  ##:ENEMY                     $LOW  $HIGH  DAR%  ITEM\n");
+  for (auto enemy_type : phosg::EnumRange<EnemyType>()) {
+    const auto& def = type_definition_for_enemy(enemy_type);
+    try {
+      const auto& meseta_range = meseta_ranges.at(enemy_type);
+      const auto& drop_prob = drop_probs.at(enemy_type);
+      const auto& item_class = item_classes.at(enemy_type);
+      phosg::fwrite_fmt(stream, "  {:02X}:{:<23}  {:5}  {:5}  {:3}%  {:02X}:{:<7}\n",
+          def.rt_index, phosg::name_for_enum(enemy_type),
+          meseta_range.min, meseta_range.max, drop_prob, item_class,
+          name_for_common_item_class(item_class));
+    } catch (const std::out_of_range&) {
+      phosg::fwrite_fmt(stream, "  {:02X}:{:<23}  -----  -----  ----  --:-------\n",
+          def.rt_index, phosg::name_for_enum(enemy_type));
+    }
+  }
+
+  static const std::array<const char*, 12> base_weapon_type_names{
+      "SABER", "SWORD", "DAGGER", "PARTISAN", "SLICER", "HANDGUN", "RIFLE", "MECHGUN", "SHOT", "CANE", "ROD", "WAND"};
+  phosg::fwrite_fmt(stream, "Base weapon config:\n");
+  phosg::fwrite_fmt(stream, "  TYPE         PROB  [SB  AL]  FLOORS\n");
+  for (size_t z = 0; z < 12; z++) {
+    uint8_t floor_to_class[10];
+    if (this->subtype_base_table[z] < 0) {
+      size_t start_floor = std::min<size_t>(-this->subtype_area_length_table[z], 10);
+      for (size_t x = 0; x < start_floor; x++) {
+        floor_to_class[x] = 0xFF;
+      }
+      for (size_t x = start_floor; x < 10; x++) {
+        floor_to_class[x] = (x - start_floor) / this->subtype_area_length_table[z];
+      }
+    } else {
+      for (size_t x = 0; x < 10; x++) {
+        floor_to_class[x] = this->subtype_base_table[z] + (x / this->subtype_area_length_table[z]);
+      }
+    }
+    phosg::fwrite_fmt(stream, "  {:02X}:{:<8}  {:3}%  [{:02X}  {:02X}]  {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}\n",
+        z, base_weapon_type_names[z], this->base_weapon_type_prob_table[z],
+        this->subtype_base_table[z], this->subtype_area_length_table[z],
+        floor_to_class[0], floor_to_class[1], floor_to_class[2], floor_to_class[3], floor_to_class[4],
+        floor_to_class[5], floor_to_class[6], floor_to_class[7], floor_to_class[8], floor_to_class[9]);
+  }
+
+  phosg::fwrite_fmt(stream, "Box configuration:\n");
+  phosg::fwrite_fmt(stream, "  AR   $LOW  $HIGH  WEP%  ARM%  SHD%  UNI%   TL%  MST%   NO%\n");
+  for (size_t z = 0; z < 10; z++) {
+    phosg::fwrite_fmt(stream, "  {:02X}  {:5}  {:5}  {:3}%  {:3}%  {:3}%  {:3}%  {:3}%  {:3}%  {:3}%\n",
+        z, this->box_meseta_ranges[z].min, this->box_meseta_ranges[z].max,
+        this->box_item_class_prob_table[0][z],
+        this->box_item_class_prob_table[1][z],
+        this->box_item_class_prob_table[2][z],
+        this->box_item_class_prob_table[3][z],
+        this->box_item_class_prob_table[4][z],
+        this->box_item_class_prob_table[5][z],
+        this->box_item_class_prob_table[6][z]);
+  }
+
+  phosg::fwrite_fmt(stream, "Weapon drops:\n");
+  phosg::fwrite_fmt(stream, "  Grinds:\n");
+  phosg::fwrite_fmt(stream, "    GD  AR0%  AR1%  AR2%  AR3%\n");
+  for (size_t z = 0; z < 9; z++) {
+    phosg::fwrite_fmt(stream, "    +{}  {:3}%  {:3}%  {:3}%  {:3}%\n", z,
+        this->grind_prob_table[z][0], this->grind_prob_table[z][1],
+        this->grind_prob_table[z][2], this->grind_prob_table[z][3]);
+  }
+  phosg::fwrite_fmt(stream, "  Bonus value table:\n");
+  phosg::fwrite_fmt(stream, "    ID");
+  for (int8_t v = -10; v <= 100; v += 5) {
+    phosg::fwrite_fmt(stream, "  {:5}%", v);
+  }
+  fputc('\n', stream);
+  for (size_t z = 0; z < (this->has_rare_bonus_value_prob_table ? 6 : 5); z++) {
+    phosg::fwrite_fmt(stream, "    {:02X}", z);
+    for (size_t x = 0; x < 0x17; x++) {
+      phosg::fwrite_fmt(stream, "  {:5}#", this->bonus_value_prob_table[x][z]);
+    }
+    fputc('\n', stream);
+  }
+  phosg::fwrite_fmt(stream, "  Area config tables:\n");
+  phosg::fwrite_fmt(stream, "    AR  BONUS  SP   NO%  NTV%   AB%  MAC%  DRK%  HIT%  SM  SPC%\n");
+  for (size_t z = 0; z < 10; z++) {
+    phosg::fwrite_fmt(stream, "    {:02X}  {:02X} {:02X}  {:02X}  {:3}%  {:3}%  {:3}%  {:3}%  {:3}%  {:3}%  {:02X}  {:3}%\n",
+        z, this->nonrare_bonus_prob_spec[0][z], this->nonrare_bonus_prob_spec[1][z], this->nonrare_bonus_prob_spec[2][z],
+        this->bonus_type_prob_table[0][z], this->bonus_type_prob_table[1][z], this->bonus_type_prob_table[2][z],
+        this->bonus_type_prob_table[3][z], this->bonus_type_prob_table[4][z], this->bonus_type_prob_table[5][z],
+        this->special_mult[z], this->special_percent[z]);
+  }
+
+  phosg::fwrite_fmt(stream, "Tool class table:\n");
+  phosg::fwrite_fmt(stream, "  CS     A1     A2     A3     A4     A5     A6     A7     A8     A9    A10\n");
+  for (size_t tool_class = 0; tool_class < this->tool_class_prob_table.size(); tool_class++) {
+    phosg::fwrite_fmt(stream, "  {:02X}", tool_class);
+    for (size_t area_norm = 0; area_norm < 10; area_norm++) {
+      phosg::fwrite_fmt(stream, "  {:5}", this->tool_class_prob_table[tool_class][area_norm]);
+    }
+    fputc('\n', stream);
+  }
+
+  static const std::array<const char*, 19> technique_names{
+      "FOIE", "GIFOIE", "RAFOIE", "BARTA", "GIBARTA", "RABARTA", "ZONDE", "GIZONDE", "RAZONDE",
+      "GRANTS", "DEBAND", "JELLEN", "ZALURE", "SHIFTA", "RYUKER", "RESTA", "ANTI", "REVERSER", "MEGID"};
+
+  phosg::fwrite_fmt(stream, "Technique table:\n");
+  phosg::fwrite_fmt(stream, "  TECH                   A1            A2            A3            A4            A5            A6            A7            A8            A9           A10\n");
+  for (size_t tech_num = 0; tech_num < this->technique_index_prob_table.size(); tech_num++) {
+    phosg::fwrite_fmt(stream, "  {:02X}:{:<8}", tech_num, technique_names[tech_num]);
+    for (size_t area_norm = 0; area_norm < 10; area_norm++) {
+      uint16_t prob = this->technique_index_prob_table[tech_num][area_norm];
+      if (prob) {
+        const auto& level_range = this->technique_level_ranges[tech_num][area_norm];
+        size_t min_level = level_range.min + 1;
+        size_t max_level = level_range.max + 1;
+        phosg::fwrite_fmt(stream, "  {:5}[{:2}-{:2}]", prob, min_level, max_level);
+      } else {
+        phosg::fwrite_fmt(stream, "      0[-----]");
+      }
+    }
+    fputc('\n', stream);
+  }
+
+  phosg::fwrite_fmt(stream, "Armor/shield type bias: {}\n", this->armor_or_shield_type_bias);
+
+  phosg::fwrite_fmt(stream, "Armor/shield type index table:\n");
+  phosg::fwrite_fmt(stream, "  TY  PROB\n");
+  for (size_t z = 0; z < 5; z++) {
+    phosg::fwrite_fmt(stream, "  {:02X}  {:3}%\n", z, this->armor_shield_type_index_prob_table[z]);
+  }
+
+  phosg::fwrite_fmt(stream, "Armor/shield slot count table:\n");
+  phosg::fwrite_fmt(stream, "  #S  PROB\n");
+  for (size_t z = 0; z < 5; z++) {
+    phosg::fwrite_fmt(stream, "  {:02X}  {:3}%\n", z, this->armor_slot_count_prob_table[z]);
+  }
+
+  phosg::fwrite_fmt(stream, "Unit maximum stars table:\n");
+  phosg::fwrite_fmt(stream, "  AR   #*\n");
+  for (size_t z = 0; z < 10; z++) {
+    phosg::fwrite_fmt(stream, "  {:02X}  {:3}\n", z, this->unit_max_stars_table[z]);
+  }
+}
+
+void CommonItemSet::Table::print_diff(FILE* stream, const Table& other) const {
+  if (this->episode != other.episode) {
+    phosg::fwrite_fmt(stream, ">   Episode: {} -> {}\n", name_for_episode(this->episode), name_for_episode(other.episode));
+  }
+  if (this->base_weapon_type_prob_table != other.base_weapon_type_prob_table) {
+    phosg::fwrite_fmt(stream, ">   base_weapon_type_prob_table: {} -> {}\n",
+        phosg::format_data_string(&this->base_weapon_type_prob_table, sizeof(this->base_weapon_type_prob_table)),
+        phosg::format_data_string(&other.base_weapon_type_prob_table, sizeof(other.base_weapon_type_prob_table)));
+  }
+  if (this->subtype_base_table != other.subtype_base_table) {
+    phosg::fwrite_fmt(stream, ">   subtype_base_table: {} -> {}\n",
+        phosg::format_data_string(&this->subtype_base_table, sizeof(this->subtype_base_table)),
+        phosg::format_data_string(&other.subtype_base_table, sizeof(other.subtype_base_table)));
+  }
+  if (this->subtype_area_length_table != other.subtype_area_length_table) {
+    phosg::fwrite_fmt(stream, ">   subtype_area_length_table: {} -> {}\n",
+        phosg::format_data_string(&this->subtype_area_length_table, sizeof(this->subtype_area_length_table)),
+        phosg::format_data_string(&other.subtype_area_length_table, sizeof(other.subtype_area_length_table)));
+  }
+  if (this->grind_prob_table != other.grind_prob_table) {
+    phosg::fwrite_fmt(stream, ">   grind_prob_table: {} -> {}\n",
+        phosg::format_data_string(&this->grind_prob_table, sizeof(this->grind_prob_table)),
+        phosg::format_data_string(&other.grind_prob_table, sizeof(other.grind_prob_table)));
+  }
+  if (this->armor_shield_type_index_prob_table != other.armor_shield_type_index_prob_table) {
+    phosg::fwrite_fmt(stream, ">   armor_shield_type_index_prob_table: {} -> {}\n",
+        phosg::format_data_string(&this->armor_shield_type_index_prob_table, sizeof(this->armor_shield_type_index_prob_table)),
+        phosg::format_data_string(&other.armor_shield_type_index_prob_table, sizeof(other.armor_shield_type_index_prob_table)));
+  }
+  if (this->armor_slot_count_prob_table != other.armor_slot_count_prob_table) {
+    phosg::fwrite_fmt(stream, ">   armor_slot_count_prob_table: {} -> {}\n",
+        phosg::format_data_string(&this->armor_slot_count_prob_table, sizeof(this->armor_slot_count_prob_table)),
+        phosg::format_data_string(&other.armor_slot_count_prob_table, sizeof(other.armor_slot_count_prob_table)));
+  }
+
+  auto format_enemy_range_table = [&](const std::unordered_map<EnemyType, Range<uint16_t>>& table) -> std::string {
+    std::string ret = "";
+    for (auto enemy_type : phosg::EnumRange<EnemyType>()) {
+      try {
+        const auto& range = table.at(enemy_type);
+        if (!ret.empty()) {
+          ret += ",";
+        }
+        ret += std::format("{}=[{},{}]", phosg::name_for_enum(enemy_type), range.min, range.max);
+      } catch (const std::out_of_range&) {
+      }
+    }
+    return ret;
+  };
+  auto format_enemy_u8_table = [&](const std::unordered_map<EnemyType, uint8_t>& table) -> std::string {
+    std::string ret = "";
+    for (auto enemy_type : phosg::EnumRange<EnemyType>()) {
+      try {
+        uint8_t value = table.at(enemy_type);
+        if (!ret.empty()) {
+          ret += ",";
+        }
+        ret += std::format("{}={}", phosg::name_for_enum(enemy_type), value);
+      } catch (const std::out_of_range&) {
+      }
+    }
+    return ret;
+  };
+
+  if (this->enemy_type_meseta_ranges != other.enemy_type_meseta_ranges) {
+    phosg::fwrite_fmt(stream, ">   enemy_type_meseta_ranges: {} -> {}\n",
+        format_enemy_range_table(this->enemy_type_meseta_ranges),
+        format_enemy_range_table(other.enemy_type_meseta_ranges));
+  }
+  if (this->enemy_type_drop_probs != other.enemy_type_drop_probs) {
+    phosg::fwrite_fmt(stream, ">   enemy_type_drop_probs: {} -> {}\n",
+        format_enemy_u8_table(this->enemy_type_drop_probs),
+        format_enemy_u8_table(other.enemy_type_drop_probs));
+  }
+  if (this->enemy_type_item_classes != other.enemy_type_item_classes) {
+    phosg::fwrite_fmt(stream, ">   enemy_type_item_classes: {} -> {}\n",
+        format_enemy_u8_table(this->enemy_type_item_classes),
+        format_enemy_u8_table(other.enemy_type_item_classes));
+  }
+  if (this->box_meseta_ranges != other.box_meseta_ranges) {
+    phosg::fwrite_fmt(stream, ">   box_meseta_ranges: {} -> {}\n",
+        phosg::format_data_string(&this->box_meseta_ranges, sizeof(this->box_meseta_ranges)),
+        phosg::format_data_string(&other.box_meseta_ranges, sizeof(other.box_meseta_ranges)));
+  }
+  if (this->has_rare_bonus_value_prob_table != other.has_rare_bonus_value_prob_table) {
+    phosg::fwrite_fmt(stream, ">   Has rare bonus value prob table: {} -> {}\n",
+        this->has_rare_bonus_value_prob_table ? "true" : "false",
+        other.has_rare_bonus_value_prob_table ? "true" : "false");
+  }
+  if (this->bonus_value_prob_table != other.bonus_value_prob_table) {
+    phosg::fwrite_fmt(stream, ">   bonus_value_prob_table: {} -> {}\n",
+        phosg::format_data_string(&this->bonus_value_prob_table, sizeof(this->bonus_value_prob_table)),
+        phosg::format_data_string(&other.bonus_value_prob_table, sizeof(other.bonus_value_prob_table)));
+  }
+  if (this->nonrare_bonus_prob_spec != other.nonrare_bonus_prob_spec) {
+    phosg::fwrite_fmt(stream, ">   nonrare_bonus_prob_spec: {} -> {}\n",
+        phosg::format_data_string(&this->nonrare_bonus_prob_spec, sizeof(this->nonrare_bonus_prob_spec)),
+        phosg::format_data_string(&other.nonrare_bonus_prob_spec, sizeof(other.nonrare_bonus_prob_spec)));
+  }
+  if (this->bonus_type_prob_table != other.bonus_type_prob_table) {
+    phosg::fwrite_fmt(stream, ">   bonus_type_prob_table: {} -> {}\n",
+        phosg::format_data_string(&this->bonus_type_prob_table, sizeof(this->bonus_type_prob_table)),
+        phosg::format_data_string(&other.bonus_type_prob_table, sizeof(other.bonus_type_prob_table)));
+  }
+  if (this->special_mult != other.special_mult) {
+    phosg::fwrite_fmt(stream, ">   special_mult: {} -> {}\n",
+        phosg::format_data_string(&this->special_mult, sizeof(this->special_mult)),
+        phosg::format_data_string(&other.special_mult, sizeof(other.special_mult)));
+  }
+  if (this->special_percent != other.special_percent) {
+    phosg::fwrite_fmt(stream, ">   special_percent: {} -> {}\n",
+        phosg::format_data_string(&this->special_percent, sizeof(this->special_percent)),
+        phosg::format_data_string(&other.special_percent, sizeof(other.special_percent)));
+  }
+  if (this->tool_class_prob_table != other.tool_class_prob_table) {
+    phosg::fwrite_fmt(stream, ">   tool_class_prob_table: {} -> {}\n",
+        phosg::format_data_string(&this->tool_class_prob_table, sizeof(this->tool_class_prob_table)),
+        phosg::format_data_string(&other.tool_class_prob_table, sizeof(other.tool_class_prob_table)));
+  }
+  if (this->technique_index_prob_table != other.technique_index_prob_table) {
+    phosg::fwrite_fmt(stream, ">   technique_index_prob_table: {} -> {}\n",
+        phosg::format_data_string(&this->technique_index_prob_table, sizeof(this->technique_index_prob_table)),
+        phosg::format_data_string(&other.technique_index_prob_table, sizeof(other.technique_index_prob_table)));
+  }
+  if (this->technique_level_ranges != other.technique_level_ranges) {
+    phosg::fwrite_fmt(stream, ">   technique_level_ranges: {} -> {}\n",
+        phosg::format_data_string(&this->technique_level_ranges, sizeof(this->technique_level_ranges)),
+        phosg::format_data_string(&other.technique_level_ranges, sizeof(other.technique_level_ranges)));
+  }
+  if (this->armor_or_shield_type_bias != other.armor_or_shield_type_bias) {
+    phosg::fwrite_fmt(stream, ">   Armor/shield type bias: {} -> {}\n",
+        this->armor_or_shield_type_bias ? "true" : "false",
+        other.armor_or_shield_type_bias ? "true" : "false");
+  }
+  if (this->unit_max_stars_table != other.unit_max_stars_table) {
+    phosg::fwrite_fmt(stream, ">   unit_max_stars_table: {} -> {}\n",
+        phosg::format_data_string(&this->unit_max_stars_table, sizeof(this->unit_max_stars_table)),
+        phosg::format_data_string(&other.unit_max_stars_table, sizeof(other.unit_max_stars_table)));
+  }
+  if (this->box_item_class_prob_table != other.box_item_class_prob_table) {
+    phosg::fwrite_fmt(stream, ">   box_item_class_prob_table: {} -> {}\n",
+        phosg::format_data_string(&this->box_item_class_prob_table, sizeof(this->box_item_class_prob_table)),
+        phosg::format_data_string(&other.box_item_class_prob_table, sizeof(other.box_item_class_prob_table)));
+  }
+}
+
+phosg::JSON CommonItemSet::Table::json(std::shared_ptr<const Table> prev_table) const {
+  auto ret = phosg::JSON::dict();
+
+  if (!prev_table || (this->base_weapon_type_prob_table != prev_table->base_weapon_type_prob_table)) {
+    ret.emplace("BaseWeaponTypeProbTable", to_json(this->base_weapon_type_prob_table));
+  }
+  if (!prev_table || (this->subtype_base_table != prev_table->subtype_base_table)) {
+    ret.emplace("SubtypeBaseTable", to_json(this->subtype_base_table));
+  }
+  if (!prev_table || (this->subtype_area_length_table != prev_table->subtype_area_length_table)) {
+    ret.emplace("SubtypeAreaLengthTable", to_json(this->subtype_area_length_table));
+  }
+  if (!prev_table || (this->grind_prob_table != prev_table->grind_prob_table)) {
+    ret.emplace("GrindProbTable", to_json(this->grind_prob_table));
+  }
+  if (!prev_table || (this->armor_shield_type_index_prob_table != prev_table->armor_shield_type_index_prob_table)) {
+    ret.emplace("ArmorShieldTypeIndexProbTable", to_json(this->armor_shield_type_index_prob_table));
+  }
+  if (!prev_table || (this->armor_slot_count_prob_table != prev_table->armor_slot_count_prob_table)) {
+    ret.emplace("ArmorSlotCountProbTable", to_json(this->armor_slot_count_prob_table));
+  }
+
+  bool needs_enemy_type_meseta_ranges = (!prev_table ||
+      (this->enemy_type_meseta_ranges != prev_table->enemy_type_meseta_ranges));
+  bool needs_enemy_type_drop_probs = (!prev_table ||
+      (this->enemy_type_drop_probs != prev_table->enemy_type_drop_probs));
+  bool needs_enemy_type_item_classes = (!prev_table ||
+      (this->enemy_type_item_classes != prev_table->enemy_type_item_classes));
+  if (needs_enemy_type_meseta_ranges || needs_enemy_type_drop_probs || needs_enemy_type_item_classes) {
+    phosg::JSON enemy_type_meseta_ranges_json = phosg::JSON::dict();
+    phosg::JSON enemy_type_drop_probs_json = phosg::JSON::dict();
+    phosg::JSON enemy_type_item_classes_json = phosg::JSON::dict();
+    for (auto enemy_type : phosg::EnumRange<EnemyType>()) {
+      auto name = phosg::name_for_enum(enemy_type);
+      if (needs_enemy_type_meseta_ranges) {
+        try {
+          enemy_type_meseta_ranges_json.emplace(name, to_json(this->enemy_type_meseta_ranges.at(enemy_type)));
+        } catch (const std::out_of_range&) {
+        }
+      }
+      if (needs_enemy_type_drop_probs) {
+        try {
+          enemy_type_drop_probs_json.emplace(name, this->enemy_type_drop_probs.at(enemy_type));
+        } catch (const std::out_of_range&) {
+        }
+      }
+      if (needs_enemy_type_item_classes) {
+        try {
+          enemy_type_item_classes_json.emplace(name, this->enemy_type_item_classes.at(enemy_type));
+        } catch (const std::out_of_range&) {
+        }
+      }
+    }
+    if (needs_enemy_type_meseta_ranges) {
+      ret.emplace("EnemyMesetaRanges", std::move(enemy_type_meseta_ranges_json));
+    }
+    if (needs_enemy_type_drop_probs) {
+      ret.emplace("EnemyTypeDropProbs", std::move(enemy_type_drop_probs_json));
+    }
+    if (needs_enemy_type_item_classes) {
+      ret.emplace("EnemyItemClasses", std::move(enemy_type_item_classes_json));
+    }
+  }
+
+  if (!prev_table || (this->box_meseta_ranges != prev_table->box_meseta_ranges)) {
+    ret.emplace("BoxMesetaRanges", to_json(this->box_meseta_ranges));
+  }
+  if (!prev_table || (this->has_rare_bonus_value_prob_table != prev_table->has_rare_bonus_value_prob_table)) {
+    ret.emplace("HasRareBonusValueProbTable", this->has_rare_bonus_value_prob_table);
+  }
+  if (!prev_table || (this->bonus_value_prob_table != prev_table->bonus_value_prob_table)) {
+    ret.emplace("BonusValueProbTable", to_json(this->bonus_value_prob_table));
+  }
+  if (!prev_table || (this->nonrare_bonus_prob_spec != prev_table->nonrare_bonus_prob_spec)) {
+    ret.emplace("NonRareBonusProbSpec", to_json(this->nonrare_bonus_prob_spec));
+  }
+  if (!prev_table || (this->bonus_type_prob_table != prev_table->bonus_type_prob_table)) {
+    ret.emplace("BonusTypeProbTable", to_json(this->bonus_type_prob_table));
+  }
+  if (!prev_table || (this->special_mult != prev_table->special_mult)) {
+    ret.emplace("SpecialMult", to_json(this->special_mult));
+  }
+  if (!prev_table || (this->special_percent != prev_table->special_percent)) {
+    ret.emplace("SpecialPercent", to_json(this->special_percent));
+  }
+  if (!prev_table || (this->tool_class_prob_table != prev_table->tool_class_prob_table)) {
+    ret.emplace("ToolClassProbTable", to_json(this->tool_class_prob_table));
+  }
+  if (!prev_table || (this->technique_index_prob_table != prev_table->technique_index_prob_table)) {
+    ret.emplace("TechniqueIndexProbTable", to_json(this->technique_index_prob_table));
+  }
+  if (!prev_table || (this->technique_level_ranges != prev_table->technique_level_ranges)) {
+    ret.emplace("TechniqueLevelRanges", to_json(this->technique_level_ranges));
+  }
+  if (!prev_table || (this->armor_or_shield_type_bias != prev_table->armor_or_shield_type_bias)) {
+    ret.emplace("ArmorOrShieldTypeBias", this->armor_or_shield_type_bias);
+  }
+  if (!prev_table || (this->unit_max_stars_table != prev_table->unit_max_stars_table)) {
+    ret.emplace("UnitMaxStarsTable", to_json(this->unit_max_stars_table));
+  }
+  if (!prev_table || (this->box_item_class_prob_table != prev_table->box_item_class_prob_table)) {
+    ret.emplace("BoxItemClassProbTable", to_json(this->box_item_class_prob_table));
+  }
+
+  return ret;
+}
+
+phosg::JSON CommonItemSet::json() const {
+  auto ret = phosg::JSON::dict();
+  for (const auto& episode : ALL_EPISODES_V4) {
+    for (const auto& mode : ALL_GAME_MODES_V4) {
+      for (const auto& difficulty : ALL_DIFFICULTIES_V234) {
+        for (uint8_t section_id = 0; section_id < 10; section_id++) {
+          auto json_key = this->json_key_for_table(episode, mode, difficulty, section_id);
+          try {
+            auto prev_table = this->get_prev_table(episode, mode, difficulty, section_id);
+            auto table = this->get_table(episode, mode, difficulty, section_id);
+            ret.emplace(json_key, table->json(prev_table));
+          } catch (const std::runtime_error&) {
+          }
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+void CommonItemSet::print(FILE* stream) const {
+  for (const auto& episode : ALL_EPISODES_V4) {
+    for (const auto& mode : ALL_GAME_MODES_V4) {
+      for (Difficulty difficulty : ALL_DIFFICULTIES_V234) {
+        for (uint8_t section_id = 0; section_id < 10; section_id++) {
+          try {
+            auto table = this->get_table(episode, mode, difficulty, section_id);
+            phosg::fwrite_fmt(stream, "============ {} {} {} {}\n",
+                name_for_episode(episode),
+                name_for_mode(mode),
+                name_for_difficulty(difficulty),
+                name_for_section_id(section_id));
+            table->print(stream);
+          } catch (const std::runtime_error&) {
+          }
+        }
+      }
+    }
+  }
+}
+
+void CommonItemSet::print_diff(FILE* stream, const CommonItemSet& other) const {
+  for (const auto& episode : ALL_EPISODES_V4) {
+    for (const auto& mode : ALL_GAME_MODES_V4) {
+      for (const auto& difficulty : ALL_DIFFICULTIES_V234) {
+        for (uint8_t section_id = 0; section_id < 10; section_id++) {
+          std::shared_ptr<const Table> this_table;
+          std::shared_ptr<const Table> other_table;
+          try {
+            this_table = this->get_table(episode, mode, difficulty, section_id);
+          } catch (const std::runtime_error&) {
+          }
+          try {
+            other_table = other.get_table(episode, mode, difficulty, section_id);
+          } catch (const std::runtime_error&) {
+          }
+
+          if (!this_table && !other_table) {
+            continue;
+          } else if (!this_table) {
+            phosg::fwrite_fmt(stream, "> Table present in other but not this: {} {} {} {}\n",
+                name_for_episode(episode),
+                name_for_mode(mode),
+                name_for_difficulty(difficulty),
+                name_for_section_id(section_id));
+          } else if (!other_table) {
+            phosg::fwrite_fmt(stream, "> Table present in this but not other: {} {} {} {}\n",
+                name_for_episode(episode),
+                name_for_mode(mode),
+                name_for_difficulty(difficulty),
+                name_for_section_id(section_id));
+          } else if (*this_table != *other_table) {
+            phosg::fwrite_fmt(stream, "> Tables do not match: {} {} {} {}\n",
+                name_for_episode(episode),
+                name_for_mode(mode),
+                name_for_difficulty(difficulty),
+                name_for_section_id(section_id));
+            this_table->print_diff(stream, *other_table);
+          }
+        }
+      }
+    }
+  }
+}
+
+CommonItemSet::Table::Table(const phosg::StringReader& r, bool is_big_endian, bool is_v3, Episode episode)
+    : episode(episode) {
   if (is_big_endian) {
     this->parse_itempt_t<true>(r, is_v3);
   } else {
@@ -14,12 +683,9 @@ CommonItemSet::Table::Table(const StringReader& r, bool is_big_endian, bool is_v
   }
 }
 
-template <bool IsBigEndian>
-void CommonItemSet::Table::parse_itempt_t(const StringReader& r, bool is_v3) {
-  using U16T = typename std::conditional<IsBigEndian, be_uint16_t, le_uint16_t>::type;
-  using U32T = typename std::conditional<IsBigEndian, be_uint32_t, le_uint32_t>::type;
-
-  const auto& offsets = r.pget<Offsets<IsBigEndian>>(r.pget<U32T>(r.size() - 0x10));
+template <bool BE>
+void CommonItemSet::Table::parse_itempt_t(const phosg::StringReader& r, bool is_v3) {
+  const auto& offsets = r.pget<RootT<BE>>(r.pget<U32T<BE>>(r.size() - 0x10));
 
   this->base_weapon_type_prob_table = r.pget<parray<uint8_t, 0x0C>>(offsets.base_weapon_type_prob_table_offset);
   this->subtype_base_table = r.pget<parray<int8_t, 0x0C>>(offsets.subtype_base_table_offset);
@@ -27,14 +693,29 @@ void CommonItemSet::Table::parse_itempt_t(const StringReader& r, bool is_v3) {
   this->grind_prob_table = r.pget<parray<parray<uint8_t, 4>, 9>>(offsets.grind_prob_table_offset);
   this->armor_shield_type_index_prob_table = r.pget<parray<uint8_t, 0x05>>(offsets.armor_shield_type_index_prob_table_offset);
   this->armor_slot_count_prob_table = r.pget<parray<uint8_t, 0x05>>(offsets.armor_slot_count_prob_table_offset);
-  const auto& data = r.pget<parray<Range<U16T>, 0x64>>(offsets.enemy_meseta_ranges_offset);
-  for (size_t z = 0; z < data.size(); z++) {
-    this->enemy_meseta_ranges[z] = Range<uint16_t>{data[z].min, data[z].max};
+  const auto& enemy_rt_index_meseta_ranges = r.pget<parray<Range<U16T<BE>>, NUM_RT_INDEXES_V3>>(
+      offsets.enemy_rt_index_meseta_ranges_offset);
+  const auto& enemy_rt_index_drop_probs = r.pget<parray<uint8_t, NUM_RT_INDEXES_V3>>(
+      offsets.enemy_rt_index_drop_probs_offset);
+  const auto& enemy_rt_index_item_classes = r.pget<parray<uint8_t, NUM_RT_INDEXES_V3>>(
+      offsets.enemy_rt_index_item_classes_offset);
+  for (auto enemy_type : phosg::EnumRange<EnemyType>()) {
+    const auto& def = type_definition_for_enemy(enemy_type);
+    if (def.valid_in_episode(this->episode) && (def.rt_index < enemy_rt_index_meseta_ranges.size())) {
+      const auto& meseta_range = enemy_rt_index_meseta_ranges[def.rt_index];
+      if (meseta_range.max > 0) {
+        this->enemy_type_meseta_ranges.emplace(enemy_type, Range<uint16_t>{meseta_range.min, meseta_range.max});
+      }
+      if (enemy_rt_index_drop_probs[def.rt_index] > 0) {
+        this->enemy_type_drop_probs.emplace(enemy_type, enemy_rt_index_drop_probs[def.rt_index]);
+      }
+      if (enemy_rt_index_item_classes[def.rt_index] != 0xFF) {
+        this->enemy_type_item_classes.emplace(enemy_type, enemy_rt_index_item_classes[def.rt_index]);
+      }
+    }
   }
-  this->enemy_type_drop_probs = r.pget<parray<uint8_t, 0x64>>(offsets.enemy_type_drop_probs_offset);
-  this->enemy_item_classes = r.pget<parray<uint8_t, 0x64>>(offsets.enemy_item_classes_offset);
   {
-    const auto& data = r.pget<parray<Range<U16T>, 0x0A>>(offsets.box_meseta_ranges_offset);
+    const auto& data = r.pget<parray<Range<U16T<BE>>, 0x0A>>(offsets.box_meseta_ranges_offset);
     for (size_t z = 0; z < data.size(); z++) {
       this->box_meseta_ranges[z] = Range<uint16_t>{data[z].min, data[z].max};
     }
@@ -48,7 +729,7 @@ void CommonItemSet::Table::parse_itempt_t(const StringReader& r, bool is_v3) {
       }
     }
   } else { // V3
-    const auto& data = r.pget<parray<parray<U16T, 6>, 0x17>>(offsets.bonus_value_prob_table_offset);
+    const auto& data = r.pget<parray<parray<U16T<BE>, 6>, 0x17>>(offsets.bonus_value_prob_table_offset);
     for (size_t z = 0; z < data.size(); z++) {
       for (size_t x = 0; x < data[z].size(); x++) {
         this->bonus_value_prob_table[z][x] = data[z][x];
@@ -60,7 +741,7 @@ void CommonItemSet::Table::parse_itempt_t(const StringReader& r, bool is_v3) {
   this->special_mult = r.pget<parray<uint8_t, 0x0A>>(offsets.special_mult_offset);
   this->special_percent = r.pget<parray<uint8_t, 0x0A>>(offsets.special_percent_offset);
   {
-    const auto& data = r.pget<parray<parray<U16T, 0x0A>, 0x1C>>(offsets.tool_class_prob_table_offset);
+    const auto& data = r.pget<parray<parray<U16T<BE>, 0x0A>, 0x1C>>(offsets.tool_class_prob_table_offset);
     for (size_t z = 0; z < data.size(); z++) {
       for (size_t x = 0; x < data[z].size(); x++) {
         this->tool_class_prob_table[z][x] = data[z][x];
@@ -74,42 +755,7 @@ void CommonItemSet::Table::parse_itempt_t(const StringReader& r, bool is_v3) {
   this->box_item_class_prob_table = r.pget<parray<parray<uint8_t, 10>, 7>>(offsets.box_item_class_prob_table_offset);
 }
 
-void CommonItemSet::Table::print_enemy_table(FILE* stream) const {
-  const auto& meseta_ranges = this->enemy_meseta_ranges;
-  const auto& drop_probs = this->enemy_type_drop_probs;
-  const auto& item_classes = this->enemy_item_classes;
-  // const parray<Range<uint16_t>, 0x64>& enemy_meseta_ranges() const;
-  //   const parray<uint8_t, 0x64>& enemy_type_drop_probs() const;
-  //   const parray<uint8_t, 0x64>& enemy_item_classes() const;
-  fprintf(stream, "##  $_LOW  $_HIGH  DAR  ITEM\n");
-  for (size_t z = 0; z < 0x64; z++) {
-    const char* item_class_name = "__UNKNOWN__";
-    switch (item_classes[z]) {
-      case 0x00:
-        item_class_name = "WEAPON";
-        break;
-      case 0x01:
-        item_class_name = "ARMOR";
-        break;
-      case 0x02:
-        item_class_name = "SHIELD";
-        break;
-      case 0x03:
-        item_class_name = "UNIT";
-        break;
-      case 0x04:
-        item_class_name = "TOOL";
-        break;
-      case 0x05:
-        item_class_name = "MESETA";
-        break;
-    }
-    fprintf(stream, "%02zX  %5hu   %5hu  %3hhu  %02hX (%s)\n",
-        z, meseta_ranges[z].min, meseta_ranges[z].max, drop_probs[z], item_classes[z], item_class_name);
-  }
-}
-
-uint16_t CommonItemSet::key_for_table(Episode episode, GameMode mode, uint8_t difficulty, uint8_t secid) {
+uint16_t CommonItemSet::key_for_table(Episode episode, GameMode mode, Difficulty difficulty, uint8_t secid) {
   // Bits: -----EEEMMDDSSSS
   return (((static_cast<uint16_t>(episode) << 8) & 0x0700) |
       ((static_cast<uint16_t>(mode) << 6) & 0x00C0) |
@@ -117,40 +763,88 @@ uint16_t CommonItemSet::key_for_table(Episode episode, GameMode mode, uint8_t di
       (static_cast<uint16_t>(secid) & 0x000F));
 }
 
-shared_ptr<const CommonItemSet::Table> CommonItemSet::get_table(
-    Episode episode, GameMode mode, uint8_t difficulty, uint8_t secid) const {
+std::string CommonItemSet::json_key_for_table(
+    Episode episode, GameMode mode, Difficulty difficulty, uint8_t section_id) {
+  return std::format("{}:{}:{}:{}", abbreviation_for_episode(episode), name_for_mode(mode),
+      token_name_for_difficulty(difficulty), name_for_section_id(section_id));
+}
+
+std::shared_ptr<const CommonItemSet::Table> CommonItemSet::get_table(
+    Episode episode, GameMode mode, Difficulty difficulty, uint8_t section_id) const {
   try {
-    return this->tables.at(this->key_for_table(episode, mode, difficulty, secid));
-  } catch (const out_of_range&) {
-    throw runtime_error(string_printf("common item table not available for episode=%s, mode=%s, difficulty=%hu, secid=%hu",
-        name_for_episode(episode), name_for_mode(mode), difficulty, secid));
+    return this->tables.at(this->key_for_table(episode, mode, difficulty, section_id));
+  } catch (const std::out_of_range&) {
+    throw std::runtime_error(std::format("common item table not available for episode={}, mode={}, difficulty={}, secid={}",
+        name_for_episode(episode), name_for_mode(mode), name_for_difficulty(difficulty), section_id));
+  }
+}
+
+std::shared_ptr<const CommonItemSet::Table> CommonItemSet::get_prev_table(
+    Episode episode, GameMode mode, Difficulty difficulty, uint8_t section_id) const {
+  if (section_id != 0) {
+    // All section IDs are based on the previous, except Viridia
+    return this->get_table(episode, mode, difficulty, section_id - 1);
+  } else if (difficulty != Difficulty::NORMAL) {
+    // All Viridia tables are based on the previous difficulty, except Normal
+    auto prev_difficulty = static_cast<Difficulty>(static_cast<uint8_t>(difficulty) - 1);
+    return this->get_table(episode, mode, prev_difficulty, 0);
+  } else if (mode != GameMode::NORMAL) {
+    // All Normal Viridia tables are based on the Normal game mode, except Normal itself
+    return this->get_table(episode, GameMode::NORMAL, Difficulty::NORMAL, 0);
+  } else {
+    // There's no previous table
+    return nullptr;
   }
 }
 
 AFSV2CommonItemSet::AFSV2CommonItemSet(
-    std::shared_ptr<const std::string> pt_afs_data,
-    std::shared_ptr<const std::string> ct_afs_data) {
-  // ItemPT.afs has 40 entries; the first 10 are for Normal, then Hard, etc.
-  AFSArchive pt_afs(pt_afs_data);
-  for (size_t difficulty = 0; difficulty < 4; difficulty++) {
-    for (size_t section_id = 0; section_id < 10; section_id++) {
-      auto entry = pt_afs.get(difficulty * 10 + section_id);
-      StringReader r(entry.first, entry.second);
-      auto table = make_shared<Table>(r, false, false);
-      this->tables.emplace(this->key_for_table(Episode::EP1, GameMode::NORMAL, difficulty, section_id), table);
-      this->tables.emplace(this->key_for_table(Episode::EP1, GameMode::BATTLE, difficulty, section_id), table);
-      this->tables.emplace(this->key_for_table(Episode::EP1, GameMode::SOLO, difficulty, section_id), table);
+    std::shared_ptr<const std::string> pt_afs_data, std::shared_ptr<const std::string> ct_afs_data) {
+  // Each AFS file has 40 entries (30 on v1); the first 10 are for Normal, then Hard, etc.
+  {
+    AFSArchive pt_afs(pt_afs_data);
+    bool include_ultimate;
+    if (pt_afs.num_entries() >= 40) {
+      include_ultimate = true;
+    } else if (pt_afs.num_entries() >= 30) {
+      include_ultimate = false;
+    } else {
+      throw std::runtime_error(std::format("PT AFS file has unexpected entry count ({})", pt_afs.num_entries()));
+    }
+    for (Difficulty difficulty : ALL_DIFFICULTIES_V234) {
+      if ((difficulty == Difficulty::ULTIMATE) && !include_ultimate) {
+        continue;
+      }
+      for (size_t section_id = 0; section_id < 10; section_id++) {
+        auto entry = pt_afs.get(static_cast<size_t>(difficulty) * 10 + section_id);
+        phosg::StringReader r(entry.first, entry.second);
+        auto table = std::make_shared<Table>(r, false, false, Episode::EP1);
+        this->tables.emplace(this->key_for_table(Episode::EP1, GameMode::NORMAL, difficulty, section_id), table);
+        this->tables.emplace(this->key_for_table(Episode::EP1, GameMode::BATTLE, difficulty, section_id), table);
+        this->tables.emplace(this->key_for_table(Episode::EP1, GameMode::SOLO, difficulty, section_id), table);
+      }
     }
   }
 
-  // ItemCT.afs also has 40 entries, but only the 0th, 10th, 20th, and 30th are
-  // used (section_id is ignored)
-  AFSArchive ct_afs(ct_afs_data);
-  for (size_t difficulty = 0; difficulty < 4; difficulty++) {
-    auto r = ct_afs.get_reader(difficulty * 10);
-    auto table = make_shared<Table>(r, false, false);
-    for (size_t section_id = 0; section_id < 10; section_id++) {
-      this->tables.emplace(this->key_for_table(Episode::EP1, GameMode::CHALLENGE, difficulty, section_id), table);
+  // ItemCT AFS files also have 40 entries, but only the 0th, 10th, 20th, and 30th are used (section_id is ignored)
+  if (ct_afs_data) {
+    AFSArchive ct_afs(ct_afs_data);
+    bool include_ultimate;
+    if (ct_afs.num_entries() >= 40) {
+      include_ultimate = true;
+    } else if (ct_afs.num_entries() >= 30) {
+      include_ultimate = false;
+    } else {
+      throw std::runtime_error(std::format("CT AFS file has unexpected entry count ({})", ct_afs.num_entries()));
+    }
+    for (Difficulty difficulty : ALL_DIFFICULTIES_V234) {
+      if ((difficulty == Difficulty::ULTIMATE) && !include_ultimate) {
+        continue;
+      }
+      auto r = ct_afs.get_reader(static_cast<size_t>(difficulty) * 10);
+      auto table = std::make_shared<Table>(r, false, false, Episode::EP1);
+      for (size_t section_id = 0; section_id < 10; section_id++) {
+        this->tables.emplace(this->key_for_table(Episode::EP1, GameMode::CHALLENGE, difficulty, section_id), table);
+      }
     }
   }
 }
@@ -158,7 +852,7 @@ AFSV2CommonItemSet::AFSV2CommonItemSet(
 GSLV3V4CommonItemSet::GSLV3V4CommonItemSet(std::shared_ptr<const std::string> gsl_data, bool is_big_endian) {
   GSLArchive gsl(gsl_data, is_big_endian);
 
-  auto filename_for_table = +[](Episode episode, uint8_t difficulty, uint8_t section_id, bool is_challenge) -> string {
+  auto filename_for_table = +[](Episode episode, Difficulty difficulty, uint8_t section_id, bool is_challenge) -> std::string {
     const char* episode_token = "";
     switch (episode) {
       case Episode::EP1:
@@ -171,24 +865,23 @@ GSLV3V4CommonItemSet::GSLV3V4CommonItemSet(std::shared_ptr<const std::string> gs
         episode_token = "s";
         break;
       default:
-        throw runtime_error("invalid episode");
+        throw std::runtime_error("invalid episode");
     }
-    return string_printf(
-        "ItemPT%s%s%c%1hhu.rel",
+    return std::format(
+        "ItemPT{}{}{}{}.rel",
         is_challenge ? "c" : "",
         episode_token,
-        tolower(abbreviation_for_difficulty(difficulty)),
+        static_cast<char>(tolower(abbreviation_for_difficulty(difficulty))),
         section_id);
   };
 
-  vector<Episode> episodes = {Episode::EP1, Episode::EP2, Episode::EP4};
-  for (Episode episode : episodes) {
-    for (size_t difficulty = 0; difficulty < 4; difficulty++) {
+  for (Episode episode : ALL_EPISODES_V3) {
+    for (Difficulty difficulty : ALL_DIFFICULTIES_V234) {
       for (size_t section_id = 0; section_id < 10; section_id++) {
-        StringReader r;
+        phosg::StringReader r;
         try {
           r = gsl.get_reader(filename_for_table(episode, difficulty, section_id, false));
-        } catch (const exception&) {
+        } catch (const std::exception&) {
           // Fall back to Episode 1 if Episode 4 data is missing
           if (episode == Episode::EP4) {
             auto ep1_table = this->tables.at(this->key_for_table(Episode::EP1, GameMode::NORMAL, difficulty, section_id));
@@ -200,207 +893,42 @@ GSLV3V4CommonItemSet::GSLV3V4CommonItemSet(std::shared_ptr<const std::string> gs
             throw;
           }
         }
-        auto table = make_shared<Table>(r, is_big_endian, true);
+        auto table = std::make_shared<Table>(r, is_big_endian, true, episode);
         this->tables.emplace(this->key_for_table(episode, GameMode::NORMAL, difficulty, section_id), table);
         this->tables.emplace(this->key_for_table(episode, GameMode::BATTLE, difficulty, section_id), table);
         this->tables.emplace(this->key_for_table(episode, GameMode::SOLO, difficulty, section_id), table);
       }
     }
 
-    if (episode != Episode::EP4) {
-      for (size_t difficulty = 0; difficulty < 4; difficulty++) {
+    for (Difficulty difficulty : ALL_DIFFICULTIES_V234) {
+      try {
         auto r = gsl.get_reader(filename_for_table(episode, difficulty, 0, true));
-        auto table = make_shared<Table>(r, is_big_endian, true);
+        auto table = std::make_shared<Table>(r, is_big_endian, true, episode);
         for (size_t section_id = 0; section_id < 10; section_id++) {
           this->tables.emplace(this->key_for_table(episode, GameMode::CHALLENGE, difficulty, section_id), table);
+        }
+      } catch (const std::out_of_range&) {
+        // GC NTE doesn't have Ep2 challenge; just skip adding the table
+      }
+    }
+  }
+}
+
+JSONCommonItemSet::JSONCommonItemSet(const phosg::JSON& json) {
+  for (const auto& episode : ALL_EPISODES_V4) {
+    for (const auto& mode : ALL_GAME_MODES_V4) {
+      for (const auto& difficulty : ALL_DIFFICULTIES_V234) {
+        for (uint8_t section_id = 0; section_id < 10; section_id++) {
+          try {
+            auto prev_table = this->get_prev_table(episode, mode, difficulty, section_id);
+            auto json_key = this->json_key_for_table(episode, mode, difficulty, section_id);
+            auto key = this->key_for_table(episode, mode, difficulty, section_id);
+            this->tables.emplace(key, std::make_shared<Table>(prev_table, json.at(json_key), episode));
+          } catch (const std::runtime_error&) {
+          } catch (const std::out_of_range&) {
+          }
         }
       }
     }
   }
-}
-
-RELFileSet::RELFileSet(std::shared_ptr<const std::string> data)
-    : data(data),
-      r(*this->data) {}
-
-ArmorRandomSet::ArmorRandomSet(std::shared_ptr<const std::string> data)
-    : RELFileSet(data) {
-  // For some reason the footer tables are doubly indirect in this file
-  uint32_t specs_offset_offset = this->r.pget_u32b(data->size() - 0x10);
-  uint32_t specs_offset = this->r.pget_u32b(specs_offset_offset);
-  this->tables = &this->r.pget<parray<TableSpec, 3>>(specs_offset);
-}
-
-std::pair<const ArmorRandomSet::WeightTableEntry8*, size_t>
-ArmorRandomSet::get_armor_table(size_t index) const {
-  return this->get_table<WeightTableEntry8>(this->tables->at(0), index);
-}
-
-std::pair<const ArmorRandomSet::WeightTableEntry8*, size_t>
-ArmorRandomSet::get_shield_table(size_t index) const {
-  return this->get_table<WeightTableEntry8>(this->tables->at(1), index);
-}
-
-std::pair<const ArmorRandomSet::WeightTableEntry8*, size_t>
-ArmorRandomSet::get_unit_table(size_t index) const {
-  return this->get_table<WeightTableEntry8>(this->tables->at(2), index);
-}
-
-ToolRandomSet::ToolRandomSet(std::shared_ptr<const std::string> data)
-    : RELFileSet(data) {
-  uint32_t specs_offset = r.pget_u32b(data->size() - 0x10);
-  this->common_recovery_table_spec = &r.pget<TableSpec>(r.pget_u32b(
-      specs_offset));
-  this->rare_recovery_table_spec = &r.pget<TableSpec>(
-      r.pget_u32b(specs_offset + sizeof(uint32_t)),
-      2 * sizeof(TableSpec));
-  this->tech_disk_table_spec = this->rare_recovery_table_spec + 1;
-  this->tech_disk_level_table_spec = &r.pget<TableSpec>(r.pget_u32b(
-      specs_offset + 2 * sizeof(uint32_t)));
-}
-
-pair<const uint8_t*, size_t> ToolRandomSet::get_common_recovery_table(
-    size_t index) const {
-  return this->get_table<uint8_t>(*this->common_recovery_table_spec, index);
-}
-
-pair<const ToolRandomSet::WeightTableEntry8*, size_t>
-ToolRandomSet::get_rare_recovery_table(size_t index) const {
-  return this->get_table<WeightTableEntry8>(*this->rare_recovery_table_spec, index);
-}
-
-pair<const ToolRandomSet::WeightTableEntry8*, size_t>
-ToolRandomSet::get_tech_disk_table(size_t index) const {
-  return this->get_table<WeightTableEntry8>(*this->tech_disk_table_spec, index);
-}
-
-pair<const ToolRandomSet::TechDiskLevelEntry*, size_t>
-ToolRandomSet::get_tech_disk_level_table(size_t index) const {
-  return this->get_table<TechDiskLevelEntry>(*this->tech_disk_level_table_spec, index);
-}
-
-WeaponRandomSet::WeaponRandomSet(std::shared_ptr<const std::string> data)
-    : RELFileSet(data) {
-  uint32_t offsets_offset = this->r.pget_u32b(data->size() - 0x10);
-  this->offsets = &this->r.pget<Offsets>(offsets_offset);
-}
-
-std::pair<const WeaponRandomSet::WeightTableEntry8*, size_t>
-WeaponRandomSet::get_weapon_type_table(size_t index) const {
-  const auto& spec = this->r.pget<TableSpec>(
-      this->offsets->weapon_type_table + index * sizeof(TableSpec));
-  const auto* data = &this->r.pget<WeightTableEntry8>(
-      spec.offset, spec.entries_per_table * sizeof(WeightTableEntry8));
-  return make_pair(data, spec.entries_per_table);
-}
-
-const parray<WeaponRandomSet::WeightTableEntry32, 6>*
-WeaponRandomSet::get_bonus_type_table(size_t which, size_t index) const {
-  uint32_t base_offset = which ? this->offsets->bonus_type_table2 : this->offsets->bonus_type_table1;
-  return &this->r.pget<parray<WeightTableEntry32, 6>>(
-      base_offset + sizeof(parray<WeightTableEntry32, 6>) * index);
-}
-
-const WeaponRandomSet::RangeTableEntry*
-WeaponRandomSet::get_bonus_range(size_t which, size_t index) const {
-  uint32_t base_offset = which ? this->offsets->bonus_range_table2 : this->offsets->bonus_range_table1;
-  return &this->r.pget<RangeTableEntry>(
-      base_offset + sizeof(RangeTableEntry) * index);
-}
-
-const parray<WeaponRandomSet::WeightTableEntry32, 3>*
-WeaponRandomSet::get_special_mode_table(size_t index) const {
-  return &this->r.pget<parray<WeightTableEntry32, 3>>(
-      this->offsets->special_mode_table + sizeof(parray<WeightTableEntry32, 3>) * index);
-}
-
-const WeaponRandomSet::RangeTableEntry*
-WeaponRandomSet::get_standard_grind_range(size_t index) const {
-  return &this->r.pget<RangeTableEntry>(
-      this->offsets->standard_grind_range_table + sizeof(RangeTableEntry) * index);
-}
-
-const WeaponRandomSet::RangeTableEntry*
-WeaponRandomSet::get_favored_grind_range(size_t index) const {
-  return &this->r.pget<RangeTableEntry>(
-      this->offsets->favored_grind_range_table + sizeof(RangeTableEntry) * index);
-}
-
-TekkerAdjustmentSet::TekkerAdjustmentSet(std::shared_ptr<const std::string> data)
-    : data(data),
-      r(*data) {
-  this->offsets = &this->r.pget<Offsets>(this->r.pget_u32b(this->r.size() - 0x10));
-}
-
-const ProbabilityTable<uint8_t, 100>& TekkerAdjustmentSet::get_table(
-    std::array<ProbabilityTable<uint8_t, 100>, 10>& tables_default,
-    std::array<ProbabilityTable<uint8_t, 100>, 10>& tables_favored,
-    uint32_t offset_and_count_offset,
-    bool favored,
-    uint8_t section_id) const {
-  if (section_id >= 10) {
-    throw runtime_error("invalid section ID");
-  }
-  ProbabilityTable<uint8_t, 100>& table = favored ? tables_favored[section_id] : tables_default[section_id];
-  if (table.count == 0) {
-    uint32_t offset = r.pget_u32b(offset_and_count_offset);
-    uint32_t count_per_section_id = r.pget_u32b(offset_and_count_offset + 4);
-    auto* entries = &r.pget<DeltaProbabilityEntry>(offset, sizeof(DeltaProbabilityEntry) * count_per_section_id * 10);
-    for (size_t z = count_per_section_id * section_id; z < count_per_section_id * (section_id + 1); z++) {
-      size_t count = favored ? entries[z].count_favored : entries[z].count_default;
-      for (size_t w = 0; w < count; w++) {
-        table.push(entries[z].delta_index);
-      }
-    }
-  }
-  return table;
-}
-
-const ProbabilityTable<uint8_t, 100>& TekkerAdjustmentSet::get_special_upgrade_prob_table(uint8_t section_id, bool favored) const {
-  return this->get_table(
-      this->special_upgrade_prob_tables_default,
-      this->special_upgrade_prob_tables_favored,
-      this->offsets->special_upgrade_prob_table_offset,
-      favored, section_id);
-}
-
-const ProbabilityTable<uint8_t, 100>& TekkerAdjustmentSet::get_grind_delta_prob_table(uint8_t section_id, bool favored) const {
-  return this->get_table(
-      this->grind_delta_prob_tables_default,
-      this->grind_delta_prob_tables_favored,
-      this->offsets->grind_delta_prob_table_offset,
-      favored, section_id);
-}
-
-const ProbabilityTable<uint8_t, 100>& TekkerAdjustmentSet::get_bonus_delta_prob_table(uint8_t section_id, bool favored) const {
-  return this->get_table(
-      this->bonus_delta_prob_tables_default,
-      this->bonus_delta_prob_tables_favored,
-      this->offsets->bonus_delta_prob_table_offset,
-      favored, section_id);
-}
-
-int8_t TekkerAdjustmentSet::get_luck(uint32_t start_offset, uint8_t delta_index) const {
-  StringReader sub_r = r.sub(start_offset);
-  while (!sub_r.eof()) {
-    const auto& entry = sub_r.get<LuckTableEntry>();
-    if (entry.delta_index == 0xFF) {
-      return 0;
-    } else if (entry.delta_index == delta_index) {
-      return entry.luck;
-    }
-  }
-  return 0;
-}
-
-int8_t TekkerAdjustmentSet::get_luck_for_special_upgrade(uint8_t delta_index) const {
-  return this->get_luck(this->offsets->special_upgrade_luck_table_offset, delta_index);
-}
-
-int8_t TekkerAdjustmentSet::get_luck_for_grind_delta(uint8_t delta_index) const {
-  return this->get_luck(this->offsets->grind_delta_luck_table_offset, delta_index);
-}
-
-int8_t TekkerAdjustmentSet::get_luck_for_bonus_delta(uint8_t delta_index) const {
-  return this->get_luck(this->offsets->bonus_delta_luck_offset, delta_index);
 }

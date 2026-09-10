@@ -2,25 +2,7 @@
 
 #include "Server.hh"
 
-using namespace std;
-
 namespace Episode3 {
-
-template <size_t Count>
-std::string string_for_refs(const parray<le_uint16_t, Count>& card_refs) {
-  string ret = "[";
-  for (size_t z = 0; z < Count; z++) {
-    if (card_refs[z] != 0xFFFF) {
-      ret += string_printf("%zu:@$%04X ", z, card_refs[z].load());
-    }
-  }
-  if (!ret.empty()) {
-    ret.back() = ']'; // Replace the ' ' from the last added item
-  } else {
-    ret.push_back(']');
-  }
-  return ret;
-}
 
 Condition::Condition() {
   this->clear();
@@ -77,20 +59,20 @@ void Condition::clear_FF() {
   this->unknown_a8 = 0xFF;
 }
 
-std::string Condition::str() const {
-  return string_printf(
-      "Condition[type=%s, turns=%hhu, a_arg=%hhd, dice=%hhu, flags=%02hhX, "
-      "def_eff_index=%hhu, ref=@%04hX, value=%hd, giver_ref=@%04hX "
-      "percent=%hhu value8=%hd order=%hu a8=%hu]",
-      name_for_condition_type(this->type),
+std::string Condition::str(std::shared_ptr<const Server> s) const {
+  return std::format(
+      "Condition[type={}, turns={}, a_arg={}, dice={}, flags={:02X}, "
+      "def_eff_index={}, ref={}, value={}, giver_ref={} "
+      "percent={} value8={} order={} a8={}]",
+      phosg::name_for_enum(this->type),
       this->remaining_turns,
       this->a_arg_value,
       this->dice_roll_value,
       this->flags,
       this->card_definition_effect_index,
-      this->card_ref.load(),
-      this->value.load(),
-      this->condition_giver_card_ref.load(),
+      s->debug_str_for_card_ref(this->card_ref),
+      this->value,
+      s->debug_str_for_card_ref(this->condition_giver_card_ref),
       this->random_percent,
       this->value8,
       this->order,
@@ -114,13 +96,11 @@ void EffectResult::clear() {
   this->dice_roll_value = 0;
 }
 
-std::string EffectResult::str() const {
-  return string_printf(
-      "EffectResult[att_ref=@%04hX, target_ref=@%04hX, value=%hhd, "
-      "cur_hp=%hhd, ap=%hhd, tp=%hhd, flags=%02hhX, op=%hhd, "
-      "cond_index=%hhu, dice=%hhu]",
-      this->attacker_card_ref.load(),
-      this->target_card_ref.load(),
+std::string EffectResult::str(std::shared_ptr<const Server> s) const {
+  return std::format(
+      "EffectResult[att_ref={}, target_ref={}, value={}, cur_hp={}, ap={}, tp={}, flags={:02X}, op={}, cond_index={}, dice={}]",
+      s->debug_str_for_card_ref(this->attacker_card_ref),
+      s->debug_str_for_card_ref(this->target_card_ref),
       this->value,
       this->current_hp,
       this->ap,
@@ -148,16 +128,14 @@ bool CardShortStatus::operator!=(const CardShortStatus& other) const {
   return !this->operator==(other);
 }
 
-std::string CardShortStatus::str() const {
-  string loc_s = this->loc.str();
-  return string_printf(
-      "CardShortStatus[ref=@%04hX, cur_hp=%hd, flags=%08" PRIX32 ", loc=%s, "
-      "u1=%04hX, max_hp=%hhd, u2=%hhu]",
-      this->card_ref.load(),
-      this->current_hp.load(),
-      this->card_flags.load(),
-      loc_s.c_str(),
-      this->unused1.load(),
+std::string CardShortStatus::str(std::shared_ptr<const Server> s) const {
+  return std::format(
+      "CardShortStatus[ref={}, cur_hp={}, flags={:08X}, loc={}, u1={:04X}, max_hp={}, u2={}]",
+      s->debug_str_for_card_ref(this->card_ref),
+      this->current_hp,
+      this->card_flags,
+      this->loc.str(),
+      this->unused1,
       this->max_hp,
       this->unused2);
 }
@@ -195,23 +173,20 @@ void ActionState::clear() {
   this->original_attacker_card_ref = 0xFFFF;
   this->target_card_refs.clear(0xFFFF);
   this->action_card_refs.clear(0xFFFF);
+  this->unused2 = 0xFFFF;
 }
 
-std::string ActionState::str() const {
-  string target_refs_s = string_for_refs(this->target_card_refs);
-  string action_refs_s = string_for_refs(this->action_card_refs);
-  return string_printf(
-      "ActionState[client=%hu, u=%hhu, facing=%s, attacker_ref=@%04hX, "
-      "def_ref=@%04hX, target_refs=%s, action_refs=%s, "
-      "orig_attacker_ref=@%04hX]",
-      this->client_id.load(),
+std::string ActionState::str(std::shared_ptr<const Server> s) const {
+  return std::format(
+      "ActionState[client={:X}, u={}, facing={}, attacker_ref={}, def_ref={}, target_refs={}, action_refs={}, orig_attacker_ref={}]",
+      this->client_id,
       this->unused,
-      name_for_direction(this->facing_direction),
-      this->attacker_card_ref.load(),
-      this->defense_card_ref.load(),
-      target_refs_s.c_str(),
-      action_refs_s.c_str(),
-      this->original_attacker_card_ref.load());
+      phosg::name_for_enum(this->facing_direction),
+      s->debug_str_for_card_ref(this->attacker_card_ref),
+      s->debug_str_for_card_ref(this->defense_card_ref),
+      s->debug_str_for_card_refs(this->target_card_refs),
+      s->debug_str_for_card_refs(this->action_card_refs),
+      s->debug_str_for_card_ref(this->original_attacker_card_ref));
 }
 
 ActionChain::ActionChain() {
@@ -234,8 +209,8 @@ bool ActionChain::operator==(const ActionChain& other) const {
       (this->damage_multiplier == other.damage_multiplier) &&
       (this->attack_number == other.attack_number) &&
       (this->tp_effect_bonus == other.tp_effect_bonus) &&
-      (this->unused1 == other.unused1) &&
-      (this->unused2 == other.unused2) &&
+      (this->physical_attack_bonus_nte == other.physical_attack_bonus_nte) &&
+      (this->tech_attack_bonus_nte == other.tech_attack_bonus_nte) &&
       (this->card_ap == other.card_ap) &&
       (this->card_tp == other.card_tp) &&
       (this->flags == other.flags) &&
@@ -245,38 +220,32 @@ bool ActionChain::operator!=(const ActionChain& other) const {
   return !this->operator==(other);
 }
 
-std::string ActionChain::str() const {
-  string attack_action_card_refs_s = string_for_refs(this->attack_action_card_refs);
-  string target_card_refs_s = string_for_refs(this->target_card_refs);
-  return string_printf(
-      "ActionChain[eff_ap=%hhd, eff_tp=%hhd, ap_bonus=%hhd, damage=%hhd, "
-      "acting_ref=@%04hX, unknown_ref_a3=@%04hX, "
-      "attack_action_refs=%s, attack_action_ref_count=%hhu, "
-      "medium=%s, target_ref_count=%hhu, subphase=%s, "
-      "strikes=%hhu, damage_mult=%hhd, attack_num=%hhu, "
-      "tp_bonus=%hhd, u1=%hhu, u2=%hhu, card_ap=%hhd, "
-      "card_tp=%hhd, flags=%08" PRIX32 ", target_refs=%s]",
+std::string ActionChain::str(std::shared_ptr<const Server> s) const {
+  return std::format(
+      "ActionChain[eff_ap={}, eff_tp={}, ap_bonus={}, damage={}, acting_ref={}, unknown_ref_a3={}, attack_action_refs={}, "
+      "attack_action_ref_count={}, medium={}, target_ref_count={}, subphase={}, strikes={}, damage_mult={}, attack_num={}, "
+      "tp_bonus={}, phys_bonus_nte={}, tech_bonus_nte={}, card_ap={}, card_tp={}, flags={:08X}, target_refs={}]",
       this->effective_ap,
       this->effective_tp,
       this->ap_effect_bonus,
       this->damage,
-      this->acting_card_ref.load(),
-      this->unknown_card_ref_a3.load(),
-      attack_action_card_refs_s.c_str(),
+      s->debug_str_for_card_ref(this->acting_card_ref),
+      s->debug_str_for_card_ref(this->unknown_card_ref_a3),
+      s->debug_str_for_card_refs(this->attack_action_card_refs),
       this->attack_action_card_ref_count,
-      name_for_attack_medium(this->attack_medium),
+      phosg::name_for_enum(this->attack_medium),
       this->target_card_ref_count,
-      name_for_action_subphase(this->action_subphase),
+      phosg::name_for_enum(this->action_subphase),
       this->strike_count,
       this->damage_multiplier,
       this->attack_number,
       this->tp_effect_bonus,
-      this->unused1,
-      this->unused2,
+      this->physical_attack_bonus_nte,
+      this->tech_attack_bonus_nte,
       this->card_ap,
       this->card_tp,
-      this->flags.load(),
-      target_card_refs_s.c_str());
+      this->flags,
+      s->debug_str_for_card_refs(this->target_card_refs));
 }
 
 void ActionChain::clear() {
@@ -294,8 +263,8 @@ void ActionChain::clear() {
   this->damage_multiplier = 1;
   this->attack_number = 0xFF;
   this->tp_effect_bonus = 0;
-  this->unused1 = 0;
-  this->unused2 = 0;
+  this->physical_attack_bonus_nte = 0;
+  this->tech_attack_bonus_nte = 0;
   this->card_ap = 0;
   this->card_tp = 0;
   this->flags = 0;
@@ -319,8 +288,8 @@ void ActionChain::clear_FF() {
   this->damage_multiplier = -1;
   this->attack_number = 0xFF;
   this->tp_effect_bonus = -1;
-  this->unused1 = 0xFF;
-  this->unused2 = 0xFF;
+  this->physical_attack_bonus_nte = 0xFF;
+  this->tech_attack_bonus_nte = 0xFF;
   this->card_ap = -1;
   this->card_tp = -1;
   this->flags = 0xFFFFFFFF;
@@ -338,17 +307,17 @@ bool ActionChainWithConds::operator!=(const ActionChainWithConds& other) const {
   return !this->operator==(other);
 }
 
-std::string ActionChainWithConds::str() const {
-  string ret = "ActionChainWithConds[chain=";
-  ret += this->chain.str();
+std::string ActionChainWithConds::str(std::shared_ptr<const Server> s) const {
+  std::string ret = "ActionChainWithConds[chain=";
+  ret += this->chain.str(s);
   ret += ", conds=[";
   for (size_t z = 0; z < this->conditions.size(); z++) {
     if (this->conditions[z].type != ConditionType::NONE) {
-      if (ret.back() != '=') {
+      if (ret.back() != '[') {
         ret += ", ";
       }
-      ret += string_printf("%zu:", z);
-      ret += this->conditions[z].str();
+      ret += std::format("{}:", z);
+      ret += this->conditions[z].str(s);
     }
   }
   ret += "]]";
@@ -393,8 +362,8 @@ void ActionChainWithConds::reset() {
   this->chain.effective_tp = 0;
   this->chain.ap_effect_bonus = 0;
   this->chain.tp_effect_bonus = 0;
-  this->chain.unused1 = 0;
-  this->chain.unused2 = 0;
+  this->chain.physical_attack_bonus_nte = 0;
+  this->chain.tech_attack_bonus_nte = 0;
   this->chain.damage = 0;
   this->chain.strike_count = 1;
   this->chain.damage_multiplier = 1;
@@ -412,8 +381,7 @@ void ActionChainWithConds::set_flags(uint32_t flags) {
   this->chain.flags |= flags;
 }
 
-void ActionChainWithConds::add_attack_action_card_ref(
-    uint16_t card_ref, shared_ptr<Server> server) {
+void ActionChainWithConds::add_attack_action_card_ref(uint16_t card_ref, std::shared_ptr<Server> server) {
   if (card_ref != 0xFFFF) {
     this->chain.attack_action_card_refs[this->chain.attack_action_card_ref_count++] = card_ref;
   }
@@ -422,13 +390,12 @@ void ActionChainWithConds::add_attack_action_card_ref(
 }
 
 void ActionChainWithConds::add_target_card_ref(uint16_t card_ref) {
-  if (card_ref != 0xFFFF &&
-      this->chain.target_card_ref_count < this->chain.target_card_refs.size()) {
+  if (card_ref != 0xFFFF && this->chain.target_card_ref_count < this->chain.target_card_refs.size()) {
     this->chain.target_card_refs[this->chain.target_card_ref_count++] = card_ref;
   }
 }
 
-void ActionChainWithConds::compute_attack_medium(shared_ptr<Server> server) {
+void ActionChainWithConds::compute_attack_medium(std::shared_ptr<Server> server) {
   this->chain.attack_medium = AttackMedium::PHYSICAL;
   for (size_t z = 0; z < this->chain.attack_action_card_ref_count; z++) {
     uint16_t card_ref = this->chain.attack_action_card_refs[z];
@@ -439,18 +406,14 @@ void ActionChainWithConds::compute_attack_medium(shared_ptr<Server> server) {
     if (!ce) {
       continue;
     }
-    if (card_class_is_tech_like(ce->def.card_class())) {
+    if (card_class_is_tech_like(ce->def.card_class(), server->options.is_nte())) {
       this->chain.attack_medium = AttackMedium::TECH;
     }
   }
 }
 
 bool ActionChainWithConds::get_condition_value(
-    ConditionType cond_type,
-    uint16_t card_ref,
-    uint8_t def_effect_index,
-    uint16_t value,
-    uint16_t* out_value) const {
+    ConditionType cond_type, uint16_t card_ref, uint8_t def_effect_index, uint16_t value, uint16_t* out_value) const {
   bool any_found = false;
   uint8_t max_order = 10;
   for (size_t z = 0; z < 9; z++) {
@@ -472,13 +435,91 @@ bool ActionChainWithConds::get_condition_value(
   return any_found;
 }
 
-void ActionChainWithConds::set_action_subphase_from_card(
-    shared_ptr<const Card> card) {
+void ActionChainWithConds::set_action_subphase_from_card(std::shared_ptr<const Card> card) {
   this->chain.action_subphase = card->server()->get_current_action_subphase();
 }
 
 bool ActionChainWithConds::can_apply_attack() const {
   return this->check_flag(4) ? false : (this->chain.target_card_ref_count != 0);
+}
+
+uint8_t ActionChainWithConds::get_adjusted_move_ability_nte(uint8_t ability) const {
+  for (size_t z = 0; z < this->conditions.size(); z++) {
+    const auto& cond = this->conditions[z];
+    switch (cond.type) {
+      case ConditionType::IMMOBILE:
+      case ConditionType::FREEZE:
+        ability = 0;
+        break;
+      case ConditionType::SET_MV_COST_TO_0:
+        ability = 99;
+        break;
+      case ConditionType::ADD_1_TO_MV_COST:
+        ability--;
+        break;
+      case ConditionType::SCALE_MV_COST:
+        if (cond.value == 0) {
+          ability = 99;
+        } else {
+          ability /= cond.value;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return ability;
+}
+
+ActionChainWithCondsTrial::ActionChainWithCondsTrial(const ActionChainWithConds& src)
+    : effective_ap(src.chain.effective_ap),
+      effective_tp(src.chain.effective_tp),
+      ap_effect_bonus(src.chain.ap_effect_bonus),
+      damage(src.chain.damage),
+      acting_card_ref(src.chain.acting_card_ref),
+      unknown_card_ref_a3(src.chain.unknown_card_ref_a3),
+      attack_action_card_refs(src.chain.attack_action_card_refs),
+      attack_action_card_ref_count(src.chain.attack_action_card_ref_count),
+      attack_medium(src.chain.attack_medium),
+      target_card_ref_count(src.chain.target_card_ref_count),
+      action_subphase(src.chain.action_subphase),
+      strike_count(src.chain.strike_count),
+      damage_multiplier(src.chain.damage_multiplier),
+      attack_number(src.chain.attack_number),
+      tp_effect_bonus(src.chain.tp_effect_bonus),
+      physical_attack_bonus_nte(src.chain.physical_attack_bonus_nte),
+      tech_attack_bonus_nte(src.chain.tech_attack_bonus_nte),
+      card_ap(src.chain.card_ap),
+      card_tp(src.chain.card_tp),
+      flags(src.chain.flags),
+      conditions(src.conditions),
+      target_card_refs(src.chain.target_card_refs) {}
+
+ActionChainWithCondsTrial::operator ActionChainWithConds() const {
+  ActionChainWithConds ret;
+  ret.chain.effective_ap = this->effective_ap;
+  ret.chain.effective_tp = this->effective_tp;
+  ret.chain.ap_effect_bonus = this->ap_effect_bonus;
+  ret.chain.damage = this->damage;
+  ret.chain.acting_card_ref = this->acting_card_ref;
+  ret.chain.unknown_card_ref_a3 = this->unknown_card_ref_a3;
+  ret.chain.attack_action_card_refs = this->attack_action_card_refs;
+  ret.chain.attack_action_card_ref_count = this->attack_action_card_ref_count;
+  ret.chain.attack_medium = this->attack_medium;
+  ret.chain.target_card_ref_count = this->target_card_ref_count;
+  ret.chain.action_subphase = this->action_subphase;
+  ret.chain.strike_count = this->strike_count;
+  ret.chain.damage_multiplier = this->damage_multiplier;
+  ret.chain.attack_number = this->attack_number;
+  ret.chain.tp_effect_bonus = this->tp_effect_bonus;
+  ret.chain.physical_attack_bonus_nte = this->physical_attack_bonus_nte;
+  ret.chain.tech_attack_bonus_nte = this->tech_attack_bonus_nte;
+  ret.chain.card_ap = this->card_ap;
+  ret.chain.card_tp = this->card_tp;
+  ret.chain.flags = this->flags;
+  ret.chain.target_card_refs = this->target_card_refs;
+  ret.conditions = this->conditions;
+  return ret;
 }
 
 ActionMetadata::ActionMetadata() {
@@ -502,26 +543,21 @@ bool ActionMetadata::operator!=(const ActionMetadata& other) const {
   return !this->operator==(other);
 }
 
-std::string ActionMetadata::str() const {
-  string target_card_refs_s = string_for_refs(this->target_card_refs);
-  string defense_card_refs_s = string_for_refs(this->defense_card_refs);
-  string original_attacker_card_refs_s = string_for_refs(this->original_attacker_card_refs);
-  return string_printf(
-      "ActionMetadata[ref=@%04hX, target_ref_count=%hhu, def_ref_count=%hhu, "
-      "subphase=%s, def_power=%hhd, def_bonus=%hhd, "
-      "att_bonus=%hhd, flags=%08" PRIX32 ", target_refs=%s, "
-      "defense_refs=%s, original_attacker_refs=%s]",
-      this->card_ref.load(),
+std::string ActionMetadata::str(std::shared_ptr<const Server> s) const {
+  return std::format(
+      "ActionMetadata[ref={}, target_ref_count={}, def_ref_count={}, subphase={}, def_power={}, def_bonus={}, "
+      "att_bonus={}, flags={:08X}, target_refs={}, defense_refs={}, original_attacker_refs={}]",
+      s->debug_str_for_card_ref(this->card_ref),
       this->target_card_ref_count,
       this->defense_card_ref_count,
-      name_for_action_subphase(this->action_subphase),
+      phosg::name_for_enum(this->action_subphase),
       this->defense_power,
       this->defense_bonus,
       this->attack_bonus,
-      this->flags.load(),
-      target_card_refs_s.c_str(),
-      defense_card_refs_s.c_str(),
-      original_attacker_card_refs_s.c_str());
+      this->flags,
+      s->debug_str_for_card_refs(this->target_card_refs),
+      s->debug_str_for_card_refs(this->defense_card_refs),
+      s->debug_str_for_card_refs(this->original_attacker_card_refs));
 }
 
 void ActionMetadata::clear() {
@@ -531,6 +567,7 @@ void ActionMetadata::clear() {
   this->action_subphase = ActionSubphase::INVALID_FF;
   this->defense_power = 0;
   this->defense_bonus = 0;
+  // TODO: Ep3 NTE doesn't set attack_bonus to zero here. Is the field just unused in NTE?
   this->attack_bonus = 0;
   this->flags = 0;
   this->target_card_refs.clear(0xFFFF);
@@ -576,16 +613,13 @@ void ActionMetadata::clear_target_card_refs() {
 }
 
 void ActionMetadata::add_target_card_ref(uint16_t card_ref) {
-  if (card_ref != 0xFFFF &&
-      this->target_card_ref_count < this->target_card_refs.size()) {
+  if ((card_ref != 0xFFFF) && (this->target_card_ref_count < this->target_card_refs.size())) {
     this->target_card_refs[this->target_card_ref_count++] = card_ref;
   }
 }
 
 void ActionMetadata::add_defense_card_ref(
-    uint16_t defense_card_ref,
-    shared_ptr<Card> card,
-    uint16_t original_attacker_card_ref) {
+    uint16_t defense_card_ref, std::shared_ptr<Card> card, uint16_t original_attacker_card_ref) {
   if ((defense_card_ref != 0xFFFF) && (this->defense_card_ref_count < 8)) {
     this->defense_card_refs[this->defense_card_ref_count] = defense_card_ref;
     this->original_attacker_card_refs[this->defense_card_ref_count] = original_attacker_card_ref;
@@ -598,20 +632,11 @@ HandAndEquipState::HandAndEquipState() {
   this->clear();
 }
 
-std::string HandAndEquipState::str() const {
-  string hand_card_refs_s = string_for_refs(this->hand_card_refs);
-  string set_card_refs_s = string_for_refs(this->set_card_refs);
-  string hand_card_refs2_s = string_for_refs(this->hand_card_refs2);
-  string set_card_refs2_s = string_for_refs(this->set_card_refs2);
-  return string_printf(
-      "HandAndEquipState[dice=[%hhu, %hhu], atk=%hhu, def=%hhu, atk2=%hhu, "
-      "a1=%hhu, total_set_cost=%hhu, is_cpu=%hhu, "
-      "assist_flags=%08" PRIX32 ", hand_refs=%s, "
-      "assist_ref=@%04hX, set_refs=%s, sc_ref=@%04hX, "
-      "hand_refs2=%s, set_refs2=%s, assist_ref2=@%04hX, "
-      "assist_set_num=%hu, assist_card_id=#%04hX, "
-      "assist_turns=%hhu, assit_dely=%hhu, atk_bonus=%hhu, "
-      "def_bonus=%hhu, u2=[%hhu, %hhu]]",
+std::string HandAndEquipState::str(std::shared_ptr<const Server> s) const {
+  return std::format(
+      "HandAndEquipState[dice=[{}, {}], atk={}, def={}, atk2={}, a1={}, total_set_cost={}, is_cpu={}, assist_flags={:08X}, "
+      "hand_refs={}, assist_ref={}, set_refs={}, sc_ref={}, hand_refs2={}, set_refs2={}, assist_ref2={}, assist_set_num={}, assist_card_id={}, "
+      "assist_turns={}, assist_delay={}, atk_bonus={}, def_bonus={}, u2=[{}, {}]]",
       this->dice_results[0],
       this->dice_results[1],
       this->atk_points,
@@ -620,16 +645,16 @@ std::string HandAndEquipState::str() const {
       this->unknown_a1,
       this->total_set_cards_cost,
       this->is_cpu_player,
-      this->assist_flags.load(),
-      hand_card_refs_s.c_str(),
-      this->assist_card_ref.load(),
-      set_card_refs_s.c_str(),
-      this->sc_card_ref.load(),
-      hand_card_refs2_s.c_str(),
-      set_card_refs2_s.c_str(),
-      this->assist_card_ref2.load(),
-      this->assist_card_set_number.load(),
-      this->assist_card_id.load(),
+      this->assist_flags,
+      s->debug_str_for_card_refs(this->hand_card_refs),
+      s->debug_str_for_card_ref(this->assist_card_ref),
+      s->debug_str_for_card_refs(this->set_card_refs),
+      s->debug_str_for_card_ref(this->sc_card_ref),
+      s->debug_str_for_card_refs(this->hand_card_refs2),
+      s->debug_str_for_card_refs(this->set_card_refs2),
+      s->debug_str_for_card_ref(this->assist_card_ref2),
+      this->assist_card_set_number,
+      s->debug_str_for_card_id(this->assist_card_id),
       this->assist_remaining_turns,
       this->assist_delay_turns,
       this->atk_bonuses,
@@ -717,17 +742,15 @@ void PlayerBattleStats::clear() {
 
 float PlayerBattleStats::score(size_t num_rounds) const {
   // Note: This formula doesn't match the formula on PSO-World, which is:
-  //     35
-  //   + (Attack Damage - Damage Taken)
-  //   + (Max Card Combo x 3)
-  //   - (Story Character Damage x 1.8)
-  //   - (Turns x 2.7)
-  //   + (Action Card Negated Damage x 0.8)
-  // I don't know where that formula came from, but this one came from the USA
-  // Ep3 PsoV3.dol, so it's presumably correct. Is the PSO-World formula simply
-  // incorrect, or is it from e.g. the Japanese version, which may have a
+  //   35 + (Attack Damage - Damage Taken)
+  //      + (Max Card Combo x 3)
+  //      - (Story Character Damage x 1.8)
+  //      - (Turns x 2.7)
+  //      + (Action Card Negated Damage x 0.8)
+  // I don't know where that formula came from, but this one came from the USA Ep3 PsoV3.dol, so it's presumably
+  // correct. Is the PSO-World formula simply incorrect, or is it from e.g. the Japanese version, which may have a
   // different rank calculation function?
-  return 38.0f + 0.8f * this->action_card_negated_damage - 2.3f * num_rounds - 1.8f * this->sc_damage_taken + 3.0f * this->max_attack_combo_size + (this->damage_given - this->damage_taken);
+  return 38.0f + (0.8f * this->action_card_negated_damage) - (2.3f * num_rounds) - (1.8f * this->sc_damage_taken) + (3.0f * this->max_attack_combo_size) + (this->damage_given - this->damage_taken);
 }
 
 uint8_t PlayerBattleStats::rank(size_t num_rounds) const {
@@ -739,10 +762,8 @@ const char* PlayerBattleStats::rank_name(size_t num_rounds) const {
 }
 
 constexpr size_t RANK_THRESHOLD_COUNT = 9;
-static const float RANK_THRESHOLDS[RANK_THRESHOLD_COUNT] = {
-    15.0f, 25.0f, 30.0f, 40.0f, 50.0f, 60.0f, 65.0f, 75.0f, 85.0f};
-static const char* RANK_NAMES[RANK_THRESHOLD_COUNT + 1] = {
-    "E", "D", "D+", "C", "C+", "B", "B+", "A", "A+", "S"};
+static const float RANK_THRESHOLDS[RANK_THRESHOLD_COUNT] = {15, 25, 30, 40, 50, 60, 65, 75, 85};
+static const char* RANK_NAMES[RANK_THRESHOLD_COUNT + 1] = {"E", "D", "D+", "C", "C+", "B", "B+", "A", "A+", "S"};
 
 uint8_t PlayerBattleStats::rank_for_score(float score) {
   size_t rank = 0;
@@ -754,38 +775,57 @@ uint8_t PlayerBattleStats::rank_for_score(float score) {
 
 const char* PlayerBattleStats::name_for_rank(uint8_t rank) {
   if (rank >= RANK_THRESHOLD_COUNT + 1) {
-    throw invalid_argument("invalid rank");
+    throw std::invalid_argument("invalid rank");
   }
   return RANK_NAMES[rank];
+}
+
+PlayerBattleStatsTrial::PlayerBattleStatsTrial(const PlayerBattleStats& data)
+    : damage_given(data.damage_given),
+      damage_taken(data.damage_taken),
+      num_opponent_cards_destroyed(data.num_opponent_cards_destroyed),
+      num_owned_cards_destroyed(data.num_owned_cards_destroyed),
+      total_move_distance(data.total_move_distance) {}
+
+PlayerBattleStatsTrial::operator PlayerBattleStats() const {
+  PlayerBattleStats ret;
+  ret.damage_given = this->damage_given;
+  ret.damage_taken = this->damage_taken;
+  ret.num_opponent_cards_destroyed = this->num_opponent_cards_destroyed;
+  ret.num_owned_cards_destroyed = this->num_owned_cards_destroyed;
+  ret.total_move_distance = this->total_move_distance;
+  return ret;
 }
 
 static bool is_card_within_range(
     const parray<uint8_t, 9 * 9>& range,
     const Location& anchor_loc,
     const CardShortStatus& ss,
-    PrefixedLogger* log) {
+    phosg::PrefixedLogger* log) {
   if (ss.card_ref == 0xFFFF) {
     if (log) {
-      log->debug("is_card_within_range: (false) ss.card_ref missing");
+      log->debug_f("is_card_within_range: (false) ss.card_ref missing");
     }
     return false;
   }
   if (range[0] == 2) {
     if (log) {
-      log->debug("is_card_within_range: (true) range is entire field");
+      log->debug_f("is_card_within_range: (true) range is entire field");
     }
     return true;
   }
 
   if ((ss.loc.x < anchor_loc.x - 4) || (ss.loc.x > anchor_loc.x + 4)) {
     if (log) {
-      log->debug("is_card_within_range: (false) outside x range (ss.loc.x=%hhu, anchor_loc.x=%hhu)", ss.loc.x, anchor_loc.x);
+      log->debug_f(
+          "is_card_within_range: (false) outside x range (ss.loc.x={}, anchor_loc.x={})", ss.loc.x, anchor_loc.x);
     }
     return false;
   }
   if ((ss.loc.y < anchor_loc.y - 4) || (ss.loc.y > anchor_loc.y + 4)) {
     if (log) {
-      log->debug("is_card_within_range: (false) outside y range (ss.loc.y=%hhu, anchor_loc.y=%hhu)", ss.loc.y, anchor_loc.y);
+      log->debug_f(
+          "is_card_within_range: (false) outside y range (ss.loc.y={}, anchor_loc.y={})", ss.loc.y, anchor_loc.y);
     }
     return false;
   }
@@ -794,38 +834,38 @@ static bool is_card_within_range(
   uint8_t x_index = (ss.loc.x - anchor_loc.x) + 4;
   bool ret = (range[y_index * 9 + x_index] != 0);
   if (log) {
-    log->debug("is_card_within_range: (%s) (ss.loc=(%hhu,%hhu), anchor_loc=(%hhu,%hhu), indexes=(%hhu,%hhu))",
+    log->debug_f("is_card_within_range: ({}) (ss.loc=({},{}), anchor_loc=({},{}), indexes=({},{}))",
         ret ? "true" : "false", ss.loc.x, ss.loc.y, anchor_loc.x, anchor_loc.y, x_index, y_index);
   }
   return ret;
 }
 
-vector<uint16_t> get_card_refs_within_range(
+std::vector<uint16_t> get_card_refs_within_range(
     const parray<uint8_t, 9 * 9>& range,
     const Location& loc,
     const parray<CardShortStatus, 0x10>& short_statuses,
-    PrefixedLogger* log) {
-  vector<uint16_t> ret;
+    phosg::PrefixedLogger* log) {
+  std::vector<uint16_t> ret;
   if (is_card_within_range(range, loc, short_statuses[0], log)) {
     if (log) {
-      log->debug("get_card_refs_within_range: sc card @%04hX within range", short_statuses[0].card_ref.load());
+      log->debug_f("get_card_refs_within_range: sc card @{:04X} within range", short_statuses[0].card_ref);
     }
     ret.emplace_back(short_statuses[0].card_ref);
   } else {
     if (log) {
-      log->debug("get_card_refs_within_range: sc card @%04hX not within range", short_statuses[0].card_ref.load());
+      log->debug_f("get_card_refs_within_range: sc card @{:04X} not within range", short_statuses[0].card_ref);
     }
   }
   for (size_t card_index = 7; card_index < 15; card_index++) {
     const auto& ss = short_statuses[card_index];
     if (is_card_within_range(range, loc, ss, log)) {
       if (log) {
-        log->debug("get_card_refs_within_range: card @%04hX within range", ss.card_ref.load());
+        log->debug_f("get_card_refs_within_range: card @{:04X} within range", ss.card_ref);
       }
       ret.emplace_back(ss.card_ref);
     } else {
       if (log) {
-        log->debug("get_card_refs_within_range: card @%04hX not within range", ss.card_ref.load());
+        log->debug_f("get_card_refs_within_range: card @{:04X} not within range", ss.card_ref);
       }
     }
   }

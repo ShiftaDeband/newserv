@@ -2,42 +2,58 @@
 .DS_Store
 
 # Build products
-src/Revision.cc
 newserv
+newserv.exe
+src/Revision.cc
 
 # CMake files
+build
 cmake_install.cmake
 CMakeCache.txt
 CMakeFiles
-CTestTestFile.cmake
 CTestTestfile.cmake
+CTestTestFile.cmake
 install_manifest.txt
 Makefile
 Testing
 
 # Files modified by the user and/or server that don't have defaults
 system/config.json
+system/ep3/battle-records/*.mzr
 system/ep3/battle-records/*.mzrd
 system/ep3/tournament-state.json
 system/licenses.nsi
 system/licenses/*.json
+system/patch-bb/.metadata-cache.json
+system/patch-pc/.metadata-cache.json
+system/players/*.nsa
+system/players/*.nsc
+system/players/*.psobank
+system/players/*.psocard
 system/players/*.psochar
 system/players/*.psosys
-system/players/*.psocard
-system/players/*.nsc
-system/players/*.nsa
+system/teams/*.bmp
 system/teams/*.json
-system/patch-pc/.metadata-cache.json
-system/patch-bb/.metadata-cache.json
 
 # Files fuzziqersoftware uses that don't make sense to be committed to the main
 # repository
+*.dec
+*.WIP-s
 files
-make_release.py
+notes-private
 old-khyller
 old-newserv
 release
 release.zip
-system/patch-bb/data
-system/patch-bb/psobb.pat
+all-quests
 system/dol
+system/patch-bb/data
+system/client-functions/Debug-Private
+system/config.2.json
+system/ep3/banners
+system/ep3/cardtex
+system/ep3/cardtex-trial
+system/players
+system/quests/includes
+system/quests/private
+.vscode

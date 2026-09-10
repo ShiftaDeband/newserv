@@ -3,23 +3,24 @@
 #include <stdint.h>
 
 #include <array>
+#include <chrono>
 #include <deque>
+#include <filesystem>
 #include <phosg/Filesystem.hh>
 #include <phosg/Random.hh>
 #include <phosg/Time.hh>
 
+#include "../CommonFileFormats.hh"
 #include "../Compression.hh"
 #include "../Loggers.hh"
 #include "../PSOEncryption.hh"
 #include "../Quest.hh"
 #include "../Text.hh"
 
-using namespace std;
-
 namespace Episode3 {
 
 const char* name_for_environment_number(uint8_t environment_number) {
-  static constexpr array<const char*, 0x1C> names = {
+  static constexpr std::array<const char*, 0x1C> names = {
       "Unguis Lapis",
       "Nebula Montana 1",
       "Lupus Silva 1",
@@ -76,170 +77,18 @@ const char* name_for_link_color(uint8_t color) {
     case 9:
       return "green"; // Status effects
     default:
-      throw invalid_argument("unknown color");
+      throw std::invalid_argument("unknown color");
   }
 }
 
-const char* name_for_card_type(CardType type) {
-  switch (type) {
-    case CardType::HUNTERS_SC:
-      return "HUNTERS_SC";
-    case CardType::ARKZ_SC:
-      return "ARKZ_SC";
-    case CardType::ITEM:
-      return "ITEM";
-    case CardType::CREATURE:
-      return "CREATURE";
-    case CardType::ACTION:
-      return "ACTION";
-    case CardType::ASSIST:
-      return "ASSIST";
-    case CardType::INVALID_FF:
-      return "INVALID_FF";
-    default:
-      throw invalid_argument("invalid card type");
+phosg::JSON json_for_link_colors(const parray<uint8_t, 8>& colors) {
+  phosg::JSON ret = phosg::JSON::list();
+  for (size_t z = 0; z < colors.size(); z++) {
+    if (colors[z]) {
+      ret.emplace_back(name_for_link_color(colors[z]));
+    }
   }
-}
-
-const char* name_for_card_class(CardClass cc) {
-  switch (cc) {
-    case CardClass::HU_SC:
-      return "HU_SC";
-    case CardClass::RA_SC:
-      return "RA_SC";
-    case CardClass::FO_SC:
-      return "FO_SC";
-    case CardClass::NATIVE_CREATURE:
-      return "NATIVE_CREATURE";
-    case CardClass::A_BEAST_CREATURE:
-      return "A_BEAST_CREATURE";
-    case CardClass::MACHINE_CREATURE:
-      return "MACHINE_CREATURE";
-    case CardClass::DARK_CREATURE:
-      return "DARK_CREATURE";
-    case CardClass::GUARD_ITEM:
-      return "GUARD_ITEM";
-    case CardClass::MAG_ITEM:
-      return "MAG_ITEM";
-    case CardClass::SWORD_ITEM:
-      return "SWORD_ITEM";
-    case CardClass::GUN_ITEM:
-      return "GUN_ITEM";
-    case CardClass::CANE_ITEM:
-      return "CANE_ITEM";
-    case CardClass::ATTACK_ACTION:
-      return "ATTACK_ACTION";
-    case CardClass::DEFENSE_ACTION:
-      return "DEFENSE_ACTION";
-    case CardClass::TECH:
-      return "TECH";
-    case CardClass::PHOTON_BLAST:
-      return "PHOTON_BLAST";
-    case CardClass::CONNECT_ONLY_ATTACK_ACTION:
-      return "CONNECT_ONLY_ATTACK_ACTION";
-    case CardClass::BOSS_ATTACK_ACTION:
-      return "BOSS_ATTACK_ACTION";
-    case CardClass::BOSS_TECH:
-      return "BOSS_TECH";
-    case CardClass::ASSIST:
-      return "ASSIST";
-    default:
-      throw invalid_argument("invalid card class");
-  }
-}
-
-const char* name_for_attack_medium(AttackMedium medium) {
-  switch (medium) {
-    case AttackMedium::UNKNOWN:
-      return "UNKNOWN";
-    case AttackMedium::PHYSICAL:
-      return "PHYSICAL";
-    case AttackMedium::TECH:
-      return "TECH";
-    case AttackMedium::UNKNOWN_03:
-      return "UNKNOWN_03";
-    case AttackMedium::INVALID_FF:
-      return "INVALID_FF";
-    default:
-      return "__INVALID__";
-  }
-}
-
-const char* name_for_criterion_code(CriterionCode code) {
-  switch (code) {
-    case CriterionCode::NONE:
-      return "NONE";
-    case CriterionCode::HU_CLASS_SC:
-      return "HU_CLASS_SC";
-    case CriterionCode::RA_CLASS_SC:
-      return "RA_CLASS_SC";
-    case CriterionCode::FO_CLASS_SC:
-      return "FO_CLASS_SC";
-    case CriterionCode::SAME_TEAM:
-      return "SAME_TEAM";
-    case CriterionCode::SAME_PLAYER:
-      return "SAME_PLAYER";
-    case CriterionCode::SAME_TEAM_NOT_SAME_PLAYER:
-      return "SAME_TEAM_NOT_SAME_PLAYER";
-    case CriterionCode::FC:
-      return "FC";
-    case CriterionCode::NOT_SC:
-      return "NOT_SC";
-    case CriterionCode::SC:
-      return "SC";
-    case CriterionCode::HU_OR_RA_CLASS_SC:
-      return "HU_OR_RA_CLASS_SC";
-    case CriterionCode::HUNTER_NON_ANDROID_SC:
-      return "HUNTER_NON_ANDROID_SC";
-    case CriterionCode::HUNTER_HU_CLASS_MALE_SC:
-      return "HUNTER_HU_CLASS_MALE_SC";
-    case CriterionCode::HUNTER_FEMALE_SC:
-      return "HUNTER_FEMALE_SC";
-    case CriterionCode::HUNTER_NON_RA_CLASS_HUMAN_SC:
-      return "HUNTER_NON_RA_CLASS_HUMAN_SC";
-    case CriterionCode::HUNTER_HU_CLASS_ANDROID_SC:
-      return "HUNTER_HU_CLASS_ANDROID_SC";
-    case CriterionCode::HUNTER_NON_RA_CLASS_NON_NEWMAN_SC:
-      return "HUNTER_NON_RA_CLASS_NON_NEWMAN_SC";
-    case CriterionCode::HUNTER_NON_NEWMAN_NON_FORCE_MALE_SC:
-      return "HUNTER_NON_NEWMAN_NON_FORCE_MALE_SC";
-    case CriterionCode::HUNTER_HUNEWEARL_CLASS_SC:
-      return "HUNTER_HUNEWEARL_CLASS_SC";
-    case CriterionCode::HUNTER_RA_CLASS_MALE_SC:
-      return "HUNTER_RA_CLASS_MALE_SC";
-    case CriterionCode::HUNTER_RA_CLASS_FEMALE_SC:
-      return "HUNTER_RA_CLASS_FEMALE_SC";
-    case CriterionCode::HUNTER_RA_OR_FO_CLASS_FEMALE_SC:
-      return "HUNTER_RA_OR_FO_CLASS_FEMALE_SC";
-    case CriterionCode::HUNTER_HU_OR_RA_CLASS_HUMAN_SC:
-      return "HUNTER_HU_OR_RA_CLASS_HUMAN_SC";
-    case CriterionCode::HUNTER_RA_CLASS_ANDROID_SC:
-      return "HUNTER_RA_CLASS_ANDROID_SC";
-    case CriterionCode::HUNTER_FO_CLASS_FEMALE_SC:
-      return "HUNTER_FO_CLASS_FEMALE_SC";
-    case CriterionCode::HUNTER_HUMAN_FEMALE_SC:
-      return "HUNTER_HUMAN_FEMALE_SC";
-    case CriterionCode::HUNTER_ANDROID_SC:
-      return "HUNTER_ANDROID_SC";
-    case CriterionCode::HU_OR_FO_CLASS_SC:
-      return "HU_OR_FO_CLASS_SC";
-    case CriterionCode::RA_OR_FO_CLASS_SC:
-      return "RA_OR_FO_CLASS_SC";
-    case CriterionCode::PHYSICAL_OR_UNKNOWN_ATTACK_MEDIUM:
-      return "PHYSICAL_OR_UNKNOWN_ATTACK_MEDIUM";
-    case CriterionCode::TECH_OR_UNKNOWN_ATTACK_MEDIUM:
-      return "TECH_OR_UNKNOWN_ATTACK_MEDIUM";
-    case CriterionCode::PHYSICAL_OR_TECH_OR_UNKNOWN_ATTACK_MEDIUM:
-      return "PHYSICAL_OR_TECH_OR_UNKNOWN_ATTACK_MEDIUM";
-    case CriterionCode::NON_PHYSICAL_NON_UNKNOWN_ATTACK_MEDIUM_NON_SC:
-      return "NON_PHYSICAL_NON_UNKNOWN_ATTACK_MEDIUM_NON_SC";
-    case CriterionCode::NON_PHYSICAL_NON_TECH_ATTACK_MEDIUM_NON_SC:
-      return "NON_PHYSICAL_NON_TECH_ATTACK_MEDIUM_NON_SC";
-    case CriterionCode::NON_PHYSICAL_NON_TECH_NON_UNKNOWN_ATTACK_MEDIUM_NON_SC:
-      return "NON_PHYSICAL_NON_TECH_NON_UNKNOWN_ATTACK_MEDIUM_NON_SC";
-    default:
-      throw invalid_argument("invalid criterion code");
-  }
+  return ret;
 }
 
 Location::Location() : Location(0, 0) {}
@@ -251,18 +100,16 @@ Location::Location(uint8_t x, uint8_t y, Direction direction)
       unused(0) {}
 
 bool Location::operator==(const Location& other) const {
-  return (this->x == other.x) &&
-      (this->y == other.y) &&
-      (this->direction == other.direction) &&
-      (this->unused == other.unused);
+  return (this->x == other.x) && (this->y == other.y) &&
+      (this->direction == other.direction) && (this->unused == other.unused);
 }
 bool Location::operator!=(const Location& other) const {
   return !this->operator==(other);
 }
 
 std::string Location::str() const {
-  return string_printf("Location[x=%hhu, y=%hhu, dir=%s, u=%hhu]",
-      this->x, this->y, name_for_direction(this->direction), this->unused);
+  return std::format("Location[x={}, y={}, dir={}:{}, u={}]",
+      this->x, this->y, static_cast<uint8_t>(this->direction), phosg::name_for_enum(this->direction), this->unused);
 }
 
 void Location::clear() {
@@ -324,97 +171,73 @@ Direction turn_around(Direction d) {
   }
 }
 
-const char* name_for_direction(Direction d) {
-  switch (d) {
-    case Direction::RIGHT:
-      return "LEFT";
-    case Direction::UP:
-      return "DOWN";
-    case Direction::LEFT:
-      return "RIGHT";
-    case Direction::DOWN:
-      return "UP";
-    case Direction::INVALID_FF:
-      return "INVALID_FF";
-    default:
-      return "__INVALID__";
+bool card_class_is_tech_like(CardClass cc, bool is_nte) {
+  // NTE does not consider BOSS_TECH to be a tech-like card class, but that's probably because that card class just
+  // doesn't exist on NTE.
+  return (cc == CardClass::TECH) || (cc == CardClass::PHOTON_BLAST) || (!is_nte && (cc == CardClass::BOSS_TECH));
+}
+
+struct ExprTokenDefinition {
+  int32_t value;
+  std::string token;
+  std::string description;
+};
+static const std::vector<ExprTokenDefinition> expr_token_defs{
+    {0x00, "f", "Number of FCs controlled by current SC"},
+    {0x01, "d", "Die roll"},
+    {0x02, "ap", "Attacker effective AP"},
+    {0x03, "tp", "Attacker effective TP"},
+    {0x04, "hp", "Current HP"},
+    {0x05, "mhp", "Maximum HP"},
+    {0x06, "dm", "Physical damage"},
+    {0x07, "tdm", "Technique damage"},
+    {0x08, "tf", "Number of SC\'s destroyed FCs"},
+    {0x09, "ac", "Remaining ATK points"},
+    {0x0A, "php", "Maximum HP"},
+    {0x0B, "dc", "Die roll"},
+    {0x0C, "cs", "Card set cost"},
+    {0x0D, "a", "Number of FCs on all teams"},
+    {0x0E, "kap", "Action cards AP"},
+    {0x0F, "ktp", "Action cards TP"},
+    {0x10, "dn", "Unknown: dn"},
+    {0x11, "hf", "Number of item or creature cards in hand"},
+    {0x12, "df", "Number of destroyed ally FCs (including SC\'s own)"},
+    {0x13, "ff", "Number of ally FCs (including SC\'s own)"},
+    {0x14, "ef", "Number of enemy FCs"},
+    {0x15, "bi", "Number of Native FCs on either team"},
+    {0x16, "ab", "Number of A.Beast FCs on either team"},
+    {0x17, "mc", "Number of Machine FCs on either team"},
+    {0x18, "dk", "Number of Dark FCs on either team"},
+    {0x19, "sa", "Number of Sword-type items on either team"},
+    {0x1A, "gn", "Number of Gun-type items on either team"},
+    {0x1B, "wd", "Number of Cane-type items on either team"},
+    {0x1C, "tt", "Physical damage"},
+    {0x1D, "lv", "Dice boost"},
+    {0x1E, "adm", "SC attack damage"},
+    {0x1F, "ddm", "Attack bonus"},
+    {0x20, "sat", "Number of Sword-type items on SC\'s team"},
+    {0x21, "edm", "Target attack bonus"},
+    {0x22, "ldm", "Last attack damage before defense"}, // Unused
+    {0x23, "rdm", "Last attack damage"},
+    {0x24, "fdm", "Final damage (after defense)"},
+    {0x25, "ndm", "Unknown: ndm"}, // Unused
+    {0x26, "ehp", "Attacker HP"},
+};
+
+static std::unordered_map<std::string, const ExprTokenDefinition*> generate_expr_token_defs_index() {
+  std::unordered_map<std::string, const ExprTokenDefinition*> ret;
+  for (const auto& def : expr_token_defs) {
+    ret.emplace(def.token, &def);
   }
+  return ret;
 }
 
-bool card_class_is_tech_like(CardClass cc) {
-  return (cc == CardClass::TECH) ||
-      (cc == CardClass::PHOTON_BLAST) ||
-      (cc == CardClass::BOSS_TECH);
+const ExprTokenDefinition& def_for_expr_token(const std::string& token) {
+  static const auto index = generate_expr_token_defs_index();
+  return *index.at(token);
 }
 
-static const unordered_map<string, const char*> description_for_expr_token({
-    {"f", "Number of FCs controlled by current SC"},
-    {"d", "Die roll"},
-    {"ap", "Attacker effective AP"},
-    {"tp", "Attacker effective TP"},
-    {"hp", "Current HP"},
-    {"mhp", "Maximum HP"},
-    {"dm", "Physical damage"},
-    {"tdm", "Technique damage"},
-    {"tf", "Number of SC\'s destroyed FCs"},
-    {"ac", "Remaining ATK points"},
-    {"php", "Maximum HP"},
-    {"dc", "Die roll"},
-    {"cs", "Card set cost"},
-    {"a", "Number of FCs on all teams"},
-    {"kap", "Action cards AP"},
-    {"ktp", "Action cards TP"},
-    {"dn", "Unknown: dn"},
-    {"hf", "Number of item or creature cards in hand"},
-    {"df", "Number of destroyed ally FCs (including SC\'s own)"},
-    {"ff", "Number of ally FCs (including SC\'s own)"},
-    {"ef", "Number of enemy FCs"},
-    {"bi", "Number of Native FCs on either team"},
-    {"ab", "Number of A.Beast FCs on either team"},
-    {"mc", "Number of Machine FCs on either team"},
-    {"dk", "Number of Dark FCs on either team"},
-    {"sa", "Number of Sword-type items on either team"},
-    {"gn", "Number of Gun-type items on either team"},
-    {"wd", "Number of Cane-type items on either team"},
-    {"tt", "Physical damage"},
-    {"lv", "Dice boost"},
-    {"adm", "SC attack damage"},
-    {"ddm", "Attack bonus"},
-    {"sat", "Number of Sword-type items on SC\'s team"},
-    {"edm", "Target attack bonus"},
-    {"ldm", "Last attack damage before defense"}, // Unused
-    {"rdm", "Last attack damage"},
-    {"fdm", "Final damage (after defense)"},
-    {"ndm", "Unknown: ndm"}, // Unused
-    {"ehp", "Attacker HP"},
-});
-
-// Arguments are encoded as 3-character null-terminated strings (why?!), and are
-// used for adding conditions to effects (e.g. making them only trigger in
-// certain situations) or otherwise customizing their results. The arguments are
-// heterogeneous based on their position; that is, the first argument always has
-// the same meaning, and meaning letters that are valid in arg1 are not
-// necessarily valid in arg2, etc.
-// Argument meanings:
-// a01 = ???
-// e00 = effect lasts while equipped? (in contrast to tXX)
-// pXX = who to target (see description_for_p_target)
-// In arg2:
-// bXX = require attack doing not more than XX damage
-// cXY/CXY = linked items (require item with cYX/CYX to be equipped as well)
-// dXY = roll one die; require result between X and Y inclusive
-// hXX = require HP >= XX
-// iXX = require HP <= XX
-// mXX = require attack doing at least XX damage
-// nXX = require condition (see description_for_n_condition below)
-// oXX = seems to be "require previous random-condition effect to have happened"
-//       TODO: this is used as both o01 (recovery) and o11 (reflection)
-//             conditions - why the difference?
-// rXX = randomly pass with XX% chance (if XX == 00, 100% chance?)
-// sXY = require card cost between X and Y ATK points (inclusive)
-// tXX = lasts XX turns, or activate after XX turns
-
-static const vector<const char*> description_for_n_condition({
+static const std::vector<const char*> description_for_n_condition({
     /* n00 */ "Always true",
     /* n01 */ "Card is Hunters-side SC",
     /* n02 */ "Destroyed with a single attack",
@@ -440,7 +263,7 @@ static const vector<const char*> description_for_n_condition({
     /* n22 */ "Target is affected by Rampage",
 });
 
-static const vector<const char*> description_for_p_target({
+static const std::vector<const char*> description_for_p_target({
     /* p00 */ "(Invalid)",
     /* p01 */ "SC / FC who set the card",
     /* p02 */ "Attacking SC / FC",
@@ -499,7 +322,7 @@ struct ConditionDescription {
   const char* description;
 };
 
-static const vector<ConditionDescription> description_for_condition_type({
+static const std::vector<ConditionDescription> description_for_condition_type({
     /* 0x00 */ {false, "NONE", nullptr},
     /* 0x01 */ {true, "AP_BOOST", "Temporarily increase AP"},
     /* 0x02 */ {false, "RAMPAGE", "Rampage"},
@@ -628,27 +451,6 @@ static const vector<ConditionDescription> description_for_condition_type({
     /* 0x7D */ {false, "UNKNOWN_7D", nullptr},
 });
 
-const char* name_for_condition_type(ConditionType cond_type) {
-  try {
-    return description_for_condition_type.at(static_cast<size_t>(cond_type)).name;
-  } catch (const out_of_range&) {
-    return "__INVALID__";
-  }
-}
-
-const char* name_for_action_subphase(ActionSubphase subphase) {
-  switch (subphase) {
-    case ActionSubphase::ATTACK:
-      return "ATTACK";
-    case ActionSubphase::DEFENSE:
-      return "DEFENSE";
-    case ActionSubphase::INVALID_FF:
-      return "INVALID_FF";
-    default:
-      return "__INVALID__";
-  }
-}
-
 void CardDefinition::Stat::decode_code() {
   this->type = static_cast<Type>(this->code / 1000);
   int16_t value = this->code - (this->type * 1000);
@@ -666,7 +468,7 @@ void CardDefinition::Stat::decode_code() {
         this->stat = -value;
         break;
       default:
-        throw runtime_error("invalid card stat type");
+        throw std::runtime_error("invalid card stat type");
     }
   } else {
     this->stat = 0;
@@ -674,18 +476,18 @@ void CardDefinition::Stat::decode_code() {
   }
 }
 
-string CardDefinition::Stat::str() const {
+std::string CardDefinition::Stat::str() const {
   switch (this->type) {
     case Type::BLANK:
-      return "(blank)";
+      return "-";
     case Type::STAT:
-      return string_printf("%hhd", this->stat);
+      return std::format("{}", this->stat);
     case Type::PLUS_STAT:
-      return string_printf("+%hhd", this->stat);
+      return std::format("+{}", this->stat);
     case Type::MINUS_STAT:
-      return string_printf("-%d", -this->stat);
+      return std::format("-{}", -this->stat);
     case Type::EQUALS_STAT:
-      return string_printf("=%hhd", this->stat);
+      return std::format("={}", this->stat);
     case Type::UNKNOWN:
       return "?";
     case Type::PLUS_UNKNOWN:
@@ -695,15 +497,80 @@ string CardDefinition::Stat::str() const {
     case Type::EQUALS_UNKNOWN:
       return "=?";
     default:
-      return string_printf("[%02hhX %02hhX]", this->type, this->stat);
+      return std::format("[{:02X} {:02X}]", static_cast<uint8_t>(this->type), this->stat);
   }
+}
+
+std::vector<CardDefinition::Effect::ExprToken> CardDefinition::Effect::ExprToken::parse(const char* expr) {
+  using T = ExprToken::Type;
+
+  std::vector<ExprToken> ret;
+  while (*expr) {
+    size_t ret_count = ret.size();
+    switch (*expr) {
+      case ' ':
+        ret.emplace_back(ExprToken{.type = T::SPACE, .value = 0, .text = expr, .text_size = 1});
+        break;
+      case '+':
+        ret.emplace_back(ExprToken{.type = T::ADD, .value = 0, .text = expr, .text_size = 1});
+        break;
+      case '-':
+        ret.emplace_back(ExprToken{.type = T::SUBTRACT, .value = 0, .text = expr, .text_size = 1});
+        break;
+      case '*':
+        ret.emplace_back(ExprToken{.type = T::MULTIPLY, .value = 0, .text = expr, .text_size = 1});
+        break;
+      case '/':
+        ret.emplace_back(ExprToken{
+            .type = ((expr[1] == '/') ? T::FLOOR_DIVIDE : T::ROUND_DIVIDE),
+            .value = 0,
+            .text = expr,
+            .text_size = static_cast<size_t>((expr[1] == '/') ? 2 : 1)});
+        break;
+
+      default:
+        if ((*expr >= 'a') && (*expr <= 'z')) {
+          std::string token_buf;
+          for (const char* z = expr; (*z >= 'a') && (*z <= 'z'); z++) {
+            token_buf.push_back(*z);
+          }
+
+          try {
+            const auto& def = def_for_expr_token(token_buf);
+            ret.emplace_back(ExprToken{
+                .type = T::REFERENCE,
+                .value = def.value,
+                .text = expr - token_buf.size(),
+                .text_size = token_buf.size()});
+          } catch (const std::out_of_range&) {
+            throw std::runtime_error("unknown token in card effect expression: " + token_buf);
+          }
+
+        } else if ((*expr >= '0') && (*expr <= '9')) {
+          const char* end_ptr;
+          int32_t value = strtol(expr, const_cast<char**>(&end_ptr), 10);
+          ret.emplace_back(ExprToken{
+              .type = T::NUMBER, .value = value, .text = expr, .text_size = static_cast<size_t>(end_ptr - expr)});
+
+        } else {
+          throw std::runtime_error("invalid card effect expression");
+        }
+    }
+
+    if (ret.size() != ret_count + 1) {
+      throw std::logic_error("expr parsing step did not add exactly one token");
+    }
+    expr += ret.back().text_size;
+  }
+
+  return ret;
 }
 
 bool CardDefinition::Effect::is_empty() const {
   return (this->effect_num == 0 &&
       this->type == ConditionType::NONE &&
       this->expr.empty() &&
-      this->when == 0 &&
+      this->when == EffectWhen::NONE &&
       this->arg1.empty() &&
       this->arg2.empty() &&
       this->arg3.empty() &&
@@ -711,7 +578,7 @@ bool CardDefinition::Effect::is_empty() const {
       this->name_index == 0);
 }
 
-string CardDefinition::Effect::str_for_arg(const string& arg) {
+std::string CardDefinition::Effect::str_for_arg(const std::string& arg) {
   if (arg.empty()) {
     return arg;
   }
@@ -720,105 +587,155 @@ string CardDefinition::Effect::str_for_arg(const string& arg) {
   }
   size_t value;
   try {
-    value = stoul(arg.c_str() + 1, nullptr, 10);
-  } catch (const invalid_argument&) {
+    value = std::stoul(arg.c_str() + 1, nullptr, 10);
+  } catch (const std::invalid_argument&) {
     return arg + " (invalid)";
   }
 
   switch (arg[0]) {
     case 'a':
-      return string_printf("%s (Each activation lasts for %zu attack%s)", arg.c_str(), value, (value == 1) ? "" : "s");
+      return std::format("{} (Each activation lasts for {} attack{})", arg, value, (value == 1) ? "" : "s");
     case 'C':
     case 'c':
-      return string_printf("%s (Req. linked item (%zu=>%zu))", arg.c_str(), value / 10, value % 10);
+      return std::format("{} (Req. linked item ({}=>{}))", arg, value / 10, value % 10);
     case 'd':
-      return string_printf("%s (Req. die roll in [%zu, %zu])", arg.c_str(), value / 10, value % 10);
+      return std::format("{} (Req. die roll in [{}, {}])", arg, value / 10, value % 10);
     case 'e':
       return arg + " (While equipped)";
     case 'h':
-      return string_printf("%s (Req. HP >= %zu)", arg.c_str(), value);
+      return std::format("{} (Req. HP >= {})", arg, value);
     case 'i':
-      return string_printf("%s (Req. HP <= %zu)", arg.c_str(), value);
+      return std::format("{} (Req. HP <= {})", arg, value);
     case 'n':
       try {
-        return string_printf("%s (Req. condition: %s)", arg.c_str(), description_for_n_condition.at(value));
-      } catch (const out_of_range&) {
+        return std::format("{} (Req. condition: {})", arg, description_for_n_condition.at(value));
+      } catch (const std::out_of_range&) {
         return arg + " (Req. condition: unknown)";
       }
-    case 'o':
-      return arg + " (Req. prev effect conditions passed)";
+    case 'o': {
+      const char* suffix = ((value / 10) == 1) ? " on opponent card" : " on self";
+      if (value == 0) {
+        return std::format("{} (Req. any previous effect{})", arg, suffix);
+      } else {
+        return std::format("{} (Req. effect {} passed{})", arg, static_cast<size_t>(value % 10), suffix);
+      }
+    }
     case 'p':
       try {
-        return string_printf("%s (Target: %s)", arg.c_str(), description_for_p_target.at(value));
-      } catch (const out_of_range&) {
+        return std::format("{} (Target: {})", arg, description_for_p_target.at(value));
+      } catch (const std::out_of_range&) {
         return arg + " (Target: unknown)";
       }
     case 'r':
-      return string_printf("%s (Random with %zu%% chance)", arg.c_str(), value == 0 ? 100 : value);
+      return std::format("{} (Random with {}% chance)", arg, value == 0 ? 100 : value);
     case 's':
-      return string_printf("%s (Req. cost in [%zu, %zu])", arg.c_str(), value / 10, value % 10);
+      return std::format("{} (Req. cost in [{}, {}])", arg, value / 10, value % 10);
     case 't':
-      return string_printf("%s (Turns: %zu)", arg.c_str(), value);
+      return std::format("{} (Turns: {})", arg, value);
     default:
       return arg + " (unknown)";
   }
 }
 
-string CardDefinition::Effect::str(const char* separator, const TextArchive* text_archive) const {
-  vector<string> tokens;
-  tokens.emplace_back(string_printf("%hhu:", this->effect_num));
+std::string CardDefinition::Effect::str(const char* separator, const TextSet* text_archive) const {
+  std::vector<std::string> tokens;
   {
     uint8_t type = static_cast<uint8_t>(this->type);
-    string cmd_str = string_printf("cmd=%02hhX", type);
+    std::string cmd_str = std::format("({}) {:02X}", this->effect_num, type);
     try {
       const char* name = description_for_condition_type.at(type).name;
       if (name) {
         cmd_str += ':';
         cmd_str += name;
       }
-    } catch (const out_of_range&) {
+    } catch (const std::out_of_range&) {
     }
     tokens.emplace_back(std::move(cmd_str));
   }
   if (!this->expr.empty()) {
-    tokens.emplace_back("expr=" + this->expr.decode());
+    std::string expr_decoded = this->expr.decode();
+    std::vector<std::string> explanation_tokens;
+    try {
+      auto tokens = ExprToken::parse(expr_decoded.c_str());
+      for (const auto& token : tokens) {
+        switch (token.type) {
+          case ExprToken::Type::REFERENCE:
+            try {
+              explanation_tokens.emplace_back(expr_token_defs.at(token.value).description);
+            } catch (const std::out_of_range&) {
+              explanation_tokens.emplace_back(std::format("<<invalid reference: {:X}>>", token.value));
+            }
+            break;
+          case ExprToken::Type::NUMBER:
+            explanation_tokens.emplace_back(std::format("{}", token.value));
+            break;
+          case ExprToken::Type::SUBTRACT:
+            explanation_tokens.emplace_back("-");
+            break;
+          case ExprToken::Type::ADD:
+            explanation_tokens.emplace_back("+");
+            break;
+          case ExprToken::Type::ROUND_DIVIDE:
+            explanation_tokens.emplace_back("/ (round-divide)");
+            break;
+          case ExprToken::Type::FLOOR_DIVIDE:
+            explanation_tokens.emplace_back("/ (floor-divide)");
+            break;
+          case ExprToken::Type::MULTIPLY:
+            explanation_tokens.emplace_back("*");
+            break;
+          default:
+            explanation_tokens.emplace_back("<<invalid token>>");
+        }
+      }
+    } catch (const std::exception& e) {
+      explanation_tokens.emplace_back(std::format("failed to parse expr: {}", e.what()));
+    }
+    if ((explanation_tokens.size() == 1) && (explanation_tokens.front() == expr_decoded)) {
+      tokens.emplace_back(std::format("expr={}", expr_decoded));
+    } else {
+      tokens.emplace_back(std::format("expr={} ({})", expr_decoded, phosg::join(explanation_tokens, " ")));
+    }
   }
-  tokens.emplace_back(string_printf("when=%02hhX", this->when));
+  tokens.emplace_back(std::format("when={:02X}:{}", static_cast<uint8_t>(this->when), phosg::name_for_enum(this->when)));
   tokens.emplace_back("arg1=" + this->str_for_arg(this->arg1.decode()));
   tokens.emplace_back("arg2=" + this->str_for_arg(this->arg2.decode()));
   tokens.emplace_back("arg3=" + this->str_for_arg(this->arg3.decode()));
-  {
+
+  if (this->apply_criterion != CriterionCode::NONE) {
     uint8_t type = static_cast<uint8_t>(this->apply_criterion);
-    string cond_str = string_printf("cond=%02hhX", type);
+    std::string cond_str = std::format("cond={:02X}", type);
     try {
-      const char* name = name_for_criterion_code(this->apply_criterion);
+      const char* name = phosg::name_for_enum(this->apply_criterion);
       cond_str += ':';
       cond_str += name;
-    } catch (const invalid_argument&) {
+    } catch (const std::invalid_argument&) {
     }
     tokens.emplace_back(std::move(cond_str));
   }
 
-  const char* name = nullptr;
-  if (this->name_index && text_archive) {
-    try {
-      name = text_archive->get_string(45, this->name_index).c_str();
-    } catch (const exception&) {
-    }
-  }
-  if (name) {
-    string formatted_name = name;
-    for (char& ch : formatted_name) {
-      if (ch == '\t') {
-        ch = '$';
+  if (this->name_index > 0) {
+    const char* name = nullptr;
+    if (this->name_index && text_archive) {
+      try {
+        name = text_archive->get(45, this->name_index).c_str();
+      } catch (const std::exception&) {
       }
     }
-    tokens.emplace_back(string_printf("name=%02hhX \"%s\"", this->name_index, formatted_name.c_str()));
-  } else {
-    tokens.emplace_back(string_printf("name=%02hhX", this->name_index));
+    if (name) {
+      std::string formatted_name = name;
+      for (char& ch : formatted_name) {
+        if (ch == '\t') {
+          ch = '$';
+        }
+      }
+      tokens.emplace_back(std::format("name={:02X} \"{}\"", this->name_index, formatted_name));
+    } else {
+      tokens.emplace_back(std::format("name={:02X}", this->name_index));
+    }
   }
 
-  return join(tokens, separator);
+  return phosg::join(tokens, separator);
 }
 
 bool CardDefinition::is_sc() const {
@@ -830,7 +747,7 @@ bool CardDefinition::is_fc() const {
 }
 
 bool CardDefinition::is_named_android_sc() const {
-  static const unordered_set<uint16_t> TARGET_IDS({0x0005, 0x0007, 0x0110, 0x0113, 0x0114, 0x0117, 0x011B, 0x011F});
+  static const std::unordered_set<uint16_t> TARGET_IDS{0x0005, 0x0007, 0x0110, 0x0113, 0x0114, 0x0117, 0x011B, 0x011F};
   return TARGET_IDS.count(this->card_id);
 }
 
@@ -852,9 +769,8 @@ CardClass CardDefinition::card_class() const {
 }
 
 void CardDefinition::decode_range() {
-  // If the cell representing the FC is nonzero, the card has a range from a
-  // list of constants. Otherwise, its range is already defined in the range
-  // array and should be left alone.
+  // If the cell representing the FC is nonzero, the card has a range from a list of constants. Otherwise, its range is
+  // already defined in the range array and should be left alone.
   uint8_t index = (this->range[4] >> 8) & 0xF;
   if (index != 0) {
     this->range.clear(0);
@@ -897,47 +813,45 @@ void CardDefinition::decode_range() {
         break;
       case 9: // No cells
         break;
-      // The table in the DOL file only appears to contain 9 entries; there are
-      // some pointers immediately after. So probably if a card specified A-F,
-      // its range would be filled in with garbage in the original game.
+      // The table in the DOL file only appears to contain 9 entries; there are some pointers immediately after. So
+      // probably if a card specified A-F, its range would be filled in with garbage in the original game.
       default:
-        throw runtime_error("invalid fixed range index");
+        throw std::runtime_error("invalid fixed range index");
     }
   }
 }
 
-string name_for_rank(CardRank rank) {
-  static const vector<const char*> names(
-      {"N1", "R1", "S", "E", "N2", "N3", "N4", "R2", "R3", "R4", "SS", "D1", "D2"});
+std::string name_for_rank(CardRank rank) {
+  static const std::vector<const char*> names{
+      "N1", "R1", "S", "E", "N2", "N3", "N4", "R2", "R3", "R4", "SS", "D1", "D2"};
   try {
     return names.at(static_cast<uint8_t>(rank) - 1);
-  } catch (const out_of_range&) {
-    return string_printf("(%02hhX)", static_cast<uint8_t>(rank));
+  } catch (const std::out_of_range&) {
+    return std::format("({:02X})", static_cast<uint8_t>(rank));
   }
 }
 
-string name_for_target_mode(TargetMode target_mode) {
-  static const vector<const char*> names({
+const char* name_for_target_mode(TargetMode target_mode) {
+  static const std::vector<const char*> names{
       "NONE",
-      "SINGLE",
-      "MULTI",
+      "SINGLE_RANGE",
+      "MULTI_RANGE",
       "SELF",
       "TEAM",
+      "EVERYONE",
+      "MULTI_RANGE_ALLIES",
+      "ALL_ALLIES",
       "ALL",
-      "MULTI-ALLY",
-      "ALL-ALLY",
-      "ALL-ATTACK",
-      "OWN-FCS",
-  });
+      "OWN_FCS"};
   try {
     return names.at(static_cast<uint8_t>(target_mode));
-  } catch (const out_of_range&) {
-    return string_printf("(%02hhX)", static_cast<uint8_t>(target_mode));
+  } catch (const std::out_of_range&) {
+    return "__UNKNOWN__";
   }
 }
 
-string string_for_colors(const parray<uint8_t, 8>& colors) {
-  string ret;
+std::string string_for_colors(const parray<uint8_t, 8>& colors) {
+  std::string ret;
   for (size_t x = 0; x < 8; x++) {
     if (colors[x]) {
       if (!ret.empty()) {
@@ -945,8 +859,8 @@ string string_for_colors(const parray<uint8_t, 8>& colors) {
       }
       try {
         ret += name_for_link_color(colors[x]);
-      } catch (const invalid_argument&) {
-        ret += string_printf("%02hhX", colors[x]);
+      } catch (const std::invalid_argument&) {
+        ret += std::format("{:02X}", colors[x]);
       }
     }
   }
@@ -956,22 +870,22 @@ string string_for_colors(const parray<uint8_t, 8>& colors) {
   return ret;
 }
 
-string string_for_assist_turns(uint8_t turns) {
+std::string string_for_assist_turns(uint8_t turns) {
   if (turns == 90) {
     return "ONCE";
   } else if (turns == 99) {
     return "FOREVER";
   } else {
-    return string_printf("%hhu", turns);
+    return std::format("{}", turns);
   }
 }
 
-string string_for_range(const parray<be_uint32_t, 6>& range) {
-  string ret;
+std::string string_for_range(const parray<be_uint32_t, 6>& range) {
+  std::string ret;
   for (size_t x = 0; x < 6; x++) {
-    ret += string_printf("%05" PRIX32 "/", range[x].load());
+    ret += std::format("{:05X}/", range[x]);
   }
-  while (starts_with(ret, "00000/")) {
+  while (ret.starts_with("00000/")) {
     ret = ret.substr(6);
   }
   if (!ret.empty()) {
@@ -980,8 +894,8 @@ string string_for_range(const parray<be_uint32_t, 6>& range) {
   return ret;
 }
 
-string string_for_drop_rate(uint16_t drop_rate) {
-  vector<string> tokens;
+std::string string_for_drop_rate(uint16_t drop_rate) {
+  std::vector<std::string> tokens;
   switch (drop_rate % 10) {
     case 0:
       tokens.emplace_back("mode=ANY");
@@ -1009,11 +923,11 @@ string string_for_drop_rate(uint16_t drop_rate) {
   }
   uint8_t environment_number = (drop_rate / 10) % 100;
   if (environment_number) {
-    tokens.emplace_back(string_printf("environment_number=%02hhX", static_cast<uint8_t>(environment_number - 1)));
+    tokens.emplace_back(std::format("environment_number={:02X}", static_cast<uint8_t>(environment_number - 1)));
   } else {
     tokens.emplace_back("environment_number=ANY");
   }
-  tokens.emplace_back(string_printf("rarity_class=%hhu", static_cast<uint8_t>((drop_rate / 1000) % 10)));
+  tokens.emplace_back(std::format("rarity_class={}", static_cast<uint8_t>((drop_rate / 1000) % 10)));
   switch ((drop_rate / 10000) % 10) {
     case 0:
       tokens.emplace_back("deck_type=ANY");
@@ -1027,8 +941,7 @@ string string_for_drop_rate(uint16_t drop_rate) {
     default:
       tokens.emplace_back("deck_type=__UNKNOWN__");
   }
-  string description = join(tokens, ", ");
-  return string_printf("[%hu: %s]", drop_rate, description.c_str());
+  return std::format("[{}: {}]", drop_rate, phosg::join(tokens, ", "));
 }
 
 static const char* short_name_for_assist_ai_param_target(uint8_t target) {
@@ -1061,36 +974,17 @@ static const char* name_for_assist_ai_param_target(uint8_t target) {
   }
 }
 
-string CardDefinition::str(bool single_line, const TextArchive* text_archive) const {
-  string type_str;
-  try {
-    type_str = name_for_card_type(this->type);
-  } catch (const invalid_argument&) {
-    type_str = string_printf("%02hhX", static_cast<uint8_t>(this->type));
-  }
-  string criterion_str;
-  try {
-    criterion_str = name_for_criterion_code(this->usable_criterion);
-  } catch (const invalid_argument&) {
-    criterion_str = string_printf("%02hhX", static_cast<uint8_t>(this->usable_criterion));
-  }
-  string card_class_str;
-  try {
-    card_class_str = name_for_card_class(this->card_class());
-  } catch (const invalid_argument&) {
-    card_class_str = string_printf("%04hX", this->be_card_class.load());
-  }
-  string rank_str = name_for_rank(this->rank);
-  string target_mode_str = name_for_target_mode(this->target_mode);
-  string assist_turns_str = string_for_assist_turns(this->assist_turns);
-  string hp_str = this->hp.str();
-  string ap_str = this->ap.str();
-  string tp_str = this->tp.str();
-  string mv_str = this->mv.str();
-  string left_str = string_for_colors(this->left_colors);
-  string right_str = string_for_colors(this->right_colors);
-  string top_str = string_for_colors(this->top_colors);
-  string effects_str;
+std::string CardDefinition::str(bool single_line, const TextSet* text_archive) const {
+  std::string type_str = phosg::name_for_enum(this->type);
+  std::string criterion_str = phosg::name_for_enum(this->usable_criterion);
+  std::string card_class_str = phosg::name_for_enum(this->card_class());
+  std::string rank_str = name_for_rank(this->rank);
+  const char* target_mode_str = name_for_target_mode(this->target_mode);
+  std::string assist_turns_str = string_for_assist_turns(this->assist_turns);
+  std::string left_str = string_for_colors(this->left_colors);
+  std::string right_str = string_for_colors(this->right_colors);
+  std::string top_str = string_for_colors(this->top_colors);
+  std::string effects_str;
   for (size_t x = 0; x < 3; x++) {
     if (this->effects[x].is_empty()) {
       continue;
@@ -1106,55 +1000,54 @@ string CardDefinition::str(bool single_line, const TextArchive* text_archive) co
     effects_str = " (none)";
   }
 
-  string drop0_str = string_for_drop_rate(this->drop_rates[0]);
-  string drop1_str = string_for_drop_rate(this->drop_rates[1]);
+  std::string drop0_str = string_for_drop_rate(this->drop_rates[0]);
+  std::string drop1_str = string_for_drop_rate(this->drop_rates[1]);
 
-  string cost_str = string_printf("%hhX", this->self_cost);
+  std::string cost_str = std::format("{:X}", this->self_cost);
   if (this->ally_cost) {
     if (single_line) {
-      cost_str += string_printf("+%hhX", this->ally_cost);
+      cost_str += std::format("+{:X}", this->ally_cost);
     } else {
-      cost_str += string_printf(" (self) + %hhX (ally)", this->ally_cost);
+      cost_str += std::format(" (self) + {:X} (ally)", this->ally_cost);
     }
   }
 
-  string en_name_s = this->en_name.decode();
+  std::string en_name_s = this->en_name.decode();
   if (single_line) {
-    string range_str = string_for_range(this->range);
-    return string_printf(
-        "[Card: %04" PRIX32 " name=%s type=%s usable_condition=%s rank=%s "
-        "cost=%s target=%s range=%s assist_turns=%s cannot_move=%s "
-        "cannot_attack=%s cannot_drop=%s hp=%s ap=%s tp=%s mv=%s left=%s right=%s "
-        "top=%s class=%s assist_ai_params=[target=%s priority=%hhu effect=%hhu] drop_rates=[%s, %s] effects=[%s]]",
-        this->card_id.load(),
-        en_name_s.c_str(),
-        type_str.c_str(),
-        criterion_str.c_str(),
-        rank_str.c_str(),
-        cost_str.c_str(),
-        target_mode_str.c_str(),
-        range_str.c_str(),
-        assist_turns_str.c_str(),
+    return std::format(
+        "[Card: {:04X} name={} type={} usable_condition={} rank={} "
+        "cost={} target={} range={} assist_turns={} cannot_move={} "
+        "cannot_attack={} cannot_drop={} hp={} ap={} tp={} mv={} left={} right={} "
+        "top={} class={} assist_ai_params=[target={} priority={} effect={}] drop_rates=[{}, {}] effects=[{}]]",
+        this->card_id,
+        en_name_s,
+        type_str,
+        criterion_str,
+        rank_str,
+        cost_str,
+        target_mode_str,
+        string_for_range(this->range),
+        assist_turns_str,
         this->cannot_move ? "true" : "false",
         this->cannot_attack ? "true" : "false",
         this->cannot_drop ? "true" : "false",
-        hp_str.c_str(),
-        ap_str.c_str(),
-        tp_str.c_str(),
-        mv_str.c_str(),
-        left_str.c_str(),
-        right_str.c_str(),
-        top_str.c_str(),
-        card_class_str.c_str(),
+        this->hp.str(),
+        this->ap.str(),
+        this->tp.str(),
+        this->mv.str(),
+        left_str,
+        right_str,
+        top_str,
+        card_class_str,
         short_name_for_assist_ai_param_target((this->assist_ai_params / 1000) % 10),
         static_cast<uint8_t>((this->assist_ai_params / 100) % 10),
         static_cast<uint8_t>(this->assist_ai_params % 100),
-        drop0_str.c_str(),
-        drop1_str.c_str(),
-        effects_str.c_str());
+        drop0_str,
+        drop1_str,
+        effects_str);
 
   } else { // Not single-line
-    string range_str;
+    std::string range_str;
     if (this->range[0] == 0x000FFFFF) {
       range_str = " (entire field)";
     } else {
@@ -1170,55 +1063,176 @@ string CardDefinition::str(bool single_line, const TextArchive* text_archive) co
         }
       }
     }
-    return string_printf(
+    std::string jp_name_s = this->jp_name.decode();
+    std::string en_name_short_s = this->en_short_name.decode();
+    std::string jp_name_short_s = this->jp_short_name.decode();
+    std::string names_str;
+    if (!en_name_s.empty()) {
+      names_str += std::format(" EN: \"{}\"", en_name_s);
+      if (!en_name_short_s.empty() && en_name_short_s != en_name_s) {
+        names_str += std::format(" (Abr. \"{}\")", en_name_short_s);
+      }
+    }
+    if (!jp_name_s.empty()) {
+      names_str += std::format(" JP: \"{}\"", jp_name_s);
+      if (!jp_name_short_s.empty() && jp_name_short_s != jp_name_s) {
+        names_str += std::format(" (Abr. \"{}\")", jp_name_short_s);
+      }
+    }
+    return std::format(
         "\
-Card: %04" PRIX32 " \"%s\"\n\
-  Type: %s, class: %s\n\
-  Usability condition: %s\n\
-  Rank: %s\n\
-  Cost: %s\n\
-  Target mode: %s\n\
-  Range:%s\n\
-  Assist turns: %s\n\
-  Capabilities: %s move, %s attack\n\
-  HP: %s, AP: %s, TP: %s, MV: %s\n\
+Card: {:04X}{}\n\
+  Type: {}, class: {}\n\
+  Usability condition: {}\n\
+  Rank: {}\n\
+  Cost: {}\n\
+  Target mode: {}\n\
+  Range:{}\n\
+  Assist turns: {}\n\
+  Capabilities: {} move, {} attack\n\
+  HP: {}, AP: {}, TP: {}, MV: {}\n\
   Colors:\n\
-    Left: %s\n\
-    Right: %s\n\
-    Top: %s\n\
-  Assist AI parameters: [target %s, priority %hu, effect %hu]\n\
+    Left: {}\n\
+    Right: {}\n\
+    Top: {}\n\
+  Assist AI parameters: [target {}, priority {}, effect {}]\n\
   Drop rates:\n\
-    %s\n\
-    %s\n\
-    %s\n\
-  Effects:%s",
-        this->card_id.load(),
-        en_name_s.c_str(),
-        type_str.c_str(),
-        card_class_str.c_str(),
-        criterion_str.c_str(),
-        rank_str.c_str(),
-        cost_str.c_str(),
-        target_mode_str.c_str(),
-        range_str.c_str(),
-        assist_turns_str.c_str(),
+    {}\n\
+    {}\n\
+    {}\n\
+  Effects:{}",
+        this->card_id,
+        names_str,
+        type_str,
+        card_class_str,
+        criterion_str,
+        rank_str,
+        cost_str,
+        target_mode_str,
+        range_str,
+        assist_turns_str,
         this->cannot_move ? "cannot" : "can",
         this->cannot_attack ? "cannot" : "can",
-        hp_str.c_str(),
-        ap_str.c_str(),
-        tp_str.c_str(),
-        mv_str.c_str(),
-        left_str.c_str(),
-        right_str.c_str(),
-        top_str.c_str(),
+        this->hp.str(),
+        this->ap.str(),
+        this->tp.str(),
+        this->mv.str(),
+        left_str,
+        right_str,
+        top_str,
         name_for_assist_ai_param_target((this->assist_ai_params / 1000) % 10),
         static_cast<uint8_t>((this->assist_ai_params / 100) % 10),
         static_cast<uint8_t>(this->assist_ai_params % 100),
-        drop0_str.c_str(),
-        drop1_str.c_str(),
+        drop0_str,
+        drop1_str,
         this->cannot_drop ? "Forbidden" : "Permitted",
-        effects_str.c_str());
+        effects_str);
   }
+}
+
+phosg::JSON CardDefinition::Stat::json() const {
+  const char* type_str = "unknown";
+  switch (this->type) {
+    case Type::BLANK:
+      type_str = "BLANK";
+      break;
+    case Type::STAT:
+      type_str = "DEFAULT";
+      break;
+    case Type::PLUS_STAT:
+      type_str = "PLUS";
+      break;
+    case Type::MINUS_STAT:
+      type_str = "MINUS";
+      break;
+    case Type::EQUALS_STAT:
+      type_str = "EQUALS";
+      break;
+    case Type::UNKNOWN:
+      type_str = "UNKNOWN";
+      break;
+    case Type::PLUS_UNKNOWN:
+      type_str = "PLUS_UNKNOWN";
+      break;
+    case Type::MINUS_UNKNOWN:
+      type_str = "MINUS_UNKNOWN";
+      break;
+    case Type::EQUALS_UNKNOWN:
+      type_str = "EQUALS_UNKNOWN";
+      break;
+  }
+  return phosg::JSON::dict({
+      {"type", type_str},
+      {"value", this->stat},
+  });
+}
+
+phosg::JSON CardDefinition::Effect::json() const {
+  return phosg::JSON::dict({
+      {"EffectNum", this->effect_num},
+      {"ConditionType", phosg::name_for_enum(this->type)},
+      {"Expression", this->expr.decode()},
+      {"When", phosg::name_for_enum(this->when)},
+      {"Arg1", this->arg1.decode()},
+      {"Arg2", this->arg2.decode()},
+      {"Arg3", this->arg3.decode()},
+      {"ApplyCriterion", phosg::name_for_enum(this->apply_criterion)},
+      {"NameIndex", this->name_index},
+  });
+}
+
+phosg::JSON CardDefinition::json() const {
+  phosg::JSON range_json;
+  if (this->range[0] == 0x000FFFFF) {
+    range_json = "ENTIRE_FIELD";
+  } else {
+    range_json = phosg::JSON::list();
+    for (size_t y = 0; y < 6; y++) {
+      uint32_t row = this->range[y];
+      auto& row_json = range_json.emplace_back(phosg::JSON::list());
+      for (size_t x = 0; x < 5; x++) {
+        row_json.emplace_back((row & 0x00010000) ? true : false);
+        row <<= 4;
+      }
+    }
+  }
+
+  phosg::JSON effects_json = phosg::JSON::list();
+  for (size_t z = 0; z < this->effects.size(); z++) {
+    if (!this->effects[z].is_empty()) {
+      effects_json.emplace_back(this->effects[z].json());
+    }
+  }
+
+  return phosg::JSON::dict({
+      {"CardID", this->card_id.load()},
+      {"JPName", this->jp_name.decode()},
+      {"CardType", phosg::name_for_enum(this->type)},
+      {"SelfCost", this->self_cost},
+      {"AllyCost", this->ally_cost},
+      {"HP", this->hp.json()},
+      {"AP", this->ap.json()},
+      {"TP", this->tp.json()},
+      {"MV", this->mv.json()},
+      {"LeftColors", json_for_link_colors(this->left_colors)},
+      {"RightColors", json_for_link_colors(this->right_colors)},
+      {"TopColors", json_for_link_colors(this->top_colors)},
+      {"Range", std::move(range_json)},
+      {"TargetMode", name_for_target_mode(this->target_mode)},
+      {"AssistTurns", this->assist_turns},
+      {"CannotMove", this->cannot_move ? true : false},
+      {"CannotAttack", this->cannot_attack ? true : false},
+      {"CannotDrop", this->cannot_drop ? true : false},
+      {"UsableCriterion", phosg::name_for_enum(this->usable_criterion)},
+      {"Rank", name_for_rank(this->rank)},
+      {"CardClass", phosg::name_for_enum(this->card_class())},
+      {"AssistAIParams", this->assist_ai_params.load()},
+      {"DropRates", phosg::JSON::list({this->drop_rates[0].load(), this->drop_rates[1].load()})},
+      {"ENName", this->en_name.decode()},
+      {"JPShortName", this->jp_short_name.decode()},
+      {"ENShortName", this->en_short_name.decode()},
+      {"Effects", std::move(effects_json)},
+  });
 }
 
 void PlayerConfig::decrypt() {
@@ -1226,9 +1240,7 @@ void PlayerConfig::decrypt() {
     return;
   }
   decrypt_trivial_gci_data(
-      &this->card_counts,
-      offsetof(PlayerConfig, decks) - offsetof(PlayerConfig, card_counts),
-      this->basis);
+      &this->card_counts, offsetof(PlayerConfig, decks) - offsetof(PlayerConfig, card_counts), this->basis);
   this->is_encrypted = 0;
   this->basis = 0;
 }
@@ -1241,50 +1253,128 @@ void PlayerConfig::encrypt(uint8_t basis) {
     this->decrypt();
   }
   decrypt_trivial_gci_data(
-      &this->card_counts,
-      offsetof(PlayerConfig, decks) - offsetof(PlayerConfig, card_counts),
-      basis);
+      &this->card_counts, offsetof(PlayerConfig, decks) - offsetof(PlayerConfig, card_counts), basis);
   this->is_encrypted = 1;
   this->basis = basis;
 }
 
-Rules::Rules(const JSON& json) {
-  this->clear();
-  this->overall_time_limit = json.get_int("overall_time_limit", this->overall_time_limit);
-  this->phase_time_limit = json.get_int("phase_time_limit", this->phase_time_limit);
-  this->allowed_cards = json.get_enum("allowed_cards", this->allowed_cards);
-  this->min_dice = json.get_int("min_dice", this->min_dice);
-  this->max_dice = json.get_int("max_dice", this->max_dice);
-  this->disable_deck_shuffle = json.get_bool("disable_deck_shuffle", this->disable_deck_shuffle);
-  this->disable_deck_loop = json.get_bool("disable_deck_loop", this->disable_deck_loop);
-  this->char_hp = json.get_int("char_hp", this->char_hp);
-  this->hp_type = json.get_enum("hp_type", this->hp_type);
-  this->no_assist_cards = json.get_bool("no_assist_cards", this->no_assist_cards);
-  this->disable_dialogue = json.get_bool("disable_dialogue", this->disable_dialogue);
-  this->dice_exchange_mode = json.get_enum("dice_exchange_mode", this->dice_exchange_mode);
-  this->disable_dice_boost = json.get_bool("disable_dice_boost", this->disable_dice_boost);
-  uint8_t min_def_dice = json.get_int("min_def_dice", (this->def_dice_range >> 4) & 0x0F);
-  uint8_t max_def_dice = json.get_int("max_def_dice", this->def_dice_range & 0x0F);
-  this->def_dice_range = ((min_def_dice << 4) & 0xF0) | (max_def_dice & 0x0F);
+bool PlayerConfig::card_count_checksums_correct() const {
+  for (size_t z = 0; z < this->card_count_checksums.size(); z++) {
+    uint16_t checksum_value = 0;
+    for (size_t w = 0; w < 20; w++) {
+      checksum_value += reinterpret_cast<const uint8_t*>(&this->card_counts)[z * 50 + w];
+    }
+    if (this->card_count_checksums[z] != checksum_value) {
+      return false;
+    }
+  }
+  return true;
 }
 
-JSON Rules::json() const {
-  return JSON::dict({
-      {"overall_time_limit", this->overall_time_limit},
-      {"phase_time_limit", this->phase_time_limit},
-      {"allowed_cards", name_for_enum(this->allowed_cards)},
-      {"min_dice", this->min_dice},
-      {"max_dice", this->max_dice},
-      {"disable_deck_shuffle", static_cast<bool>(this->disable_deck_shuffle)},
-      {"disable_deck_loop", static_cast<bool>(this->disable_deck_loop)},
-      {"char_hp", this->char_hp},
-      {"hp_type", name_for_enum(this->hp_type)},
-      {"no_assist_cards", static_cast<bool>(this->no_assist_cards)},
-      {"disable_dialogue", static_cast<bool>(this->disable_dialogue)},
-      {"dice_exchange_mode", name_for_enum(this->dice_exchange_mode)},
-      {"disable_dice_boost", static_cast<bool>(this->disable_dice_boost)},
-      {"min_def_dice", ((this->def_dice_range >> 4) & 0x0F)},
-      {"max_def_dice", (this->def_dice_range & 0x0F)},
+PlayerConfigNTE::PlayerConfigNTE(const PlayerConfig& config)
+    : rank_text(config.rank_text),
+      unknown_a1(config.unknown_a1),
+      tech_menu_shortcut_entries(config.tech_menu_shortcut_entries),
+      choice_search_config(config.choice_search_config),
+      scenario_progress(config.scenario_progress),
+      unused_offline_records(config.unused_offline_records),
+      unknown_a4(config.unknown_a4),
+      is_encrypted(config.is_encrypted),
+      basis(config.basis),
+      unused(config.unused),
+      card_counts(config.card_counts),
+      card_count_checksums(config.card_count_checksums),
+      rare_tokens(config.rare_tokens),
+      decks(config.decks),
+      unknown_a8(config.unknown_a8),
+      offline_clv_exp(config.offline_clv_exp),
+      online_clv_exp(config.online_clv_exp),
+      recent_human_opponents(config.recent_human_opponents),
+      recent_battle_start_timestamps(config.recent_battle_start_timestamps),
+      unknown_a10(config.unknown_a10),
+      init_timestamp(config.init_timestamp),
+      last_online_battle_start_timestamp(config.last_online_battle_start_timestamp),
+      unknown_t3(config.unknown_t3),
+      unknown_a14(config.unknown_a14) {
+  // TODO: Do we need to recompute card_count_checksums? (Here or in operator PlayerConfig?)
+}
+
+PlayerConfigNTE::operator PlayerConfig() const {
+  PlayerConfig ret;
+  ret.rank_text = this->rank_text;
+  ret.unknown_a1 = this->unknown_a1;
+  ret.tech_menu_shortcut_entries = this->tech_menu_shortcut_entries;
+  ret.choice_search_config = this->choice_search_config;
+  ret.scenario_progress = this->scenario_progress;
+  ret.unused_offline_records = this->unused_offline_records;
+  ret.unknown_a4 = this->unknown_a4;
+  ret.is_encrypted = this->is_encrypted;
+  ret.basis = this->basis;
+  ret.unused = this->unused;
+  ret.card_counts = this->card_counts;
+  ret.card_count_checksums = this->card_count_checksums;
+  ret.rare_tokens = this->rare_tokens;
+  ret.decks = this->decks;
+  ret.unknown_a8 = this->unknown_a8;
+  ret.offline_clv_exp = this->offline_clv_exp;
+  ret.online_clv_exp = this->online_clv_exp;
+  ret.recent_human_opponents = this->recent_human_opponents;
+  ret.recent_battle_start_timestamps = this->recent_battle_start_timestamps;
+  ret.unknown_a10 = this->unknown_a10;
+  ret.init_timestamp = this->init_timestamp;
+  ret.last_online_battle_start_timestamp = this->last_online_battle_start_timestamp;
+  ret.unknown_t3 = this->unknown_t3;
+  ret.unknown_a14 = this->unknown_a14;
+  return ret;
+}
+
+Rules::Rules(const phosg::JSON& json) {
+  this->clear();
+  this->overall_time_limit = json.get_int("OverallTimeLimit", json.get_int("overall_time_limit", this->overall_time_limit));
+  this->phase_time_limit = json.get_int("PhaseTimeLimit", json.get_int("phase_time_limit", this->phase_time_limit));
+  this->allowed_cards = json.get_enum("AllowedCards", json.get_enum("allowed_cards", this->allowed_cards));
+  this->min_dice_value = json.get_int("MinDice", json.get_int("min_dice", this->min_dice_value));
+  this->max_dice_value = json.get_int("MaxDice", json.get_int("max_dice", this->max_dice_value));
+  this->disable_deck_shuffle = json.get_bool("DisableDeckShuffle", json.get_bool("disable_deck_shuffle", this->disable_deck_shuffle));
+  this->disable_deck_loop = json.get_bool("DisableDeckLoop", json.get_bool("disable_deck_loop", this->disable_deck_loop));
+  this->char_hp = json.get_int("CharHP", json.get_int("char_hp", this->char_hp));
+  this->hp_type = json.get_enum("HPType", json.get_enum("hp_type", this->hp_type));
+  this->no_assist_cards = json.get_bool("NoAssistCards", json.get_bool("no_assist_cards", this->no_assist_cards));
+  this->disable_dialogue = json.get_bool("DisableDialogue", json.get_bool("disable_dialogue", this->disable_dialogue));
+  this->dice_exchange_mode = json.get_enum("DiceExchangeMode", json.get_enum("dice_exchange_mode", this->dice_exchange_mode));
+  this->disable_dice_boost = json.get_bool("DisableDiceBoost", json.get_bool("disable_dice_boost", this->disable_dice_boost));
+  uint8_t min_dice = json.get_int("MinDEFDice", json.get_int("min_def_dice", (this->def_dice_value_range >> 4) & 0x0F));
+  uint8_t max_dice = json.get_int("MaxDEFDice", json.get_int("max_def_dice", this->def_dice_value_range & 0x0F));
+  this->def_dice_value_range = ((min_dice << 4) & 0xF0) | (max_dice & 0x0F);
+  min_dice = json.get_int("MinATKDice2v1", json.get_int("min_atk_dice_2v1", (this->atk_dice_value_range_2v1 >> 4) & 0x0F));
+  max_dice = json.get_int("MaxATKDice2v1", json.get_int("max_atk_dice_2v1", this->atk_dice_value_range_2v1 & 0x0F));
+  this->atk_dice_value_range_2v1 = ((min_dice << 4) & 0xF0) | (max_dice & 0x0F);
+  min_dice = json.get_int("MinDEFDice2v1", json.get_int("min_def_dice_2v1", (this->def_dice_value_range_2v1 >> 4) & 0x0F));
+  max_dice = json.get_int("MaxDEFDice2v1", json.get_int("max_def_dice_2v1", this->def_dice_value_range_2v1 & 0x0F));
+  this->def_dice_value_range_2v1 = ((min_dice << 4) & 0xF0) | (max_dice & 0x0F);
+}
+
+phosg::JSON Rules::json() const {
+  return phosg::JSON::dict({
+      {"OverallTimeLimit", this->overall_time_limit},
+      {"PhaseTimeLimit", this->phase_time_limit},
+      {"AllowedCards", phosg::name_for_enum(this->allowed_cards)},
+      {"MinDice", this->min_dice_value},
+      {"MaxDice", this->max_dice_value},
+      {"DisableDeckShuffle", static_cast<bool>(this->disable_deck_shuffle)},
+      {"DisableDeckLoop", static_cast<bool>(this->disable_deck_loop)},
+      {"CharHP", this->char_hp},
+      {"HPType", phosg::name_for_enum(this->hp_type)},
+      {"NoAssistCards", static_cast<bool>(this->no_assist_cards)},
+      {"DisableDialogue", static_cast<bool>(this->disable_dialogue)},
+      {"DiceExchangeMode", phosg::name_for_enum(this->dice_exchange_mode)},
+      {"DisableDiceBoost", static_cast<bool>(this->disable_dice_boost)},
+      {"MinDEFDice", ((this->def_dice_value_range >> 4) & 0x0F)},
+      {"MaxDEFDice", (this->def_dice_value_range & 0x0F)},
+      {"MinATKDice2v1", ((this->atk_dice_value_range_2v1 >> 4) & 0x0F)},
+      {"MaxATKDice2v1", (this->atk_dice_value_range_2v1 & 0x0F)},
+      {"MinDEFDice2v1", ((this->def_dice_value_range_2v1 >> 4) & 0x0F)},
+      {"MaxDEFDice2v1", (this->def_dice_value_range_2v1 & 0x0F)},
   });
 }
 
@@ -1292,8 +1382,8 @@ void Rules::set_defaults() {
   this->clear();
   this->overall_time_limit = 24; // 2 hours
   this->phase_time_limit = 30;
-  this->min_dice = 1;
-  this->max_dice = 6;
+  this->min_dice_value = 1;
+  this->max_dice_value = 6;
   this->char_hp = 15;
 }
 
@@ -1301,8 +1391,8 @@ void Rules::clear() {
   this->overall_time_limit = 0;
   this->phase_time_limit = 0;
   this->allowed_cards = AllowedCards::ALL;
-  this->min_dice = 0;
-  this->max_dice = 0;
+  this->min_dice_value = 0;
+  this->max_dice_value = 0;
   this->disable_deck_shuffle = 0;
   this->disable_deck_loop = 0;
   this->char_hp = 0;
@@ -1311,17 +1401,59 @@ void Rules::clear() {
   this->disable_dialogue = 0;
   this->dice_exchange_mode = DiceExchangeMode::HIGH_ATK;
   this->disable_dice_boost = 0;
-  this->def_dice_range = 0;
+  this->def_dice_value_range = 0;
+  this->atk_dice_value_range_2v1 = 0;
+  this->def_dice_value_range_2v1 = 0;
   this->unused.clear(0);
 }
 
-string Rules::str() const {
-  vector<string> tokens;
+std::pair<uint8_t, uint8_t> Rules::atk_dice_range(bool is_1p_2v1) const {
+  std::pair<uint8_t, uint8_t> ret;
+  if (is_1p_2v1 && this->atk_dice_value_range_2v1 && (this->atk_dice_value_range_2v1 != 0xFF)) {
+    ret = std::make_pair((this->atk_dice_value_range_2v1 >> 4) & 0x0F, this->atk_dice_value_range_2v1 & 0x0F);
+  } else {
+    ret = std::make_pair(this->min_dice_value, this->max_dice_value);
+  }
+  if (ret.first == 0) {
+    ret.first = 1;
+  }
+  if (ret.second == 0) {
+    ret.second = 6;
+  }
+  if (ret.first > ret.second) {
+    ret = std::make_pair(ret.second, ret.first);
+  }
+  return ret;
+}
+
+std::pair<uint8_t, uint8_t> Rules::def_dice_range(bool is_1p_2v1) const {
+  std::pair<uint8_t, uint8_t> ret;
+  if (is_1p_2v1 && this->def_dice_value_range_2v1 && (this->def_dice_value_range_2v1 != 0xFF)) {
+    ret = std::make_pair((this->def_dice_value_range_2v1 >> 4) & 0x0F, this->def_dice_value_range_2v1 & 0x0F);
+  } else if (this->def_dice_value_range && (this->def_dice_value_range != 0xFF)) {
+    ret = std::make_pair((this->def_dice_value_range >> 4) & 0x0F, this->def_dice_value_range & 0x0F);
+  } else {
+    ret = std::make_pair(this->min_dice_value, this->max_dice_value);
+  }
+  if (ret.first == 0) {
+    ret.first = 1;
+  }
+  if (ret.second == 0) {
+    ret.second = 6;
+  }
+  if (ret.first > ret.second) {
+    ret = std::make_pair(ret.second, ret.first);
+  }
+  return ret;
+}
+
+std::string Rules::str() const {
+  std::vector<std::string> tokens;
 
   if (this->char_hp == 0xFF) {
     tokens.emplace_back("char_hp=(open)");
   } else {
-    tokens.emplace_back(string_printf("char_hp=%hhu", this->char_hp));
+    tokens.emplace_back(std::format("char_hp={}", this->char_hp));
   }
 
   switch (this->hp_type) {
@@ -1338,36 +1470,38 @@ string Rules::str() const {
       if (static_cast<uint8_t>(this->hp_type) == 0xFF) {
         tokens.emplace_back("hp_type=(open)");
       } else {
-        tokens.emplace_back(string_printf("hp_type=(%02hhX)",
-            static_cast<uint8_t>(this->hp_type)));
+        tokens.emplace_back(std::format("hp_type=({:02X})", static_cast<uint8_t>(this->hp_type)));
       }
       break;
   }
 
-  if (this->min_dice == 0xFF) {
-    tokens.emplace_back("min_dice=(open)");
-  } else if (this->min_dice == 0x00) {
-    tokens.emplace_back("min_dice=1 (default)");
-  } else {
-    tokens.emplace_back(string_printf("min_dice=%hhu", this->min_dice));
+  auto format_dice_range = +[](std::pair<uint8_t, uint8_t> range) -> std::string {
+    std::string s = "[";
+    if (range.first == 0xFF) {
+      s += "min=(open), ";
+    } else if (range.first == 0x00) {
+      s += "min=(default), ";
+    } else {
+      s += std::format("min={}, ", range.first);
+    }
+    if (range.second == 0xFF) {
+      s += "max=(open)]";
+    } else if (range.second == 0x00) {
+      s += "max=(default)]";
+    } else {
+      s += std::format("max={}]", range.second);
+    }
+    return s;
+  };
+  tokens.emplace_back("dice_range=" + format_dice_range(std::make_pair(this->min_dice_value, this->max_dice_value)));
+  if (this->def_dice_value_range) {
+    tokens.emplace_back("def_dice_range=" + format_dice_range(this->def_dice_range(false)));
   }
-  if (this->max_dice == 0xFF) {
-    tokens.emplace_back("max_dice=(open)");
-  } else if (this->max_dice == 0x00) {
-    tokens.emplace_back("max_dice=6 (default)");
-  } else {
-    tokens.emplace_back(string_printf("max_dice=%hhu", this->max_dice));
+  if (this->atk_dice_value_range_2v1) {
+    tokens.emplace_back("atk_dice_range_2v1=" + format_dice_range(this->atk_dice_range(true)));
   }
-
-  if (this->min_def_dice() == 0) {
-    tokens.emplace_back("min_def_dice=(default)");
-  } else {
-    tokens.emplace_back(string_printf("min_def_dice=%hhu", this->min_def_dice()));
-  }
-  if (this->max_def_dice() == 0) {
-    tokens.emplace_back("max_def_dice=(default)");
-  } else {
-    tokens.emplace_back(string_printf("max_def_dice=%hhu", this->max_def_dice()));
+  if (this->def_dice_value_range_2v1) {
+    tokens.emplace_back("def_dice_range_2v1=" + format_dice_range(this->def_dice_range(true)));
   }
 
   switch (this->dice_exchange_mode) {
@@ -1384,13 +1518,12 @@ string Rules::str() const {
       if (static_cast<uint8_t>(this->dice_exchange_mode) == 0xFF) {
         tokens.emplace_back("dice_exchange=(open)");
       } else {
-        tokens.emplace_back(string_printf("dice_exchange=(%02hhX)",
-            static_cast<uint8_t>(this->dice_exchange_mode)));
+        tokens.emplace_back(std::format("dice_exchange=({:02X})", static_cast<uint8_t>(this->dice_exchange_mode)));
       }
       break;
   }
 
-  auto str_for_disable_bool = +[](uint8_t v) -> string {
+  auto str_for_disable_bool = +[](uint8_t v) -> std::string {
     switch (v) {
       case 0x00:
         return "on";
@@ -1399,7 +1532,7 @@ string Rules::str() const {
       case 0xFF:
         return "(open)";
       default:
-        return string_printf("(%02hhX)", v);
+        return std::format("({:02X})", v);
     }
   };
 
@@ -1424,8 +1557,7 @@ string Rules::str() const {
       if (static_cast<uint8_t>(this->allowed_cards) == 0xFF) {
         tokens.emplace_back("allowed_cards=(open)");
       } else {
-        tokens.emplace_back(string_printf("allowed_cards=(%02hhX)",
-            static_cast<uint8_t>(this->allowed_cards)));
+        tokens.emplace_back(std::format("allowed_cards=({:02X})", static_cast<uint8_t>(this->allowed_cards)));
       }
       break;
   }
@@ -1434,44 +1566,56 @@ string Rules::str() const {
   if (this->overall_time_limit == 0xFF) {
     tokens.emplace_back("overall_time_limit=(open)");
   } else if (this->overall_time_limit) {
-    tokens.emplace_back(string_printf("overall_time_limit=%zumin", static_cast<size_t>(this->overall_time_limit * 5)));
+    tokens.emplace_back(std::format("overall_time_limit={}min", static_cast<size_t>(this->overall_time_limit * 5)));
   } else {
     tokens.emplace_back("overall_time_limit=(infinite)");
   }
   if (this->phase_time_limit == 0xFF) {
     tokens.emplace_back("phase_time_limit=(open)");
   } else if (this->phase_time_limit) {
-    tokens.emplace_back(string_printf("phase_time_limit=%hhusec", this->phase_time_limit));
+    tokens.emplace_back(std::format("phase_time_limit={}sec", this->phase_time_limit));
   } else {
     tokens.emplace_back("phase_time_limit=(infinite)");
   }
 
   tokens.emplace_back("dialogue=" + str_for_disable_bool(this->disable_dialogue));
 
-  return "Rules[" + join(tokens, ", ") + "]";
+  return "Rules[" + phosg::join(tokens, ", ") + "]";
 }
 
 RulesTrial::RulesTrial(const Rules& r)
     : overall_time_limit(r.overall_time_limit),
       phase_time_limit(r.phase_time_limit),
       allowed_cards(r.allowed_cards),
-      atk_dice_max(r.max_dice),
-      def_dice_max(r.max_dice),
+      // ATK/DEF behaviors set below
       disable_deck_shuffle(r.disable_deck_shuffle),
       disable_deck_loop(r.disable_deck_loop),
       char_hp(r.char_hp),
       hp_type(r.hp_type),
       no_assist_cards(r.no_assist_cards),
       disable_dialogue(r.disable_dialogue),
-      dice_exchange_mode(r.dice_exchange_mode) {}
+      dice_exchange_mode(r.dice_exchange_mode) {
+  this->atk_die_behavior = (r.max_dice_value == r.min_dice_value) ? r.max_dice_value : 0;
+  if (r.def_dice_value_range == 0xFF) {
+    this->def_die_behavior = 0xFF;
+  } else {
+    auto def_range = r.def_dice_range(false);
+    this->def_die_behavior = (def_range.first == def_range.second) ? def_range.first : 0;
+  }
+}
 
 RulesTrial::operator Rules() const {
   Rules ret;
   ret.overall_time_limit = this->overall_time_limit;
   ret.phase_time_limit = this->phase_time_limit;
   ret.allowed_cards = this->allowed_cards;
-  ret.min_dice = 1;
-  ret.max_dice = this->atk_dice_max;
+  if (this->atk_die_behavior) {
+    ret.min_dice_value = this->atk_die_behavior;
+    ret.max_dice_value = this->atk_die_behavior;
+  } else {
+    ret.min_dice_value = 1;
+    ret.max_dice_value = 6;
+  }
   ret.disable_deck_shuffle = this->disable_deck_shuffle;
   ret.disable_deck_loop = this->disable_deck_loop;
   ret.char_hp = this->char_hp;
@@ -1480,7 +1624,13 @@ RulesTrial::operator Rules() const {
   ret.disable_dialogue = this->disable_dialogue;
   ret.dice_exchange_mode = this->dice_exchange_mode;
   ret.disable_dice_boost = 0;
-  ret.def_dice_range = 0x10 | (this->def_dice_max ? this->def_dice_max : 0x06);
+  if (this->def_die_behavior) {
+    ret.def_dice_value_range = (this->def_die_behavior << 4) | this->def_die_behavior;
+  } else {
+    ret.def_dice_value_range = 0x16;
+  }
+  ret.atk_dice_value_range_2v1 = 0x00;
+  ret.def_dice_value_range_2v1 = 0x00;
   ret.unused.clear(0);
   return ret;
 }
@@ -1498,7 +1648,7 @@ bool StateFlags::operator==(const StateFlags& other) const {
       (this->setup_phase == other.setup_phase) &&
       (this->registration_phase == other.registration_phase) &&
       (this->team_exp == other.team_exp) &&
-      (this->team_dice_boost == other.team_dice_boost) &&
+      (this->team_dice_bonus == other.team_dice_bonus) &&
       (this->first_team_turn == other.first_team_turn) &&
       (this->tournament_flag == other.tournament_flag) &&
       (this->client_sc_card_types == other.client_sc_card_types);
@@ -1516,7 +1666,7 @@ void StateFlags::clear() {
   this->setup_phase = SetupPhase::REGISTRATION;
   this->registration_phase = RegistrationPhase::AWAITING_NUM_PLAYERS;
   this->team_exp.clear(0);
-  this->team_dice_boost.clear(0);
+  this->team_dice_bonus.clear(0);
   this->first_team_turn = 0;
   this->tournament_flag = 0;
   this->client_sc_card_types.clear(CardType::HUNTERS_SC);
@@ -1531,208 +1681,360 @@ void StateFlags::clear_FF() {
   this->setup_phase = SetupPhase::INVALID_FF;
   this->registration_phase = RegistrationPhase::INVALID_FF;
   this->team_exp.clear(0xFFFFFFFF);
-  this->team_dice_boost.clear(0xFF);
+  this->team_dice_bonus.clear(0xFF);
   this->first_team_turn = 0xFF;
   this->tournament_flag = 0xFF;
   this->client_sc_card_types.clear(CardType::INVALID_FF);
 }
 
+OverlayState::OverlayState() {
+  this->clear();
+}
+
+void OverlayState::clear() {
+  for (size_t y = 0; y < this->tiles.size(); y++) {
+    this->tiles[y].clear(0);
+  }
+  this->unused1.clear(0);
+  this->trap_tile_colors_nte.clear(0);
+  this->trap_card_ids_nte.clear(0);
+}
+
 void MapDefinition::assert_semantically_equivalent(const MapDefinition& other) const {
   if (this->map_number != other.map_number) {
-    throw runtime_error("map number not equal");
+    throw std::runtime_error("map number not equal");
   }
   if (this->width != other.width) {
-    throw runtime_error("width not equal");
+    throw std::runtime_error("width not equal");
   }
   if (this->height != other.height) {
-    throw runtime_error("width not equal");
+    throw std::runtime_error("width not equal");
   }
   if (this->environment_number != other.environment_number) {
-    throw runtime_error("environment number not equal");
+    throw std::runtime_error("environment number not equal");
   }
   if (this->map_tiles != other.map_tiles) {
-    throw runtime_error("tiles not equal");
+    throw std::runtime_error("tiles not equal");
   }
   if (this->start_tile_definitions != other.start_tile_definitions) {
-    throw runtime_error("start tile definitions not equal");
+    throw std::runtime_error("start tile definitions not equal");
   }
-  if (this->modification_tiles != other.modification_tiles) {
-    throw runtime_error("modification tiles not equal");
-  }
-  if (this->unknown_a5 != other.unknown_a5) {
-    throw runtime_error("unknown_a5 not equal");
+  if (this->overlay_state.tiles != other.overlay_state.tiles) {
+    throw std::runtime_error("modification tiles not equal");
   }
   if (this->default_rules != other.default_rules) {
-    throw runtime_error("default rules not equal");
+    throw std::runtime_error("default rules not equal");
   }
   for (size_t z = 0; z < this->npc_decks.size(); z++) {
     if (this->npc_decks[z].card_ids != other.npc_decks[z].card_ids) {
-      throw runtime_error("npc deck card IDs not equal");
+      throw std::runtime_error("npc deck card IDs not equal");
     }
     const auto& this_ai_params = this->npc_ai_params[z];
     const auto& other_ai_params = other.npc_ai_params[z];
     if (this_ai_params.unknown_a1 != other_ai_params.unknown_a1) {
-      throw runtime_error("npc AI params unknown_a1 not equal");
+      throw std::runtime_error("npc AI params unknown_a1 not equal");
     }
     if (this_ai_params.is_arkz != other_ai_params.is_arkz) {
-      throw runtime_error("npc AI params is_arkz not equal");
+      throw std::runtime_error("npc AI params is_arkz not equal");
     }
     if (this_ai_params.unknown_a2 != other_ai_params.unknown_a2) {
-      throw runtime_error("npc AI params unknown_a2 not equal");
+      throw std::runtime_error("npc AI params unknown_a2 not equal");
     }
     if (this_ai_params.params != other_ai_params.params) {
-      throw runtime_error("npc AI params not equal");
+      throw std::runtime_error("npc AI params not equal");
     }
   }
   if (this->unknown_a7 != other.unknown_a7) {
-    throw runtime_error("unknown_a7 not equal");
+    throw std::runtime_error("unknown_a7 not equal");
   }
   if (this->npc_ai_params_entry_index != other.npc_ai_params_entry_index) {
-    throw runtime_error("npc AI params entry indexes not equal");
+    throw std::runtime_error("npc AI params entry indexes not equal");
   }
   if (this->reward_card_ids != other.reward_card_ids) {
-    throw runtime_error("reward card IDs not equal");
+    throw std::runtime_error("reward card IDs not equal");
   }
   if (this->win_level_override != other.win_level_override) {
-    throw runtime_error("win level override not equal");
+    throw std::runtime_error("win level override not equal");
   }
   if (this->loss_level_override != other.loss_level_override) {
-    throw runtime_error("loss level override not equal");
+    throw std::runtime_error("loss level override not equal");
   }
   if (this->field_offset_x != other.field_offset_x) {
-    throw runtime_error("field x offset not equal");
+    throw std::runtime_error("field x offset not equal");
   }
   if (this->field_offset_y != other.field_offset_y) {
-    throw runtime_error("field y offset not equal");
+    throw std::runtime_error("field y offset not equal");
   }
   if (this->map_category != other.map_category) {
-    throw runtime_error("map category not equal");
+    throw std::runtime_error("map category not equal");
   }
   if (this->cyber_block_type != other.cyber_block_type) {
-    throw runtime_error("cyber block type not equal");
+    throw std::runtime_error("cyber block type not equal");
   }
   if (this->unknown_a11 != other.unknown_a11) {
-    throw runtime_error("unknown_a11 not equal");
+    throw std::runtime_error("unknown_a11 not equal");
   }
   if (this->unavailable_sc_cards != other.unavailable_sc_cards) {
-    throw runtime_error("unavailable SC cards not equal");
+    throw std::runtime_error("unavailable SC cards not equal");
   }
   if (this->entry_states != other.entry_states) {
-    throw runtime_error("entry states not equal");
+    throw std::runtime_error("entry states not equal");
   }
 }
 
-string MapDefinition::CameraSpec::str() const {
-  return string_printf(
-      "CameraSpec[a1=(%g %g %g %g %g %g %g %g %g) camera=(%g %g %g) focus=(%g %g %g) a2=(%g %g %g)]",
-      this->unknown_a1[0].load(), this->unknown_a1[1].load(),
-      this->unknown_a1[2].load(), this->unknown_a1[3].load(),
-      this->unknown_a1[4].load(), this->unknown_a1[5].load(),
-      this->unknown_a1[6].load(), this->unknown_a1[7].load(),
-      this->unknown_a1[8].load(), this->camera_x.load(),
-      this->camera_y.load(), this->camera_z.load(),
-      this->focus_x.load(), this->focus_y.load(),
-      this->focus_z.load(), this->unknown_a2[0].load(),
-      this->unknown_a2[1].load(), this->unknown_a2[2].load());
+phosg::JSON MapDefinition::CameraSpec::json() const {
+  return phosg::JSON::dict({
+      {"Camera", phosg::JSON::list({this->camera_x.load(), this->camera_y.load(), this->camera_z.load()})},
+      {"Focus", phosg::JSON::list({this->focus_x.load(), this->focus_y.load(), this->focus_z.load()})},
+  });
 }
 
-string MapDefinition::str(const CardIndex* card_index, uint8_t language) const {
-  deque<string> lines;
+phosg::JSON MapDefinition::NPCDeck::json(Language language) const {
+  phosg::JSON card_ids_json = phosg::JSON::list();
+  for (size_t z = 0; z < this->card_ids.size(); z++) {
+    if (this->card_ids[z] != 0xFFFF) {
+      card_ids_json.emplace_back(this->card_ids[z].load());
+    }
+  }
+  return phosg::JSON::dict({
+      {"Name", this->deck_name.decode(language)},
+      {"CardIDs", std::move(card_ids_json)},
+  });
+}
+
+phosg::JSON MapDefinition::AIParams::json(Language language) const {
+  phosg::JSON params_json = phosg::JSON::list();
+  for (size_t z = 0; z < this->params.size(); z++) {
+    params_json.emplace_back(this->params[z].load());
+  }
+  return phosg::JSON::dict({
+      {"IsArkz", this->is_arkz ? true : false},
+      {"Name", this->ai_name.decode(language)},
+      {"Params", std::move(params_json)},
+  });
+}
+
+phosg::JSON MapDefinition::DialogueSet::json(Language language) const {
+  phosg::JSON strings_json = phosg::JSON::list();
+  for (size_t z = 0; z < this->strings.size(); z++) {
+    strings_json.emplace_back(this->strings[z].decode(language));
+  }
+  return phosg::JSON::dict({
+      {"When", this->when.load()},
+      {"PercentChance", this->percent_chance.load()},
+      {"Strings", std::move(strings_json)},
+  });
+}
+
+phosg::JSON MapDefinition::EntryState::json() const {
+  phosg::JSON player_type_json;
+  switch (this->player_type) {
+    case 0x00:
+      player_type_json = "Player";
+      break;
+    case 0x01:
+      player_type_json = "Player/COM";
+      break;
+    case 0x02:
+      player_type_json = "COM";
+      break;
+    case 0x03:
+      player_type_json = "NPC";
+      break;
+    case 0x04:
+      player_type_json = "NONE";
+      break;
+    case 0xFF:
+      player_type_json = "FREE";
+      break;
+    default:
+      player_type_json = this->player_type;
+  }
+  phosg::JSON deck_type_json;
+  switch (this->deck_type) {
+    case 0x00:
+      deck_type_json = "HERO ONLY";
+      break;
+    case 0x01:
+      deck_type_json = "DARK ONLY";
+      break;
+    case 0xFF:
+      deck_type_json = "ANY";
+      break;
+    default:
+      deck_type_json = this->deck_type;
+  }
+  return phosg::JSON::dict({{"PlayerType", std::move(player_type_json)}, {"DeckType", std::move(deck_type_json)}});
+}
+
+std::string MapDefinition::CameraSpec::str() const {
+  return std::format(
+      "CameraSpec[a1=({:g} {:g} {:g} {:g} {:g} {:g} {:g} {:g} {:g}) camera=({:g} {:g} {:g}) focus=({:g} {:g} {:g}) a2=({:g} {:g} {:g})]",
+      this->unknown_a1[0], this->unknown_a1[1], this->unknown_a1[2], this->unknown_a1[3], this->unknown_a1[4],
+      this->unknown_a1[5], this->unknown_a1[6], this->unknown_a1[7], this->unknown_a1[8],
+      this->camera_x, this->camera_y, this->camera_z, this->focus_x, this->focus_y, this->focus_z,
+      this->unknown_a2[0], this->unknown_a2[1], this->unknown_a2[2]);
+}
+
+struct UnavailableSCCardDefinition {
+  size_t index;
+  uint16_t card_id;
+  const char* internal_name;
+};
+
+static const std::array<UnavailableSCCardDefinition, 0x2A> unavailable_sc_card_defs = {
+    UnavailableSCCardDefinition{0x00, 0x0005, "Guykild"},
+    UnavailableSCCardDefinition{0x01, 0x0006, "Kylria"},
+    UnavailableSCCardDefinition{0x02, 0x0110, "Saligun"},
+    UnavailableSCCardDefinition{0x03, 0x0111, "Relmitos"},
+    UnavailableSCCardDefinition{0x04, 0x0002, "Kranz"},
+    UnavailableSCCardDefinition{0x05, 0x0004, "Sil'fer"},
+    UnavailableSCCardDefinition{0x06, 0x0003, "Ino'lis"},
+    UnavailableSCCardDefinition{0x07, 0x0112, "Viviana"},
+    UnavailableSCCardDefinition{0x08, 0x0113, "Teifu"},
+    UnavailableSCCardDefinition{0x09, 0x0001, "Orland"},
+    UnavailableSCCardDefinition{0x0A, 0x0114, "Stella"},
+    UnavailableSCCardDefinition{0x0B, 0x0115, "Glustar"},
+    UnavailableSCCardDefinition{0x0C, 0x0117, "Hyze"},
+    UnavailableSCCardDefinition{0x0D, 0x0118, "Rufina"},
+    UnavailableSCCardDefinition{0x0E, 0x0119, "Peko"},
+    UnavailableSCCardDefinition{0x0F, 0x011A, "Creinu"},
+    UnavailableSCCardDefinition{0x10, 0x011B, "Reiz"},
+    UnavailableSCCardDefinition{0x11, 0x0007, "Lura"},
+    UnavailableSCCardDefinition{0x12, 0x0008, "Break"},
+    UnavailableSCCardDefinition{0x13, 0x011C, "Rio"},
+    UnavailableSCCardDefinition{0x14, 0x0116, "Endu"},
+    UnavailableSCCardDefinition{0x15, 0x011D, "Memoru"},
+    UnavailableSCCardDefinition{0x16, 0x011E, "K.C."},
+    UnavailableSCCardDefinition{0x17, 0x011F, "Ohgun"},
+    UnavailableSCCardDefinition{0x18, 0x02AA, "HERO_1"},
+    UnavailableSCCardDefinition{0x19, 0x02AB, "HERO_2"},
+    UnavailableSCCardDefinition{0x1A, 0x02AC, "HERO_3"},
+    UnavailableSCCardDefinition{0x1B, 0x02AD, "HERO_4"},
+    UnavailableSCCardDefinition{0x1C, 0x02AE, "HERO_5"},
+    UnavailableSCCardDefinition{0x1D, 0x02AF, "HERO_6"},
+    UnavailableSCCardDefinition{0x1E, 0x02B0, "DARK_1"},
+    UnavailableSCCardDefinition{0x1F, 0x02B1, "DARK_2"},
+    UnavailableSCCardDefinition{0x20, 0x02B2, "DARK_3"},
+    UnavailableSCCardDefinition{0x21, 0x02B3, "DARK_4"},
+    UnavailableSCCardDefinition{0x22, 0x02B4, "DARK_5"},
+    UnavailableSCCardDefinition{0x23, 0x02B5, "DARK_6"},
+    UnavailableSCCardDefinition{0x24, 0x029B, "LEUKON"},
+    UnavailableSCCardDefinition{0x25, 0x029C, "CASTOR"},
+    UnavailableSCCardDefinition{0x26, 0x029D, "POLLUX"},
+    UnavailableSCCardDefinition{0x27, 0x029E, "AMPLUM"},
+    UnavailableSCCardDefinition{0x28, 0x02BE, "CASTOR_USR"},
+    UnavailableSCCardDefinition{0x29, 0x02BF, "POLLUX_USR"},
+};
+
+std::string MapDefinition::str(const CardIndex* card_index, Language language) const {
+  std::deque<std::string> lines;
   auto add_map = [&](const parray<parray<uint8_t, 0x10>, 0x10>& tiles) {
     for (size_t y = 0; y < this->height; y++) {
-      string line = "   ";
-      for (size_t x = 0; x < this->height; x++) {
-        line += string_printf(" %02hhX", tiles[y][x]);
+      std::string line = "   ";
+      for (size_t x = 0; x < this->width; x++) {
+        line += std::format(" {:02X}", tiles[y][x]);
       }
       lines.emplace_back(std::move(line));
     }
   };
 
-  lines.emplace_back(string_printf("Map %08" PRIX32 ": %hhux%hhu",
-      this->map_number.load(), this->width, this->height));
-  lines.emplace_back(string_printf("  tag: %08" PRIX32, this->tag.load()));
-  lines.emplace_back(string_printf("  environment_number: %02hhX (%s)", this->environment_number, name_for_environment_number(this->environment_number)));
-  lines.emplace_back(string_printf("  num_camera_zones: %02hhX", this->num_camera_zones));
+  lines.emplace_back(std::format("Map {:08X}: {}x{}", this->map_number, this->width, this->height));
+  lines.emplace_back(std::format("  tag: {:08X}", this->tag));
+  lines.emplace_back(std::format("  environment_number: {:02X} ({})",
+      this->environment_number, name_for_environment_number(this->environment_number)));
+  lines.emplace_back(std::format("  num_camera_zones: {:02X}", this->num_camera_zones));
   lines.emplace_back("  tiles:");
   add_map(this->map_tiles);
-  lines.emplace_back(string_printf(
-      "  start_tile_definitions: A:[1p: %02hhX; 2p: %02hhX,%02hhX; 3p: %02hhX,%02hhX,%02hhX], B:[1p: %02hhX; 2p: %02hhX,%02hhX; 3p: %02hhX,%02hhX,%02hhX]",
-      this->start_tile_definitions[0][0], this->start_tile_definitions[0][1],
-      this->start_tile_definitions[0][2], this->start_tile_definitions[0][3],
-      this->start_tile_definitions[0][4], this->start_tile_definitions[0][5],
-      this->start_tile_definitions[1][0], this->start_tile_definitions[1][1],
-      this->start_tile_definitions[1][2], this->start_tile_definitions[1][3],
-      this->start_tile_definitions[1][4], this->start_tile_definitions[1][5]));
+  lines.emplace_back(std::format(
+      "  start_tile_definitions: A:[1p: {:02X}; 2p: {:02X},{:02X}; 3p: {:02X},{:02X},{:02X}], B:[1p: {:02X}; 2p: {:02X},{:02X}; 3p: {:02X},{:02X},{:02X}]",
+      this->start_tile_definitions[0][0], this->start_tile_definitions[0][1], this->start_tile_definitions[0][2],
+      this->start_tile_definitions[0][3], this->start_tile_definitions[0][4], this->start_tile_definitions[0][5],
+      this->start_tile_definitions[1][0], this->start_tile_definitions[1][1], this->start_tile_definitions[1][2],
+      this->start_tile_definitions[1][3], this->start_tile_definitions[1][4], this->start_tile_definitions[1][5]));
   for (size_t z = 0; z < this->num_camera_zones; z++) {
     for (size_t w = 0; w < 2; w++) {
-      lines.emplace_back(string_printf("  camera zone %zu (team %c):", z, w ? 'A' : 'B'));
+      lines.emplace_back(std::format("  camera zone {} (team {}):", z, w ? 'A' : 'B'));
       add_map(this->camera_zone_maps[w][z]);
       lines.emplace_back("    " + this->camera_zone_specs[w][z].str());
     }
   }
   for (size_t w = 0; w < 3; w++) {
     for (size_t z = 0; z < 2; z++) {
-      string spec_str = this->overview_specs[w][z].str();
-      lines.emplace_back(string_printf("  overview_specs[%zu][team %zu]: %s", w, z, spec_str.c_str()));
+      lines.emplace_back(std::format("  overview_specs[{}][team {}]: {}", w, z, this->overview_specs[w][z].str()));
     }
   }
-  lines.emplace_back("  modification tiles:");
-  add_map(this->modification_tiles);
-  for (size_t z = 0; z < 0x70; z += 0x10) {
-    lines.emplace_back(string_printf(
-        "  a5[0x%02zX:0x%02zX]: %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX", z, z + 0x10,
-        this->unknown_a5[z + 0x00], this->unknown_a5[z + 0x01], this->unknown_a5[z + 0x02], this->unknown_a5[z + 0x03],
-        this->unknown_a5[z + 0x04], this->unknown_a5[z + 0x05], this->unknown_a5[z + 0x06], this->unknown_a5[z + 0x07],
-        this->unknown_a5[z + 0x08], this->unknown_a5[z + 0x09], this->unknown_a5[z + 0x0A], this->unknown_a5[z + 0x0B],
-        this->unknown_a5[z + 0x0C], this->unknown_a5[z + 0x0D], this->unknown_a5[z + 0x0E], this->unknown_a5[z + 0x0F]));
-  }
-  lines.emplace_back(string_printf(
-      "  a5[0x70:0x74]: %02hhX %02hhX %02hhX %02hhX",
-      this->unknown_a5[0x70], this->unknown_a5[0x71], this->unknown_a5[0x72], this->unknown_a5[0x73]));
+  lines.emplace_back("  overlay tiles:");
+  add_map(this->overlay_state.tiles);
+  lines.emplace_back(std::format(
+      "  unused1: {:08X} {:08X} {:08X} {:08X} {:08X}",
+      this->overlay_state.unused1[0], this->overlay_state.unused1[1], this->overlay_state.unused1[2],
+      this->overlay_state.unused1[3], this->overlay_state.unused1[4]));
+  lines.emplace_back(std::format(
+      "  trap_tile_colors_nte: {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} {:08X}",
+      this->overlay_state.trap_tile_colors_nte[0], this->overlay_state.trap_tile_colors_nte[1],
+      this->overlay_state.trap_tile_colors_nte[2], this->overlay_state.trap_tile_colors_nte[3],
+      this->overlay_state.trap_tile_colors_nte[4], this->overlay_state.trap_tile_colors_nte[5],
+      this->overlay_state.trap_tile_colors_nte[6], this->overlay_state.trap_tile_colors_nte[7],
+      this->overlay_state.trap_tile_colors_nte[8], this->overlay_state.trap_tile_colors_nte[9],
+      this->overlay_state.trap_tile_colors_nte[10], this->overlay_state.trap_tile_colors_nte[11],
+      this->overlay_state.trap_tile_colors_nte[12], this->overlay_state.trap_tile_colors_nte[13],
+      this->overlay_state.trap_tile_colors_nte[14], this->overlay_state.trap_tile_colors_nte[15]));
+  lines.emplace_back(std::format(
+      "  trap_card_ids_nte: #{:04X} #{:04X} #{:04X} #{:04X} #{:04X} #{:04X} #{:04X} #{:04X} #{:04X} #{:04X} #{:04X} #{:04X} #{:04X} #{:04X} #{:04X} #{:04X}",
+      this->overlay_state.trap_card_ids_nte[0], this->overlay_state.trap_card_ids_nte[1],
+      this->overlay_state.trap_card_ids_nte[2], this->overlay_state.trap_card_ids_nte[3],
+      this->overlay_state.trap_card_ids_nte[4], this->overlay_state.trap_card_ids_nte[5],
+      this->overlay_state.trap_card_ids_nte[6], this->overlay_state.trap_card_ids_nte[7],
+      this->overlay_state.trap_card_ids_nte[8], this->overlay_state.trap_card_ids_nte[9],
+      this->overlay_state.trap_card_ids_nte[10], this->overlay_state.trap_card_ids_nte[11],
+      this->overlay_state.trap_card_ids_nte[12], this->overlay_state.trap_card_ids_nte[13],
+      this->overlay_state.trap_card_ids_nte[14], this->overlay_state.trap_card_ids_nte[15]));
+
   lines.emplace_back("  default_rules: " + this->default_rules.str());
   lines.emplace_back("  name: " + this->name.decode(language));
   lines.emplace_back("  location_name: " + this->location_name.decode(language));
   lines.emplace_back("  quest_name: " + this->quest_name.decode(language));
   lines.emplace_back("  description: " + this->description.decode(language));
-  lines.emplace_back(string_printf("  map_xy: %hu %hu", this->map_x.load(), this->map_y.load()));
+  lines.emplace_back(std::format("  map_xy: {} {}", this->map_x, this->map_y));
   for (size_t z = 0; z < 3; z++) {
-    lines.emplace_back(string_printf("  npc_chars[%zu]:", z));
-    lines.emplace_back("    name: " + this->npc_ai_params[z].name.decode(language));
-    lines.emplace_back(string_printf(
-        "    ai_params: (a1: %04hX %04hX, is_arkz: %02hhX, a2: %02hX %02hX %02hX)",
-        this->npc_ai_params[z].unknown_a1[0].load(), this->npc_ai_params[z].unknown_a1[1].load(),
+    lines.emplace_back(std::format("  npc_chars[{}]:", z));
+    lines.emplace_back("    name: " + this->npc_ai_params[z].ai_name.decode(language));
+    lines.emplace_back(std::format(
+        "    ai_params: (a1: {:04X} {:04X}, is_arkz: {:02X}, a2: {:02X} {:02X} {:02X})",
+        this->npc_ai_params[z].unknown_a1[0], this->npc_ai_params[z].unknown_a1[1],
         this->npc_ai_params[z].is_arkz, this->npc_ai_params[z].unknown_a2[0],
         this->npc_ai_params[z].unknown_a2[1], this->npc_ai_params[z].unknown_a2[2]));
     for (size_t w = 0; w < 0x78; w += 0x08) {
-      lines.emplace_back(string_printf(
-          "    ai_params.a3[0x%02zX:0x%02zX]: %04hX %04hX %04hX %04hX %04hX %04hX %04hX %04hX",
+      lines.emplace_back(std::format(
+          "    ai_params.a3[0x{:02X}:0x{:02X}]: {:04X} {:04X} {:04X} {:04X} {:04X} {:04X} {:04X} {:04X}",
           w, w + 0x08,
-          this->npc_ai_params[z].params[w + 0x00].load(), this->npc_ai_params[z].params[w + 0x01].load(),
-          this->npc_ai_params[z].params[w + 0x02].load(), this->npc_ai_params[z].params[w + 0x03].load(),
-          this->npc_ai_params[z].params[w + 0x04].load(), this->npc_ai_params[z].params[w + 0x05].load(),
-          this->npc_ai_params[z].params[w + 0x06].load(), this->npc_ai_params[z].params[w + 0x07].load()));
+          this->npc_ai_params[z].params[w + 0x00], this->npc_ai_params[z].params[w + 0x01],
+          this->npc_ai_params[z].params[w + 0x02], this->npc_ai_params[z].params[w + 0x03],
+          this->npc_ai_params[z].params[w + 0x04], this->npc_ai_params[z].params[w + 0x05],
+          this->npc_ai_params[z].params[w + 0x06], this->npc_ai_params[z].params[w + 0x07]));
     }
-    lines.emplace_back(string_printf(
-        "    ai_params.a3[0x78:0x7E]: %04hX %04hX %04hX %04hX %04hX %04hX",
-        this->npc_ai_params[z].params[0x78].load(), this->npc_ai_params[z].params[0x79].load(),
-        this->npc_ai_params[z].params[0x7A].load(), this->npc_ai_params[z].params[0x7B].load(),
-        this->npc_ai_params[z].params[0x7C].load(), this->npc_ai_params[z].params[0x7D].load()));
-    lines.emplace_back(string_printf("  npc_decks[%zu]:", z));
-    lines.emplace_back("    name: " + this->npc_decks[z].name.decode(language));
+    lines.emplace_back(std::format(
+        "    ai_params.a3[0x78:0x7E]: {:04X} {:04X} {:04X} {:04X} {:04X} {:04X}",
+        this->npc_ai_params[z].params[0x78], this->npc_ai_params[z].params[0x79],
+        this->npc_ai_params[z].params[0x7A], this->npc_ai_params[z].params[0x7B],
+        this->npc_ai_params[z].params[0x7C], this->npc_ai_params[z].params[0x7D]));
+    lines.emplace_back(std::format("  npc_decks[{}]:", z));
+    lines.emplace_back("    name: " + this->npc_decks[z].deck_name.decode(language));
     for (size_t w = 0; w < 0x20; w++) {
       uint16_t card_id = this->npc_decks[z].card_ids[w];
-      shared_ptr<const CardIndex::CardEntry> entry;
+      std::shared_ptr<const CardIndex::CardEntry> entry;
       if (card_index) {
         try {
           entry = card_index->definition_for_id(card_id);
-        } catch (const out_of_range&) {
+        } catch (const std::out_of_range&) {
         }
       }
       if (entry) {
-        string name = entry->def.en_name.decode(language);
-        lines.emplace_back(string_printf("    cards[%02zu]: %04hX (%s)", w, card_id, name.c_str()));
+        lines.emplace_back(std::format("    cards[{:02}]: #{:04X} ({})",
+            w, card_id, entry->def.en_name.decode(language)));
       } else {
-        lines.emplace_back(string_printf("    cards[%02zu]: %04hX", w, card_id));
+        lines.emplace_back(std::format("    cards[{:02}]: #{:04X}", w, card_id));
       }
     }
     for (size_t x = 0; x < 0x10; x++) {
@@ -1740,19 +2042,18 @@ string MapDefinition::str(const CardIndex* card_index, uint8_t language) const {
       if (set.when == -1 && set.percent_chance == 0xFFFF) {
         continue;
       }
-      lines.emplace_back(string_printf("  npc_dialogue[%zu][%zu] (when: %04hX, chance: %hu%%):",
-          z, x, set.when.load(), set.percent_chance.load()));
+      lines.emplace_back(std::format("  npc_dialogue[{}][{}] (when: {:04X}, chance: {}%):",
+          z, x, set.when, set.percent_chance));
       for (size_t w = 0; w < 4; w++) {
         if (!set.strings[w].empty() && set.strings[w].at(0) != 0xFF) {
-          string s = set.strings[w].decode(language);
-          lines.emplace_back(string_printf("    strings[%zu]: %s", w, s.c_str()));
+          lines.emplace_back(std::format("    strings[{}]: {}", w, set.strings[w].decode(language)));
         }
       }
     }
   }
-  lines.emplace_back("  a7: " + format_data_string(this->unknown_a7.data(), this->unknown_a7.bytes()));
-  lines.emplace_back(string_printf("  npc_ai_params_entry_index: [%08" PRIX32 ", %08" PRIX32 ", %08" PRIX32 "]",
-      this->npc_ai_params_entry_index[0].load(), this->npc_ai_params_entry_index[1].load(), this->npc_ai_params_entry_index[2].load()));
+  lines.emplace_back("  a7: " + phosg::format_data_string(this->unknown_a7.data(), this->unknown_a7.bytes()));
+  lines.emplace_back(std::format("  npc_ai_params_entry_index: [{:08X}, {:08X}, {:08X}]",
+      this->npc_ai_params_entry_index[0], this->npc_ai_params_entry_index[1], this->npc_ai_params_entry_index[2]));
   if (!this->before_message.empty()) {
     lines.emplace_back("  before_message: " + this->before_message.decode(language));
   }
@@ -1764,53 +2065,27 @@ string MapDefinition::str(const CardIndex* card_index, uint8_t language) const {
   }
   for (size_t z = 0; z < 0x10; z++) {
     uint16_t card_id = this->reward_card_ids[z];
-    shared_ptr<const CardIndex::CardEntry> entry;
+    std::shared_ptr<const CardIndex::CardEntry> entry;
     if (card_index) {
       try {
         entry = card_index->definition_for_id(card_id);
-      } catch (const out_of_range&) {
+      } catch (const std::out_of_range&) {
       }
     }
     if (entry) {
-      string name = entry->def.en_name.decode(language);
-      lines.emplace_back(string_printf("  reward_cards[%02zu]: %04hX (%s)", z, card_id, name.c_str()));
+      lines.emplace_back(std::format("  reward_cards[{:02}]: #{:04X} ({})",
+          z, card_id, entry->def.en_name.decode(language)));
     } else {
-      lines.emplace_back(string_printf("  reward_cards[%02zu]: %04hX", z, card_id));
+      lines.emplace_back(std::format("  reward_cards[{:02}]: #{:04X}", z, card_id));
     }
   }
-  lines.emplace_back(string_printf("  level_overrides: [win: %" PRId32 ", loss: %" PRId32 "]",
-      this->win_level_override.load(), this->loss_level_override.load()));
-  lines.emplace_back(string_printf("  field_offset: (x: %hd units, y:%hd units) (x: %lg tiles, y: %lg tiles)", this->field_offset_x.load(), this->field_offset_y.load(), static_cast<double>(this->field_offset_x) / 25.0, static_cast<double>(this->field_offset_y) / 25.0));
-  lines.emplace_back(string_printf("  map_category: %02hhX", this->map_category));
-  lines.emplace_back(string_printf("  cyber_block_type: %02hhX", this->cyber_block_type));
-  lines.emplace_back(string_printf("  a11: %02hhX%02hhX", this->unknown_a11[0], this->unknown_a11[1]));
-  static const array<const char*, 0x18> sc_card_entry_names = {
-      "00 (Guykild; 0005)",
-      "01 (Kylria; 0006)",
-      "02 (Saligun; 0110)",
-      "03 (Relmitos; 0111)",
-      "04 (Kranz; 0002)",
-      "05 (Sil'fer; 0004)",
-      "06 (Ino'lis; 0003)",
-      "07 (Viviana; 0112)",
-      "08 (Teifu; 0113)",
-      "09 (Orland; 0001)",
-      "0A (Stella; 0114)",
-      "0B (Glustar; 0115)",
-      "0C (Hyze; 0117)",
-      "0D (Rufina; 0118)",
-      "0E (Peko; 0119)",
-      "0F (Creinu; 011A)",
-      "10 (Reiz; 011B)",
-      "11 (Lura; 0007)",
-      "12 (Break; 0008)",
-      "13 (Rio; 011C)",
-      "14 (Endu; 0116)",
-      "15 (Memoru; 011D)",
-      "16 (K.C.; 011E)",
-      "17 (Ohgun; 011F)",
-  };
-  string unavailable_sc_cards = "  unavailable_sc_cards: [";
+  lines.emplace_back(std::format("  level_overrides: [win: {}, loss: {}]",
+      this->win_level_override, this->loss_level_override));
+  lines.emplace_back(std::format("  field_offset: (x: {} units, y:{} units) (x: {:g} tiles, y: {:g} tiles)", this->field_offset_x, this->field_offset_y, static_cast<double>(this->field_offset_x) / 25.0, static_cast<double>(this->field_offset_y) / 25.0));
+  lines.emplace_back(std::format("  map_category: {:02X}", this->map_category));
+  lines.emplace_back(std::format("  cyber_block_type: {:02X}", this->cyber_block_type));
+  lines.emplace_back(std::format("  a11: {:04X}", this->unknown_a11));
+  std::string unavailable_sc_cards = "  unavailable_sc_cards: [";
   for (size_t z = 0; z < 0x18; z++) {
     if (this->unavailable_sc_cards[z] == 0xFFFF) {
       continue;
@@ -1818,16 +2093,17 @@ string MapDefinition::str(const CardIndex* card_index, uint8_t language) const {
     if (unavailable_sc_cards.size() > 25) {
       unavailable_sc_cards += ", ";
     }
-    if (this->unavailable_sc_cards[z] >= sc_card_entry_names.size()) {
-      unavailable_sc_cards += string_printf("%04hX (invalid)", this->unavailable_sc_cards[z].load());
+    if (this->unavailable_sc_cards[z] >= unavailable_sc_card_defs.size()) {
+      unavailable_sc_cards += std::format("{:04X} (invalid)", this->unavailable_sc_cards[z]);
     } else {
-      unavailable_sc_cards += sc_card_entry_names[this->unavailable_sc_cards[z]];
+      const auto& def = unavailable_sc_card_defs[this->unavailable_sc_cards[z]];
+      unavailable_sc_cards += std::format("{:04X} ({}; {:04X})", def.index, def.internal_name, def.card_id);
     }
   }
   unavailable_sc_cards += ']';
   lines.emplace_back(std::move(unavailable_sc_cards));
   for (size_t z = 0; z < 4; z++) {
-    string player_type;
+    std::string player_type;
     switch (this->entry_states[z].player_type) {
       case 0x00:
         player_type = "Player";
@@ -1848,10 +2124,10 @@ string MapDefinition::str(const CardIndex* card_index, uint8_t language) const {
         player_type = "FREE";
         break;
       default:
-        player_type = string_printf("(%02hhX)", this->entry_states[z].player_type);
+        player_type = std::format("({:02X})", this->entry_states[z].player_type);
         break;
     }
-    string deck_type;
+    std::string deck_type;
     switch (this->entry_states[z].deck_type) {
       case 0x00:
         deck_type = "HERO ONLY";
@@ -1863,13 +2139,140 @@ string MapDefinition::str(const CardIndex* card_index, uint8_t language) const {
         deck_type = "any deck allowed";
         break;
       default:
-        deck_type = string_printf("(%02hhX)", this->entry_states[z].deck_type);
+        deck_type = std::format("({:02X})", this->entry_states[z].deck_type);
         break;
     }
-    lines.emplace_back(string_printf(
-        "  entry_states[%zu]: %s / %s", z, player_type.c_str(), deck_type.c_str()));
+    lines.emplace_back(std::format("  entry_states[{}]: {} / {}", z, player_type, deck_type));
   }
-  return join(lines, "\n");
+  return phosg::join(lines, "\n");
+}
+
+phosg::JSON MapDefinition::json(Language language) const {
+  phosg::JSON camera_zones_json = phosg::JSON::list();
+  for (size_t team_id = 0; team_id < 2; team_id++) {
+    phosg::JSON team_camera_zones_json = phosg::JSON::list();
+    for (size_t camera_zone_id = 0; camera_zone_id < std::min<size_t>(this->num_camera_zones, 10); camera_zone_id++) {
+      team_camera_zones_json.emplace_back(phosg::JSON::dict({
+          {"Map", this->camera_zone_maps[team_id][camera_zone_id].json()},
+          {"Spec", this->camera_zone_specs[team_id][camera_zone_id].json()},
+      }));
+    }
+    camera_zones_json.emplace_back(std::move(team_camera_zones_json));
+  }
+  phosg::JSON overview_specs_json = phosg::JSON::list();
+  for (size_t team_id = 0; team_id < 2; team_id++) {
+    phosg::JSON team_overview_specs_json = phosg::JSON::list();
+    for (size_t spec_id = 0; spec_id < 3; spec_id++) {
+      team_overview_specs_json.emplace_back(this->overview_specs[spec_id][team_id].json());
+    }
+    overview_specs_json.emplace_back(std::move(team_overview_specs_json));
+  }
+
+  auto overlay_state_json = phosg::JSON::dict({
+      {"Tiles", this->overlay_state.tiles.json()},
+      {"NTETrapTileColors", this->overlay_state.trap_tile_colors_nte.json()},
+      {"NTETrapCardIDs", this->overlay_state.trap_card_ids_nte.json()},
+  });
+
+  // Note: All typos/errors here are from AIPrm.dat
+  static const std::array<std::string, 30> default_ai_names{
+      "Sample_Hunter", "Glustar", "Guykild", "Inolis", "Kilia", "Kranz", "Orland", "Relmitos", "Saligun", "Silfer",
+      "Sample_Hunter", "Teifu", "Viviana", "Sample_Dark", "Break", "Creinu", "Endu", "Heiz", "KC", "Lura",
+      "memoru", "Ohgun", "Peko", "Reiz", "Rio", "Rufina", "LKnight", "Boss_Castor", "Boss_Pollux", "Sample_Dark"};
+
+  auto npcs_json = phosg::JSON::list();
+  for (size_t npc_index = 0; npc_index < 3; npc_index++) {
+    auto npc = phosg::JSON::dict();
+
+    const auto& deck = this->npc_decks[npc_index];
+    if (deck.deck_name.at(0)) {
+      npc.emplace("Deck", deck.json(language));
+    } else {
+      npc.emplace("Deck", nullptr);
+    }
+
+    int32_t entry_index = this->npc_ai_params_entry_index[npc_index];
+    if (entry_index < 0) {
+      const auto& ai_params = this->npc_ai_params[npc_index];
+      if (ai_params.ai_name.at(0)) {
+        npc.emplace("AIParams", ai_params.json(language));
+      } else {
+        npc.emplace("AIParams", nullptr);
+      }
+    } else if (static_cast<uint32_t>(entry_index) < default_ai_names.size()) {
+      npc.emplace("AIParams", default_ai_names[entry_index]);
+    } else {
+      npc.emplace("AIParams", entry_index);
+    }
+
+    auto dialogue_set_json = phosg::JSON::list();
+    for (size_t ds_index = 0; ds_index < this->dialogue_sets[npc_index].size(); ds_index++) {
+      const auto& ds = this->dialogue_sets[npc_index][ds_index];
+      if (ds.when >= 0) {
+        dialogue_set_json.emplace_back(ds.json(language));
+      }
+    }
+    npc.emplace("DialogueSet", std::move(dialogue_set_json));
+  }
+
+  auto unavailable_sc_cards_json = phosg::JSON::list();
+  for (size_t z = 0; z < this->unavailable_sc_cards.size(); z++) {
+    uint16_t index = this->unavailable_sc_cards[z];
+    if (index < unavailable_sc_card_defs.size()) {
+      const auto& def = unavailable_sc_card_defs[index];
+      unavailable_sc_cards_json.emplace_back(phosg::JSON::dict({
+          {"Index", def.index},
+          {"Name", def.internal_name},
+          {"CardID", def.card_id},
+      }));
+    } else if (index != 0xFFFF) {
+      unavailable_sc_cards_json.emplace_back(index);
+    }
+  }
+
+  auto reward_card_ids_json = phosg::JSON::list();
+  for (size_t z = 0; z < this->reward_card_ids.size(); z++) {
+    if (this->reward_card_ids[z] != 0xFFFF) {
+      reward_card_ids_json.emplace_back(this->reward_card_ids[z].load());
+    }
+  }
+
+  auto entry_states_json = phosg::JSON::list();
+  for (size_t z = 0; z < this->entry_states.size(); z++) {
+    entry_states_json.emplace_back(this->entry_states[z].json());
+  }
+
+  return phosg::JSON::dict({
+      {"Tag", this->tag.load()},
+      {"MapNumber", this->map_number.load()},
+      {"Width", this->width},
+      {"Height", this->height},
+      {"EnvironmentNumber", this->environment_number},
+      {"EnvironmentName", name_for_environment_number(this->environment_number)},
+      {"MapTiles", this->map_tiles.json()},
+      {"StartTileDefinitions", this->start_tile_definitions.json()},
+      {"CameraZones", std::move(camera_zones_json)},
+      {"OverviewSpecs", std::move(overview_specs_json)},
+      {"OverlayState", std::move(overlay_state_json)},
+      {"Rules", this->default_rules.json()},
+      {"Name", this->name.decode(language)},
+      {"LocationName", this->location_name.decode(language)},
+      {"QuestName", this->quest_name.decode(language)},
+      {"Description", this->description.decode(language)},
+      {"WorldMapCoords", phosg::JSON::list({this->map_x.load(), this->map_y.load()})},
+      {"NPCs", std::move(npcs_json)},
+      {"BeforeMessage", this->before_message.decode(language)},
+      {"AfterMessage", this->after_message.decode(language)},
+      {"DispatchMessage", this->dispatch_message.decode(language)},
+      {"UnavailableSCCards", std::move(unavailable_sc_cards_json)},
+      {"RewardCardIDs", std::move(reward_card_ids_json)},
+      {"WinLevelOverride", this->win_level_override.load()},
+      {"LossLevelOverride", this->loss_level_override.load()},
+      {"FieldOffset", phosg::JSON::list({this->field_offset_x.load(), this->field_offset_y.load()})},
+      {"MapCategory", this->map_category},
+      {"CyberBlockType", this->cyber_block_type},
+      {"EntryStates", std::move(entry_states_json)},
+  });
 }
 
 MapDefinitionTrial::MapDefinitionTrial(const MapDefinition& map)
@@ -1884,8 +2287,7 @@ MapDefinitionTrial::MapDefinitionTrial(const MapDefinition& map)
       camera_zone_maps(map.camera_zone_maps),
       camera_zone_specs(map.camera_zone_specs),
       overview_specs(map.overview_specs),
-      modification_tiles(map.modification_tiles),
-      unknown_a5(map.unknown_a5),
+      overlay_state(map.overlay_state),
       default_rules(map.default_rules),
       name(map.name),
       location_name(map.location_name),
@@ -1913,12 +2315,18 @@ MapDefinitionTrial::MapDefinitionTrial(const MapDefinition& map)
   for (size_t z = 0; z < this->dialogue_sets.size(); z++) {
     this->dialogue_sets[z] = map.dialogue_sets[z].sub<8>(0);
   }
+
+  // TODO: It'd be nice to rewrite start_tile_definitions, since it seems NTE always expects team A to be represented
+  // by 3 and 4, and team B to be represented by 7 and 8.
+
+  // TODO: NTE also expects team A to always be facing up, and B to always be facing down, so it would be nice to
+  // automatically rotate the map to make that the case. However, we'd also have to fix up the camera zones and camera
+  // specs, and the spec structure is not (yet) fully understood.
 }
 
 MapDefinitionTrial::operator MapDefinition() const {
   MapDefinition ret;
-  // Trial Edition maps seem to have different tag values; we just always use
-  // the value that the final version expects.
+  // Trial Edition maps seem to have different tag values; we just always use the value that the final version expects.
   ret.tag = 0x00000100;
   ret.map_number = this->map_number;
   ret.width = this->width;
@@ -1930,9 +2338,7 @@ MapDefinitionTrial::operator MapDefinition() const {
   ret.camera_zone_maps = this->camera_zone_maps;
   ret.camera_zone_specs = this->camera_zone_specs;
   ret.overview_specs = this->overview_specs;
-  ret.modification_tiles = this->modification_tiles;
-  ret.unknown_a5.clear(0xFF);
-  ret.unknown_a5 = this->unknown_a5;
+  ret.overlay_state = this->overlay_state;
   ret.default_rules = this->default_rules;
   ret.name = this->name;
   ret.location_name = this->location_name;
@@ -1967,11 +2373,11 @@ MapDefinitionTrial::operator MapDefinition() const {
   ret.cyber_block_type = this->cyber_block_type;
   ret.unknown_a11 = this->unknown_a11;
   ret.unavailable_sc_cards.clear(0xFFFF);
-  // The trial edition doesn't seem to have entry_states at all, so we have to
-  // guess and fill in the field appropriately here.
+  // The trial edition doesn't seem to have entry_states at all, so we have to guess and fill in the field
+  // appropriately here.
   size_t num_npc_decks = 0;
   for (size_t z = 0; z < ret.npc_decks.size(); z++) {
-    if (!ret.npc_decks[z].name.empty()) {
+    if (!ret.npc_decks[z].deck_name.empty()) {
       num_npc_decks++;
     }
   }
@@ -2004,7 +2410,7 @@ MapDefinitionTrial::operator MapDefinition() const {
       ret.entry_states[3].player_type = 0x03;
       break;
     default: // Should be impossible
-      throw logic_error("too many NPC decks in trial map definition");
+      throw std::logic_error("too many NPC decks in trial map definition");
   }
   return ret;
 }
@@ -2028,41 +2434,52 @@ bool Rules::check_and_reset_invalid_fields() {
     this->allowed_cards = AllowedCards::ALL;
     ret = true;
   }
-  if (this->min_dice > 9) {
-    this->min_dice = 0;
+  if (this->min_dice_value > 9) {
+    this->min_dice_value = 0;
     ret = true;
   }
-  if (this->max_dice > 9) {
-    this->max_dice = 0;
+  if (this->max_dice_value > 9) {
+    this->max_dice_value = 0;
     ret = true;
   }
-  if ((this->min_dice != 0) && (this->max_dice != 0) && (this->max_dice < this->min_dice)) {
-    uint8_t t = this->min_dice;
-    this->min_dice = this->max_dice;
-    this->max_dice = t;
+  if ((this->min_dice_value != 0) && (this->max_dice_value != 0) && (this->max_dice_value < this->min_dice_value)) {
+    uint8_t t = this->min_dice_value;
+    this->min_dice_value = this->max_dice_value;
+    this->max_dice_value = t;
     ret = true;
   }
-  uint8_t min_def_dice = this->min_def_dice();
-  uint8_t max_def_dice = this->max_def_dice();
-  if (min_def_dice > 9) {
-    min_def_dice = 0;
-    ret = true;
-  }
-  if (max_def_dice > 9) {
-    max_def_dice = 0;
-    ret = true;
-  }
-  if ((min_def_dice != 0) && (max_def_dice != 0) && (max_def_dice < min_def_dice)) {
-    uint8_t t = min_def_dice;
-    min_def_dice = max_def_dice;
-    max_def_dice = t;
-    ret = true;
-  }
-  this->def_dice_range = ((min_def_dice << 4) & 0xF0) | (max_def_dice & 0x0F);
+
+  // These ranges are a newserv-specific extension and are not part of the original implementation.
+  auto check_compressed_dice_range = +[](uint8_t* range) -> bool {
+    bool ret = false;
+    uint8_t min_dice = ((*range) >> 4) & 0x0F;
+    uint8_t max_dice = (*range) & 0x0F;
+    if (min_dice > 9) {
+      min_dice = 0;
+      ret = true;
+    }
+    if (max_dice > 9) {
+      max_dice = 0;
+      ret = true;
+    }
+    if ((min_dice != 0) && (max_dice != 0) && (max_dice < min_dice)) {
+      uint8_t t = min_dice;
+      min_dice = max_dice;
+      max_dice = t;
+      ret = true;
+    }
+    *range = ((min_dice << 4) & 0xF0) | (max_dice & 0x0F);
+    return ret;
+  };
+  ret |= check_compressed_dice_range(&this->def_dice_value_range);
+  ret |= check_compressed_dice_range(&this->atk_dice_value_range_2v1);
+  ret |= check_compressed_dice_range(&this->def_dice_value_range_2v1);
+
   if (this->disable_deck_shuffle > 1) {
     this->disable_deck_shuffle = 0;
     ret = true;
   }
+
   if (this->disable_deck_loop > 1) {
     this->disable_deck_loop = 0;
     ret = true;
@@ -2087,65 +2504,78 @@ bool Rules::check_and_reset_invalid_fields() {
     this->disable_dice_boost = 0;
     ret = true;
   }
-  if ((this->max_dice != 0) && (this->max_dice < 3)) {
-    this->disable_dice_boost = 1;
-    ret = true;
-  }
+  // Due to newserv's custom range overrides, it doesn't make sense to disable Dice Boost for everyone based on the
+  // Rules struct. Instead, we skip setting the flag at roll time.
+  // if ((this->max_dice_value != 0) && (this->max_dice_value < 3)) {
+  //   this->disable_dice_boost = 1;
+  //   ret = true;
+  // }
   return ret;
 }
 
-uint8_t Rules::min_def_dice() const {
-  return (this->def_dice_range >> 4) & 0x0F;
-}
-
-uint8_t Rules::max_def_dice() const {
-  return this->def_dice_range & 0x0F;
+phosg::JSON COMDeckDefinition::json() const {
+  auto card_ids_list = phosg::JSON::list();
+  for (size_t z = 0; z < this->card_ids.size(); z++) {
+    card_ids_list.emplace_back(this->card_ids[z].load());
+  }
+  return phosg::JSON::dict({
+      {"Index", this->index},
+      {"PlayerName", this->player_name},
+      {"DeckName", this->deck_name},
+      {"CardIDs", std::move(card_ids_list)},
+  });
 }
 
 CardIndex::CardIndex(
-    const string& filename,
-    const string& decompressed_filename,
-    const string& text_filename,
-    const string& decompressed_text_filename,
-    const string& dice_text_filename,
-    const string& decompressed_dice_text_filename) {
-  unordered_map<uint32_t, vector<string>> card_tags;
-  unordered_map<uint32_t, string> card_text;
+    const std::string& filename,
+    const std::string& decompressed_filename,
+    const std::string& text_filename,
+    const std::string& decompressed_text_filename,
+    const std::string& dice_text_filename,
+    const std::string& decompressed_dice_text_filename,
+    bool text_is_sjis) {
+  std::unordered_map<uint32_t, std::vector<std::string>> card_text_pages;
+  std::unordered_map<uint32_t, std::vector<std::string>> card_tags;
+  std::unordered_map<uint32_t, std::string> card_text;
   try {
-    string text_bin_data;
-    if (!decompressed_text_filename.empty() && isfile(decompressed_text_filename)) {
-      text_bin_data = load_file(decompressed_text_filename);
-    } else if (!text_filename.empty() && isfile(text_filename)) {
-      text_bin_data = prs_decompress(load_file(text_filename));
+    std::string text_bin_data;
+    if (!decompressed_text_filename.empty() && std::filesystem::is_regular_file(decompressed_text_filename)) {
+      text_bin_data = phosg::load_file(decompressed_text_filename);
+    } else if (!text_filename.empty() && std::filesystem::is_regular_file(text_filename)) {
+      text_bin_data = prs_decompress(phosg::load_file(text_filename));
     }
     if (!text_bin_data.empty()) {
-      StringReader r(text_bin_data);
+      phosg::StringReader r(text_bin_data);
 
       while (!r.eof()) {
-        string card_id_str = r.get_cstr();
+        std::string card_id_str = r.get_cstr();
         if (card_id_str.empty() || (static_cast<uint8_t>(card_id_str[0]) == 0xFF)) {
           break;
         }
-        strip_leading_whitespace(card_id_str);
+        phosg::strip_leading_whitespace(card_id_str);
         uint32_t card_id = stoul(card_id_str);
 
         // Read all pages for this card
-        string text;
-        string first_page;
+        std::string text;
+        std::string first_page;
+        std::vector<std::string> pages;
         for (;;) {
-          string line = r.get_cstr();
+          std::string line = r.get_cstr();
           if (line.empty()) {
             break;
           }
+          line = text_is_sjis ? tt_sega_sjis_to_utf8(line) : tt_8859_to_utf8(line);
           if (first_page.empty()) {
             first_page = line;
           }
           text += '\n';
           text += line;
+
+          pages.emplace_back(std::move(line));
         }
 
         // In orig_text, turn all \t into $ (following newserv conventions)
-        string orig_text = text;
+        std::string orig_text = text;
         for (char& ch : orig_text) {
           if (ch == '\t') {
             ch = '$';
@@ -2154,13 +2584,13 @@ CardIndex::CardIndex(
 
         // Preprocess first page: first, delete all color markers
         size_t offset = first_page.find("\tC");
-        while (offset != string::npos) {
+        while (offset != std::string::npos) {
           first_page = first_page.substr(0, offset) + first_page.substr(offset + 3);
           offset = first_page.find("\tC");
         }
         // Preprocess first page: delete all lines that don't start with \t
         offset = first_page.find('\t');
-        if (offset == string::npos) {
+        if (offset == std::string::npos) {
           first_page.clear();
         } else {
           first_page = first_page.substr(offset);
@@ -2174,102 +2604,108 @@ CardIndex::CardIndex(
         }
 
         // Split first page into tags, and collapse whitespace in the tag names
-        vector<string> tags;
-        auto lines = split(first_page, '\n');
+        std::vector<std::string> tags;
+        auto lines = phosg::split(first_page, '\n');
         for (const auto& line : lines) {
-          string tag;
+          std::string tag;
           if (line[0] == '\t' && line[1] == 'D') {
             tag = "D: " + line.substr(2);
           } else if (line[0] == '\t' && line[1] == 'S') {
             tag = "S: " + line.substr(2);
           }
           if (!tag.empty()) {
-            for (size_t offset = tag.find("  "); offset != string::npos; offset = tag.find("  ")) {
+            for (size_t offset = tag.find("  "); offset != std::string::npos; offset = tag.find("  ")) {
               tag = tag.substr(0, offset) + tag.substr(offset + 1);
             }
             tags.emplace_back(std::move(tag));
           }
         }
-        strip_leading_whitespace(orig_text);
+        phosg::strip_leading_whitespace(orig_text);
 
+        if (!card_text_pages.emplace(card_id, std::move(pages)).second) {
+          throw std::runtime_error("duplicate card text id");
+        }
         if (!card_text.emplace(card_id, std::move(orig_text)).second) {
-          throw runtime_error("duplicate card text id");
+          throw std::runtime_error("duplicate card text id");
         }
         if (!card_tags.emplace(card_id, std::move(tags)).second) {
-          throw logic_error("duplicate card tags id");
+          throw std::logic_error("duplicate card tags id");
         }
 
         r.go((r.where() + 0x3FF) & (~0x3FF));
       }
     }
-  } catch (const exception& e) {
-    static_game_data_log.warning("Failed to load card text: %s", e.what());
+  } catch (const std::exception& e) {
+    static_game_data_log.warning_f("Failed to load card text: {}", e.what());
   }
 
-  unordered_map<uint32_t, pair<string, string>> card_dice_text;
+  std::unordered_map<uint32_t, std::pair<std::string, std::string>> card_dice_text;
   try {
-    string text_bin_data;
-    if (!decompressed_dice_text_filename.empty() && isfile(decompressed_dice_text_filename)) {
-      text_bin_data = load_file(decompressed_dice_text_filename);
-    } else if (!dice_text_filename.empty() && isfile(dice_text_filename)) {
-      text_bin_data = prs_decompress(load_file(dice_text_filename));
+    std::string text_bin_data;
+    if (!decompressed_dice_text_filename.empty() && std::filesystem::is_regular_file(decompressed_dice_text_filename)) {
+      text_bin_data = phosg::load_file(decompressed_dice_text_filename);
+    } else if (!dice_text_filename.empty() && std::filesystem::is_regular_file(dice_text_filename)) {
+      text_bin_data = prs_decompress(phosg::load_file(dice_text_filename));
     }
     if (!text_bin_data.empty()) {
-      StringReader r(text_bin_data);
+      phosg::StringReader r(text_bin_data);
 
       while (!r.eof()) {
         uint32_t card_id = r.get_u32l();
-        string dice_caption = r.read(0xFE);
-        string dice_text = r.read(0xFE);
-        strip_trailing_zeroes(dice_caption);
-        strip_trailing_zeroes(dice_text);
+        std::string dice_caption = r.read(0xFE);
+        std::string dice_text = r.read(0xFE);
+        phosg::strip_trailing_zeroes(dice_caption);
+        phosg::strip_trailing_zeroes(dice_text);
         card_dice_text.emplace(card_id, make_pair(std::move(dice_caption), std::move(dice_text)));
       }
     }
-  } catch (const exception& e) {
-    static_game_data_log.warning("Failed to load card dice text: %s", e.what());
+  } catch (const std::exception& e) {
+    static_game_data_log.warning_f("Failed to load card dice text: {}", e.what());
   }
 
   try {
-    string decompressed_data;
-    this->mtime_for_card_definitions = stat(filename).st_mtime;
+    std::string decompressed_data;
     try {
-      decompressed_data = load_file(decompressed_filename);
+      decompressed_data = phosg::load_file(decompressed_filename);
       this->compressed_card_definitions.clear();
-    } catch (const cannot_open_file&) {
-      this->compressed_card_definitions = load_file(filename);
+    } catch (const phosg::cannot_open_file&) {
+      this->compressed_card_definitions = phosg::load_file(filename);
       decompressed_data = prs_decompress(this->compressed_card_definitions);
     }
-    if (decompressed_data.size() > 0x36EC0) {
-      throw runtime_error("decompressed card list data is too long");
-    }
 
-    // There's a footer after the card definitions (it's a standard-format REL
-    // file), but we ignore it
-    if (decompressed_data.size() % sizeof(CardDefinition) != sizeof(CardDefinitionsFooter)) {
-      throw runtime_error(string_printf(
-          "decompressed card update file size %zX is not aligned with card definition size %zX (%zX extra bytes)",
-          decompressed_data.size(), sizeof(CardDefinition), decompressed_data.size() % sizeof(CardDefinition)));
+    // The client can't handle files larger than this
+    if (decompressed_data.size() > 0x36EC0) {
+      throw std::runtime_error("decompressed card list data is too long");
     }
-    auto* defs = reinterpret_cast<CardDefinition*>(decompressed_data.data());
-    size_t max_cards = decompressed_data.size() / sizeof(CardDefinition);
-    for (size_t x = 0; x < max_cards; x++) {
-      // The last card entry has the build date and some other metadata (and
-      // isn't a real card, obviously), so skip it. The game detects this by
-      // checking for a negative value in type, which we also do here.
-      if (static_cast<int8_t>(defs[x].type) < 0) {
+    this->defs_hash = phosg::fnv1a64(decompressed_data);
+
+    // The card definitions file is a standard REL file; the root offset points to an ArrayRef which specifies an array
+    // of CardDefinition structs
+    phosg::StringReader r(decompressed_data);
+    const auto& footer = r.pget<RELFileFooterBE>(r.size() - sizeof(RELFileFooterBE));
+    uint32_t offset = r.pget_u32b(footer.root_offset);
+    uint32_t count = r.pget_u32b(footer.root_offset + 4);
+    if (offset > decompressed_data.size() || ((offset + count * sizeof(CardDefinition)) > decompressed_data.size())) {
+      throw std::runtime_error("definitions array reference out of bounds");
+    }
+    CardDefinition* defs = reinterpret_cast<CardDefinition*>(decompressed_data.data() + offset);
+    for (size_t x = 0; x < count; x++) {
+      auto& def = defs[x];
+
+      // The last card entry has the build date and some other metadata (and isn't a real card, obviously), so skip it.
+      // The game detects this by checking for a negative value in type, which we also do here.
+      if (static_cast<int8_t>(def.type) < 0) {
         continue;
       }
 
-      auto entry = make_shared<CardEntry>(CardEntry{defs[x], "", "", "", {}});
+      auto entry = std::make_shared<CardEntry>(CardEntry{def, {}, "", "", "", {}});
       if (!this->card_definitions.emplace(entry->def.card_id, entry).second) {
-        throw runtime_error(string_printf(
-            "duplicate card id: %08" PRIX32, entry->def.card_id.load()));
+        throw std::runtime_error(std::format("duplicate card id: {:08X}", entry->def.card_id));
       }
 
-      // Some cards intentionally have the same name, so we just leave them
-      // unindexed (they can still be looked up by ID, of course)
-      string name = entry->def.en_name.decode(1);
+      // Some cards intentionally have the same name, so we just leave them unindexed (they can still be looked up by
+      // ID, of course)
+      std::string name = entry->def.en_name.decode(Language::ENGLISH);
       this->card_definitions_by_name.emplace(name, entry);
       this->card_definitions_by_name_normalized.emplace(this->normalize_card_name(name), entry);
 
@@ -2281,94 +2717,106 @@ CardIndex::CardIndex(
 
       if (!text_filename.empty() || !decompressed_text_filename.empty()) {
         try {
-          entry->text = std::move(card_text.at(defs[x].card_id));
-        } catch (const out_of_range&) {
+          entry->text_pages = std::move(card_text_pages.at(def.card_id));
+        } catch (const std::out_of_range&) {
         }
         try {
-          entry->debug_tags = std::move(card_tags.at(defs[x].card_id));
-        } catch (const out_of_range&) {
+          entry->text = std::move(card_text.at(def.card_id));
+        } catch (const std::out_of_range&) {
+        }
+        try {
+          entry->debug_tags = std::move(card_tags.at(def.card_id));
+        } catch (const std::out_of_range&) {
         }
       }
       if (!dice_text_filename.empty() || !decompressed_dice_text_filename.empty()) {
         try {
-          auto& dice_text_it = card_dice_text.at(defs[x].card_id);
+          auto& dice_text_it = card_dice_text.at(def.card_id);
           entry->dice_caption = std::move(dice_text_it.first);
           entry->dice_text = std::move(dice_text_it.second);
-        } catch (const out_of_range&) {
+        } catch (const std::out_of_range&) {
         }
       }
     }
 
     if (this->compressed_card_definitions.empty()) {
-      uint64_t start = now();
+      uint64_t start = phosg::now();
       this->compressed_card_definitions = prs_compress(decompressed_data);
-      uint64_t diff = now() - start;
-      static_game_data_log.info(
-          "Compressed card definitions (%zu bytes -> %zu bytes) in %" PRIu64 "ms",
+      uint64_t diff = phosg::now() - start;
+      static_game_data_log.info_f(
+          "Compressed card definitions ({} bytes -> {} bytes) in {}us",
           decompressed_data.size(), this->compressed_card_definitions.size(), diff);
     }
 
     if (this->compressed_card_definitions.size() > 0x7BF8) {
       // Try to reduce the compressed size by clearing out text
-      static_game_data_log.info("Compressed card list data is too long (0x%zX bytes); removing text", this->compressed_card_definitions.size());
-      for (size_t x = 0; x < max_cards; x++) {
+      static_game_data_log.info_f("Compressed card list data is too long (0x{:X} bytes); removing text", this->compressed_card_definitions.size());
+      for (size_t x = 0; x < count; x++) {
         if (static_cast<int8_t>(defs[x].type) < 0) {
           continue;
         }
         defs[x].jp_name.clear();
         defs[x].jp_short_name.clear();
       }
-      uint64_t start = now();
+      uint64_t start = phosg::now();
       this->compressed_card_definitions = prs_compress_optimal(decompressed_data.data(), decompressed_data.size());
-      uint64_t diff = now() - start;
-      static_game_data_log.info(
-          "Compressed card definitions (0x%zX bytes -> 0x%zX bytes) in %" PRIu64 "ms",
+      uint64_t diff = phosg::now() - start;
+      static_game_data_log.info_f(
+          "Compressed card definitions (0x{:X} bytes -> 0x{:X} bytes) in {}us",
           decompressed_data.size(), this->compressed_card_definitions.size(), diff);
     }
 
     if (this->compressed_card_definitions.size() > 0x7BF8) {
-      throw runtime_error("compressed card list data is too long");
+      throw std::runtime_error("compressed card list data is too long");
     }
 
-    static_game_data_log.info("Indexed %zu Episode 3 card definitions", this->card_definitions.size());
-  } catch (const exception& e) {
-    static_game_data_log.warning("Failed to load Episode 3 card update: %s", e.what());
+    static_game_data_log.info_f("Indexed {} Episode 3 card definitions", this->card_definitions.size());
+  } catch (const std::exception& e) {
+    static_game_data_log.warning_f("Failed to load Episode 3 card update: {}", e.what());
   }
 }
 
-const string& CardIndex::get_compressed_definitions() const {
+const std::string& CardIndex::get_compressed_definitions() const {
   if (this->compressed_card_definitions.empty()) {
-    throw runtime_error("card definitions are not available");
+    throw std::runtime_error("card definitions are not available");
   }
   return this->compressed_card_definitions;
 }
 
-shared_ptr<const CardIndex::CardEntry> CardIndex::definition_for_id(uint32_t id) const {
+std::shared_ptr<const CardIndex::CardEntry> CardIndex::definition_for_id(uint32_t id) const {
   return this->card_definitions.at(id);
 }
 
-shared_ptr<const CardIndex::CardEntry> CardIndex::definition_for_name(const string& name) const {
+std::shared_ptr<const CardIndex::CardEntry> CardIndex::definition_for_name(const std::string& name) const {
   return this->card_definitions_by_name.at(name);
 }
 
-shared_ptr<const CardIndex::CardEntry> CardIndex::definition_for_name_normalized(const string& name) const {
+std::shared_ptr<const CardIndex::CardEntry> CardIndex::definition_for_name_normalized(const std::string& name) const {
   return this->card_definitions_by_name_normalized.at(this->normalize_card_name(name));
 }
 
-set<uint32_t> CardIndex::all_ids() const {
-  set<uint32_t> ret;
+std::set<uint32_t> CardIndex::all_ids() const {
+  std::set<uint32_t> ret;
   for (const auto& it : this->card_definitions) {
     ret.emplace(it.first);
   }
   return ret;
 }
 
-uint64_t CardIndex::definitions_mtime() const {
-  return this->mtime_for_card_definitions;
+uint64_t CardIndex::definitions_hash() const {
+  return this->defs_hash;
 }
 
-string CardIndex::normalize_card_name(const string& name) {
-  string ret;
+phosg::JSON CardIndex::definitions_json() const {
+  phosg::JSON ret = phosg::JSON::dict();
+  for (const auto& it : this->card_definitions_by_name) {
+    ret.emplace(it.first, it.second->def.json());
+  }
+  return ret;
+}
+
+std::string CardIndex::normalize_card_name(const std::string& name) {
+  std::string ret;
   for (char ch : name) {
     if (ch == ' ') {
       continue;
@@ -2378,74 +2826,92 @@ string CardIndex::normalize_card_name(const string& name) {
   return ret;
 }
 
-MapIndex::VersionedMap::VersionedMap(shared_ptr<const MapDefinition> map, uint8_t language)
+MapIndex::VersionedMap::VersionedMap(std::shared_ptr<const MapDefinition> map, Language language)
     : map(map),
       language(language) {}
 
-MapIndex::VersionedMap::VersionedMap(std::string&& compressed_data, uint8_t language)
-    : language(language),
-      compressed_data(std::move(compressed_data)) {
-  string decompressed = prs_decompress(this->compressed_data);
-  if (decompressed.size() != sizeof(MapDefinition)) {
-    throw runtime_error(string_printf(
-        "decompressed data size is incorrect (expected %zu bytes, read %zu bytes)",
+MapIndex::VersionedMap::VersionedMap(std::string&& compressed_data, Language language)
+    : language(language), compressed_data(std::make_shared<std::string>(std::move(compressed_data))) {
+  std::string decompressed = prs_decompress(*this->compressed_data);
+  if (decompressed.size() == sizeof(MapDefinitionTrial)) {
+    this->map = std::make_shared<MapDefinition>(*reinterpret_cast<const MapDefinitionTrial*>(decompressed.data()));
+  } else if (decompressed.size() == sizeof(MapDefinition)) {
+    this->map = std::make_shared<MapDefinition>(*reinterpret_cast<const MapDefinition*>(decompressed.data()));
+  } else {
+    throw std::runtime_error(std::format(
+        "decompressed data size is incorrect (expected {} bytes, read {} bytes)",
         sizeof(MapDefinition), decompressed.size()));
   }
-  this->map = make_shared<MapDefinition>(*reinterpret_cast<const MapDefinition*>(decompressed.data()));
 }
 
-shared_ptr<const MapDefinitionTrial> MapIndex::VersionedMap::trial() const {
+std::shared_ptr<const MapDefinitionTrial> MapIndex::VersionedMap::trial() const {
   if (!this->trial_map) {
-    this->trial_map = make_shared<MapDefinitionTrial>(*this->map);
+    this->trial_map = std::make_shared<MapDefinitionTrial>(*this->map);
   }
   return this->trial_map;
 }
 
-const std::string& MapIndex::VersionedMap::compressed(bool is_trial) const {
-  if (is_trial) {
-    if (this->compressed_trial_data.empty()) {
+std::shared_ptr<const std::string> MapIndex::VersionedMap::compressed(bool trial) const {
+  if (trial) {
+    if (!this->compressed_data_trial) {
       auto md = this->trial();
-      this->compressed_trial_data = prs_compress(md.get(), sizeof(*md));
+      this->compressed_data_trial = std::make_shared<std::string>(prs_compress(md.get(), sizeof(*md)));
     }
-    return this->compressed_trial_data;
+    return this->compressed_data_trial;
   } else {
-    if (this->compressed_data.empty()) {
-      this->compressed_data = prs_compress(this->map.get(), sizeof(*this->map));
+    if (!this->compressed_data) {
+      this->compressed_data = std::make_shared<std::string>(prs_compress(this->map.get(), sizeof(*this->map)));
     }
     return this->compressed_data;
   }
 }
 
-MapIndex::Map::Map(shared_ptr<const VersionedMap> initial_version)
+std::shared_ptr<const std::string> MapIndex::VersionedMap::trial_download() const {
+  if (!this->download_data_trial) {
+    MapDefinitionTrial trial_map = *this->map;
+    trial_map.tag = 0x96;
+    this->download_data_trial = std::make_shared<std::string>(prs_compress(&trial_map, sizeof(trial_map)));
+  }
+  return this->download_data_trial;
+}
+
+MapIndex::Map::Map(std::shared_ptr<const VersionedMap> initial_version, uint8_t visibility_flags)
     : map_number(initial_version->map->map_number),
+      visibility_flags(visibility_flags),
       initial_version(initial_version) {
-  this->versions.resize(this->initial_version->language + 1);
-  this->versions[this->initial_version->language] = initial_version;
+  size_t lang_index = static_cast<size_t>(this->initial_version->language);
+  this->versions.resize(lang_index + 1);
+  this->versions[lang_index] = initial_version;
 }
 
 void MapIndex::Map::add_version(std::shared_ptr<const VersionedMap> vm) {
-  if (this->versions.size() <= vm->language) {
-    this->versions.resize(vm->language + 1);
+  size_t lang_index = static_cast<size_t>(vm->language);
+  if (this->versions.size() <= lang_index) {
+    this->versions.resize(lang_index + 1);
   }
-  if (this->versions[vm->language]) {
-    throw runtime_error("map version already exists");
+  if (this->versions[lang_index]) {
+    throw std::runtime_error("map version already exists");
   }
   this->initial_version->map->assert_semantically_equivalent(*vm->map);
-  this->versions[vm->language] = vm;
+  this->versions[lang_index] = vm;
 }
 
-bool MapIndex::Map::has_version(uint8_t language) const {
-  return (this->versions.size() > language) && !!this->versions[language];
+bool MapIndex::Map::has_version(Language language) const {
+  size_t lang_index = static_cast<size_t>(language);
+  return (this->versions.size() > lang_index) && !!this->versions[lang_index];
 }
 
-shared_ptr<const MapIndex::VersionedMap> MapIndex::Map::version(uint8_t language) const {
+std::shared_ptr<const MapIndex::VersionedMap> MapIndex::Map::version(Language language) const {
+  size_t lang_index = static_cast<size_t>(language);
+
   // If the requested language exists, return it
-  if ((language < this->versions.size()) && this->versions[language]) {
-    return this->versions[language];
+  if ((lang_index < this->versions.size()) && this->versions[lang_index]) {
+    return this->versions[lang_index];
   }
   // If English exists, return it
-  if ((1 < this->versions.size()) && this->versions[1]) {
-    return this->versions[1];
+  constexpr size_t english_lang_index = static_cast<size_t>(Language::ENGLISH);
+  if ((english_lang_index < this->versions.size()) && this->versions[english_lang_index]) {
+    return this->versions[english_lang_index];
   }
   // Return the first version that exists
   for (const auto& vm : this->versions) {
@@ -2453,108 +2919,183 @@ shared_ptr<const MapIndex::VersionedMap> MapIndex::Map::version(uint8_t language
       return vm;
     }
   }
-  // This should never happen because Map cannot be constructed without an
-  // initial_version
-  throw logic_error("no map versions exist");
+  // This should never happen because Map cannot be constructed without an initial_version
+  throw std::logic_error("no map versions exist");
 }
 
-MapIndex::MapIndex(const string& directory) {
-  for (const auto& filename : list_directory_sorted(directory)) {
+MapIndex::Category::Category(uint32_t category_id, const phosg::JSON& json)
+    : category_id(category_id),
+      visibility_flags(json.get_int("VisibilityFlags")),
+      name(json.get_string("Name", "")),
+      description(json.get_string("Description", "")) {}
+
+MapIndex::MapIndex(const std::string& directory, bool raise_on_any_failure) {
+  std::map<uint32_t, std::shared_ptr<Map>> mutable_maps;
+
+  auto try_add_map_file = [&](std::shared_ptr<Category> category, const std::string& file_path) -> void {
     try {
-      string base_filename;
-      string compressed_data;
-      shared_ptr<MapDefinition> decompressed_data;
-      if (ends_with(filename, ".mnmd") || ends_with(filename, ".bind")) {
-        decompressed_data = make_shared<MapDefinition>(load_object_file<MapDefinition>(directory + "/" + filename));
+      std::string filename = phosg::basename(file_path);
+      std::string base_filename;
+      std::string compressed_data;
+      std::shared_ptr<MapDefinition> decompressed_data;
+      if (filename.ends_with(".mnmd") || filename.ends_with(".bind")) {
+        decompressed_data = std::make_shared<MapDefinition>(phosg::load_object_file<MapDefinition>(file_path));
         base_filename = filename.substr(0, filename.size() - 5);
-      } else if (ends_with(filename, ".mnm") || ends_with(filename, ".bin")) {
-        compressed_data = load_file(directory + "/" + filename);
+      } else if (filename.ends_with(".mnm") || filename.ends_with(".bin")) {
+        compressed_data = phosg::load_file(file_path);
         base_filename = filename.substr(0, filename.size() - 4);
-      } else if (ends_with(filename, ".bin.gci") || ends_with(filename, ".mnm.gci")) {
-        compressed_data = decode_gci_data(load_file(directory + "/" + filename));
+      } else if (filename.ends_with(".bin.gci") || filename.ends_with(".mnm.gci")) {
+        compressed_data = decode_gci_data(phosg::load_file(file_path));
         base_filename = filename.substr(0, filename.size() - 8);
-      } else if (ends_with(filename, ".gci")) {
-        compressed_data = decode_gci_data(load_file(directory + "/" + filename));
+      } else if (filename.ends_with(".gci")) {
+        compressed_data = decode_gci_data(phosg::load_file(file_path));
         base_filename = filename.substr(0, filename.size() - 4);
-      } else if (ends_with(filename, ".bin.vms") || ends_with(filename, ".mnm.vms")) {
-        compressed_data = decode_vms_data(load_file(directory + "/" + filename));
+      } else if (filename.ends_with(".bin.vms") || filename.ends_with(".mnm.vms")) {
+        compressed_data = decode_vms_data(phosg::load_file(file_path));
         base_filename = filename.substr(0, filename.size() - 8);
-      } else if (ends_with(filename, ".vms")) {
-        compressed_data = decode_vms_data(load_file(directory + "/" + filename));
+      } else if (filename.ends_with(".vms")) {
+        compressed_data = decode_vms_data(phosg::load_file(file_path));
         base_filename = filename.substr(0, filename.size() - 4);
-      } else if (ends_with(filename, ".bin.dlq") || ends_with(filename, ".mnm.dlq")) {
-        compressed_data = decode_dlq_data(load_file(directory + "/" + filename));
+      } else if (filename.ends_with(".bin.dlq") || filename.ends_with(".mnm.dlq")) {
+        compressed_data = decode_dlq_data(phosg::load_file(file_path));
         base_filename = filename.substr(0, filename.size() - 8);
-      } else if (ends_with(filename, ".dlq")) {
-        compressed_data = decode_dlq_data(load_file(directory + "/" + filename));
+      } else if (filename.ends_with(".dlq")) {
+        compressed_data = decode_dlq_data(phosg::load_file(file_path));
         base_filename = filename.substr(0, filename.size() - 4);
       } else {
-        continue; // Silently skip file
+        return; // Silently skip file
       }
 
       if (base_filename.size() < 2) {
-        throw runtime_error("filename too short for language code");
+        throw std::runtime_error("filename too short for language code");
       }
       if (base_filename[base_filename.size() - 2] != '-') {
-        throw runtime_error("language code not present");
+        throw std::runtime_error("language code not present");
       }
-      uint8_t language = language_code_for_char(base_filename[base_filename.size() - 1]);
+      Language language = language_for_char(base_filename[base_filename.size() - 1]);
 
-      shared_ptr<VersionedMap> vm;
+      std::shared_ptr<VersionedMap> vm;
       if (decompressed_data) {
-        vm = make_shared<VersionedMap>(decompressed_data, language);
+        vm = std::make_shared<VersionedMap>(decompressed_data, language);
       } else if (!compressed_data.empty()) {
-        vm = make_shared<VersionedMap>(std::move(compressed_data), language);
+        vm = std::make_shared<VersionedMap>(std::move(compressed_data), language);
       } else {
-        throw runtime_error("unknown map file format");
+        throw std::runtime_error("unknown map file format");
       }
 
-      string name = vm->map->name.decode(vm->language);
-      auto map_it = this->maps.find(vm->map->map_number);
-      if (map_it == this->maps.end()) {
-        map_it = this->maps.emplace(vm->map->map_number, make_shared<Map>(vm)).first;
-        static_game_data_log.info("(%s) Created Episode 3 map %08" PRIX32 " %c (%s; %s)",
-            filename.c_str(),
-            vm->map->map_number.load(),
-            char_for_language_code(vm->language),
+      uint8_t visibility_flags = category ? category->visibility_flags : 0x00;
+
+      std::string name = vm->map->name.decode(vm->language);
+      auto map_it = mutable_maps.find(vm->map->map_number);
+      if (map_it == mutable_maps.end()) {
+        map_it = mutable_maps.emplace(vm->map->map_number, std::make_shared<Map>(vm, visibility_flags)).first;
+        this->maps.emplace(vm->map->map_number, map_it->second);
+
+        std::string in_category_str;
+        if (category) {
+          in_category_str = std::format(" in category {}", category->name);
+          category->add_map(map_it->second);
+        }
+        static_game_data_log.debug_f("({}) Created Episode 3 map {:08X} {}{} ({}; {})",
+            filename,
+            vm->map->map_number,
+            char_for_language(vm->language),
+            in_category_str,
             vm->map->is_quest() ? "quest" : "free",
-            name.c_str());
+            name);
       } else {
+        if (map_it->second->visibility_flags != visibility_flags) {
+          throw std::runtime_error(std::format(
+              "visibility flags {:02X} for added map {} do not match existing flags {}",
+              map_it->second->visibility_flags, file_path, visibility_flags));
+        }
         map_it->second->add_version(vm);
-        static_game_data_log.info("(%s) Added Episode 3 map version %08" PRIX32 " %c (%s; %s)",
-            filename.c_str(),
-            vm->map->map_number.load(),
-            char_for_language_code(vm->language),
+        static_game_data_log.debug_f("({}) Added Episode 3 map version {:08X} {} ({}; {})",
+            filename,
+            vm->map->map_number,
+            char_for_language(vm->language),
             vm->map->is_quest() ? "quest" : "free",
-            name.c_str());
+            name);
       }
       this->maps_by_name.emplace(vm->map->name.decode(vm->language), map_it->second);
 
-    } catch (const exception& e) {
-      static_game_data_log.warning("Failed to index Episode 3 map %s: %s",
-          filename.c_str(), e.what());
+    } catch (const std::exception& e) {
+      if (raise_on_any_failure) {
+        throw;
+      }
+      static_game_data_log.warning_f("Failed to index Episode 3 map {}: {}", file_path, e.what());
+    }
+  };
+
+  std::vector<std::filesystem::directory_entry> cat_items;
+  for (const auto& cat_item : std::filesystem::directory_iterator(directory)) {
+    cat_items.emplace_back(cat_item);
+  }
+  auto sort_fn = +[](const std::filesystem::directory_entry& a, const std::filesystem::directory_entry& b) -> bool {
+    return a.path().filename().string() < b.path().filename().string();
+  };
+  sort(cat_items.begin(), cat_items.end(), sort_fn);
+
+  for (const auto& cat_item : cat_items) {
+    std::string cat_dir_path = cat_item.path().string();
+
+    if (cat_item.is_directory()) {
+      std::shared_ptr<Category> category;
+      try {
+        std::string json_filename = std::format("{}/{}", cat_item.path().string(), "category.json");
+        auto category_json = phosg::JSON::parse(phosg::load_file(json_filename));
+        uint32_t category_id = this->categories.size() + 1;
+        auto category = std::make_shared<Category>(category_id, category_json);
+        this->categories.emplace(category_id, category);
+        static_game_data_log.debug_f("({}) Created Episode 3 map category {:08X} ({})",
+            cat_item.path().filename().string(), category_id, category->name);
+
+        for (const auto& map_item : std::filesystem::directory_iterator(cat_item)) {
+          try_add_map_file(category, map_item.path().string());
+        }
+
+      } catch (const std::exception& e) {
+        if (raise_on_any_failure) {
+          throw;
+        }
+        static_game_data_log.warning_f("Failed to index Episode 3 map category {}: {}", cat_item.path().string(), e.what());
+      }
+
+    } else {
+      try_add_map_file(nullptr, cat_dir_path);
     }
   }
 }
 
-const string& MapIndex::get_compressed_list(size_t num_players, uint8_t language) const {
+const std::string& MapIndex::get_compressed_list(size_t num_players, Language language, bool is_trial) const {
   if (num_players == 0) {
-    throw runtime_error("cannot generate map list for no players");
+    throw std::runtime_error("cannot generate map list for no players");
   }
   if (num_players > 4) {
-    throw logic_error("player count is too high in map list generation");
+    throw std::logic_error("player count is too high in map list generation");
   }
 
-  if (language >= this->compressed_map_lists.size()) {
-    this->compressed_map_lists.resize(language + 1);
+  auto& compressed_lists = is_trial ? this->compressed_map_lists_trial : this->compressed_map_lists_final;
+
+  size_t lang_index = static_cast<size_t>(language);
+  if (lang_index >= compressed_lists.size()) {
+    compressed_lists.resize(lang_index + 1);
   }
-  string& compressed_map_list = this->compressed_map_lists[language].at(num_players - 1);
+  std::string& compressed_map_list = compressed_lists[lang_index].at(num_players - 1);
   if (compressed_map_list.empty()) {
-    StringWriter entries_w;
-    StringWriter strings_w;
+    phosg::StringWriter entries_w;
+    phosg::StringWriter strings_w;
+
+    auto vis_flag = is_trial
+        ? Episode3::MapIndex::VisibilityFlag::ONLINE_TRIAL
+        : Episode3::MapIndex::VisibilityFlag::ONLINE_FINAL;
 
     size_t num_maps = 0;
     for (const auto& map_it : this->maps) {
+      if (!map_it.second->check_visibility_flag(vis_flag)) {
+        continue;
+      }
+
       auto vm = map_it.second->version(language);
       size_t map_num_players = 0;
       for (size_t z = 0; z < 4; z++) {
@@ -2571,11 +3112,11 @@ const string& MapIndex::get_compressed_list(size_t num_players, uint8_t language
       e.map_x = vm->map->map_x;
       e.map_y = vm->map->map_y;
       e.environment_number = vm->map->environment_number;
-      e.map_number = vm->map->map_number.load();
+      e.map_number = vm->map->map_number;
       e.width = vm->map->width;
       e.height = vm->map->height;
       e.map_tiles = vm->map->map_tiles;
-      e.modification_tiles = vm->map->modification_tiles;
+      e.modification_tiles = vm->map->overlay_state.tiles;
 
       e.name_offset = strings_w.size();
       strings_w.write(vm->map->name.data, vm->map->name.used_chars_8());
@@ -2606,41 +3147,27 @@ const string& MapIndex::get_compressed_list(size_t num_players, uint8_t language
     prs.add(entries_w.str());
     prs.add(strings_w.str());
 
-    StringWriter compressed_w;
+    phosg::StringWriter compressed_w;
     compressed_w.put_u32b(prs.input_size());
     compressed_w.write(prs.close());
     compressed_map_list = std::move(compressed_w.str());
     if (compressed_map_list.size() > 0x7BEC) {
-      throw runtime_error(string_printf("compressed map list for %zu players is too large (0x%zX bytes)", num_players, compressed_map_list.size()));
+      throw std::runtime_error(std::format("compressed {} map list for {} players is too large (0x{:X} bytes)",
+          is_trial ? "trial" : "final", num_players, compressed_map_list.size()));
     }
     size_t decompressed_size = sizeof(header) + entries_w.size() + strings_w.size();
-    static_game_data_log.info("Generated Episode 3 compressed map list for %zu player(s) (%zu maps; 0x%zX -> 0x%zX bytes)",
-        num_players, num_maps, decompressed_size, compressed_map_list.size());
+    static_game_data_log.info_f(
+        "Generated Episode 3 compressed {} map list for {} player(s) ({} maps; 0x{:X} -> 0x{:X} bytes)",
+        is_trial ? "trial" : "final", num_players, num_maps, decompressed_size, compressed_map_list.size());
   }
   return compressed_map_list;
 }
 
-shared_ptr<const MapIndex::Map> MapIndex::for_number(uint32_t id) const {
-  return this->maps.at(id);
-}
-
-shared_ptr<const MapIndex::Map> MapIndex::for_name(const string& name) const {
-  return this->maps_by_name.at(name);
-}
-
-set<uint32_t> MapIndex::all_numbers() const {
-  set<uint32_t> ret;
-  for (const auto& it : this->maps) {
-    ret.emplace(it.first);
-  }
-  return ret;
-}
-
-COMDeckIndex::COMDeckIndex(const string& filename) {
+COMDeckIndex::COMDeckIndex(const std::string& filename) {
   try {
-    auto json = JSON::parse(load_file(filename));
+    auto json = phosg::JSON::parse(phosg::load_file(filename));
     for (const auto& def_json : json.as_list()) {
-      auto& def = this->decks.emplace_back(make_shared<COMDeckDefinition>());
+      auto& def = this->decks.emplace_back(std::make_shared<COMDeckDefinition>());
       def->index = this->decks.size() - 1;
       def->player_name = def_json->at(0).as_string();
       def->deck_name = def_json->at(1).as_string();
@@ -2649,11 +3176,11 @@ COMDeckIndex::COMDeckIndex(const string& filename) {
         def->card_ids[z] = card_ids_json.at(z).as_int();
       }
       if (!this->decks_by_name.emplace(def->deck_name, def).second) {
-        throw runtime_error("duplicate COM deck name: " + def->deck_name);
+        throw std::runtime_error("duplicate COM deck name: " + def->deck_name);
       }
     }
-  } catch (const exception& e) {
-    static_game_data_log.warning("Failed to load Episode 3 COM decks: %s", e.what());
+  } catch (const std::exception& e) {
+    static_game_data_log.warning_f("Failed to load Episode 3 COM decks: {}", e.what());
   }
 }
 
@@ -2661,22 +3188,30 @@ size_t COMDeckIndex::num_decks() const {
   return this->decks.size();
 }
 
-shared_ptr<const COMDeckDefinition> COMDeckIndex::deck_for_index(size_t which) const {
+std::shared_ptr<const COMDeckDefinition> COMDeckIndex::deck_for_index(size_t which) const {
   return this->decks.at(which);
 }
 
-shared_ptr<const COMDeckDefinition> COMDeckIndex::deck_for_name(const string& which) const {
+std::shared_ptr<const COMDeckDefinition> COMDeckIndex::deck_for_name(const std::string& which) const {
   return this->decks_by_name.at(which);
 }
 
-shared_ptr<const COMDeckDefinition> COMDeckIndex::random_deck() const {
-  return this->decks[random_object<size_t>() % this->decks.size()];
+std::shared_ptr<const COMDeckDefinition> COMDeckIndex::random_deck() const {
+  return this->decks[phosg::random_object<size_t>() % this->decks.size()];
+}
+
+phosg::JSON COMDeckIndex::json() const {
+  auto ret = phosg::JSON::list();
+  for (const auto& deck : this->decks) {
+    ret.emplace_back(deck->json());
+  }
+  return ret;
 }
 
 } // namespace Episode3
 
 template <>
-Episode3::HPType enum_for_name<Episode3::HPType>(const char* name) {
+Episode3::HPType phosg::enum_for_name<Episode3::HPType>(const char* name) {
   if (!strcmp(name, "DEFEAT_PLAYER")) {
     return Episode3::HPType::DEFEAT_PLAYER;
   } else if (!strcmp(name, "DEFEAT_TEAM")) {
@@ -2684,12 +3219,12 @@ Episode3::HPType enum_for_name<Episode3::HPType>(const char* name) {
   } else if (!strcmp(name, "COMMON_HP")) {
     return Episode3::HPType::COMMON_HP;
   } else {
-    throw out_of_range("invalid HP type name");
+    throw std::out_of_range("invalid HP type name");
   }
 }
 
 template <>
-const char* name_for_enum<Episode3::HPType>(Episode3::HPType hp_type) {
+const char* phosg::name_for_enum<Episode3::HPType>(Episode3::HPType hp_type) {
   switch (hp_type) {
     case Episode3::HPType::DEFEAT_PLAYER:
       return "DEFEAT_PLAYER";
@@ -2698,12 +3233,12 @@ const char* name_for_enum<Episode3::HPType>(Episode3::HPType hp_type) {
     case Episode3::HPType::COMMON_HP:
       return "COMMON_HP";
     default:
-      throw out_of_range("invalid HP type");
+      throw std::out_of_range("invalid HP type");
   }
 }
 
 template <>
-Episode3::DiceExchangeMode enum_for_name<Episode3::DiceExchangeMode>(const char* name) {
+Episode3::DiceExchangeMode phosg::enum_for_name<Episode3::DiceExchangeMode>(const char* name) {
   if (!strcmp(name, "HIGH_ATK")) {
     return Episode3::DiceExchangeMode::HIGH_ATK;
   } else if (!strcmp(name, "HIGH_DEF")) {
@@ -2711,12 +3246,12 @@ Episode3::DiceExchangeMode enum_for_name<Episode3::DiceExchangeMode>(const char*
   } else if (!strcmp(name, "NONE")) {
     return Episode3::DiceExchangeMode::NONE;
   } else {
-    throw out_of_range("invalid dice exchange mode name");
+    throw std::out_of_range("invalid dice exchange mode name");
   }
 }
 
 template <>
-const char* name_for_enum<Episode3::DiceExchangeMode>(Episode3::DiceExchangeMode dice_exchange_mode) {
+const char* phosg::name_for_enum<Episode3::DiceExchangeMode>(Episode3::DiceExchangeMode dice_exchange_mode) {
   switch (dice_exchange_mode) {
     case Episode3::DiceExchangeMode::HIGH_ATK:
       return "HIGH_ATK";
@@ -2725,12 +3260,12 @@ const char* name_for_enum<Episode3::DiceExchangeMode>(Episode3::DiceExchangeMode
     case Episode3::DiceExchangeMode::NONE:
       return "NONE";
     default:
-      throw out_of_range("invalid dice exchange mode");
+      throw std::out_of_range("invalid dice exchange mode");
   }
 }
 
 template <>
-Episode3::AllowedCards enum_for_name<Episode3::AllowedCards>(const char* name) {
+Episode3::AllowedCards phosg::enum_for_name<Episode3::AllowedCards>(const char* name) {
   if (!strcmp(name, "ALL")) {
     return Episode3::AllowedCards::ALL;
   } else if (!strcmp(name, "N_ONLY")) {
@@ -2740,12 +3275,12 @@ Episode3::AllowedCards enum_for_name<Episode3::AllowedCards>(const char* name) {
   } else if (!strcmp(name, "N_R_S_ONLY")) {
     return Episode3::AllowedCards::N_R_S_ONLY;
   } else {
-    throw out_of_range("invalid allowed cards name");
+    throw std::out_of_range("invalid allowed cards name");
   }
 }
 
 template <>
-const char* name_for_enum<Episode3::AllowedCards>(Episode3::AllowedCards allowed_cards) {
+const char* phosg::name_for_enum<Episode3::AllowedCards>(Episode3::AllowedCards allowed_cards) {
   switch (allowed_cards) {
     case Episode3::AllowedCards::ALL:
       return "ALL";
@@ -2756,6 +3291,347 @@ const char* name_for_enum<Episode3::AllowedCards>(Episode3::AllowedCards allowed
     case Episode3::AllowedCards::N_R_S_ONLY:
       return "N_R_S_ONLY";
     default:
-      throw out_of_range("invalid allowed cards");
+      return "__INVALID__";
+  }
+}
+
+template <>
+const char* phosg::name_for_enum<Episode3::BattlePhase>(Episode3::BattlePhase phase) {
+  switch (phase) {
+    case Episode3::BattlePhase::INVALID_00:
+      return "INVALID_00";
+    case Episode3::BattlePhase::DICE:
+      return "DICE";
+    case Episode3::BattlePhase::SET:
+      return "SET";
+    case Episode3::BattlePhase::MOVE:
+      return "MOVE";
+    case Episode3::BattlePhase::ACTION:
+      return "ACTION";
+    case Episode3::BattlePhase::DRAW:
+      return "DRAW";
+    case Episode3::BattlePhase::INVALID_FF:
+      return "INVALID_FF";
+    default:
+      return "__INVALID__";
+  }
+}
+
+template <>
+const char* phosg::name_for_enum<Episode3::SetupPhase>(Episode3::SetupPhase phase) {
+  switch (phase) {
+    case Episode3::SetupPhase::REGISTRATION:
+      return "REGISTRATION";
+    case Episode3::SetupPhase::STARTER_ROLLS:
+      return "STARTER_ROLLS";
+    case Episode3::SetupPhase::HAND_REDRAW_OPTION:
+      return "HAND_REDRAW_OPTION";
+    case Episode3::SetupPhase::MAIN_BATTLE:
+      return "MAIN_BATTLE";
+    case Episode3::SetupPhase::BATTLE_ENDED:
+      return "BATTLE_ENDED";
+    case Episode3::SetupPhase::INVALID_FF:
+      return "INVALID_FF";
+    default:
+      return "__INVALID__";
+  }
+}
+
+template <>
+const char* phosg::name_for_enum<Episode3::RegistrationPhase>(Episode3::RegistrationPhase phase) {
+  switch (phase) {
+    case Episode3::RegistrationPhase::AWAITING_NUM_PLAYERS:
+      return "AWAITING_NUM_PLAYERS";
+    case Episode3::RegistrationPhase::AWAITING_PLAYERS:
+      return "AWAITING_PLAYERS";
+    case Episode3::RegistrationPhase::AWAITING_DECKS:
+      return "AWAITING_DECKS";
+    case Episode3::RegistrationPhase::REGISTERED:
+      return "REGISTERED";
+    case Episode3::RegistrationPhase::BATTLE_STARTED:
+      return "BATTLE_STARTED";
+    case Episode3::RegistrationPhase::INVALID_FF:
+      return "INVALID_FF";
+    default:
+      return "__INVALID__";
+  }
+}
+
+template <>
+const char* phosg::name_for_enum<Episode3::ActionSubphase>(Episode3::ActionSubphase phase) {
+  switch (phase) {
+    case Episode3::ActionSubphase::ATTACK:
+      return "ATTACK";
+    case Episode3::ActionSubphase::DEFENSE:
+      return "DEFENSE";
+    case Episode3::ActionSubphase::INVALID_FF:
+      return "INVALID_FF";
+    default:
+      return "__INVALID__";
+  }
+}
+
+template <>
+const char* phosg::name_for_enum<Episode3::AttackMedium>(Episode3::AttackMedium medium) {
+  switch (medium) {
+    case Episode3::AttackMedium::UNKNOWN:
+      return "UNKNOWN";
+    case Episode3::AttackMedium::PHYSICAL:
+      return "PHYSICAL";
+    case Episode3::AttackMedium::TECH:
+      return "TECH";
+    case Episode3::AttackMedium::UNKNOWN_03:
+      return "UNKNOWN_03";
+    case Episode3::AttackMedium::INVALID_FF:
+      return "INVALID_FF";
+    default:
+      return "__INVALID__";
+  }
+}
+
+template <>
+const char* phosg::name_for_enum<Episode3::CriterionCode>(Episode3::CriterionCode code) {
+  switch (code) {
+    case Episode3::CriterionCode::NONE:
+      return "NONE";
+    case Episode3::CriterionCode::HU_CLASS_SC:
+      return "HU_CLASS_SC";
+    case Episode3::CriterionCode::RA_CLASS_SC:
+      return "RA_CLASS_SC";
+    case Episode3::CriterionCode::FO_CLASS_SC:
+      return "FO_CLASS_SC";
+    case Episode3::CriterionCode::SAME_TEAM:
+      return "SAME_TEAM";
+    case Episode3::CriterionCode::SAME_PLAYER:
+      return "SAME_PLAYER";
+    case Episode3::CriterionCode::SAME_TEAM_NOT_SAME_PLAYER:
+      return "SAME_TEAM_NOT_SAME_PLAYER";
+    case Episode3::CriterionCode::FC:
+      return "FC";
+    case Episode3::CriterionCode::NOT_SC:
+      return "NOT_SC";
+    case Episode3::CriterionCode::SC:
+      return "SC";
+    case Episode3::CriterionCode::HU_OR_RA_CLASS_SC:
+      return "HU_OR_RA_CLASS_SC";
+    case Episode3::CriterionCode::HUNTER_NON_ANDROID_SC:
+      return "HUNTER_NON_ANDROID_SC";
+    case Episode3::CriterionCode::HUNTER_HU_CLASS_MALE_SC:
+      return "HUNTER_HU_CLASS_MALE_SC";
+    case Episode3::CriterionCode::HUNTER_FEMALE_SC:
+      return "HUNTER_FEMALE_SC";
+    case Episode3::CriterionCode::HUNTER_NON_RA_CLASS_HUMAN_SC:
+      return "HUNTER_NON_RA_CLASS_HUMAN_SC";
+    case Episode3::CriterionCode::HUNTER_HU_CLASS_ANDROID_SC:
+      return "HUNTER_HU_CLASS_ANDROID_SC";
+    case Episode3::CriterionCode::HUNTER_NON_RA_CLASS_NON_NEWMAN_SC:
+      return "HUNTER_NON_RA_CLASS_NON_NEWMAN_SC";
+    case Episode3::CriterionCode::HUNTER_NON_NEWMAN_NON_FORCE_MALE_SC:
+      return "HUNTER_NON_NEWMAN_NON_FORCE_MALE_SC";
+    case Episode3::CriterionCode::HUNTER_HUNEWEARL_CLASS_SC:
+      return "HUNTER_HUNEWEARL_CLASS_SC";
+    case Episode3::CriterionCode::HUNTER_RA_CLASS_MALE_SC:
+      return "HUNTER_RA_CLASS_MALE_SC";
+    case Episode3::CriterionCode::HUNTER_RA_CLASS_FEMALE_SC:
+      return "HUNTER_RA_CLASS_FEMALE_SC";
+    case Episode3::CriterionCode::HUNTER_RA_OR_FO_CLASS_FEMALE_SC:
+      return "HUNTER_RA_OR_FO_CLASS_FEMALE_SC";
+    case Episode3::CriterionCode::HUNTER_HU_OR_RA_CLASS_HUMAN_SC:
+      return "HUNTER_HU_OR_RA_CLASS_HUMAN_SC";
+    case Episode3::CriterionCode::HUNTER_RA_CLASS_ANDROID_SC:
+      return "HUNTER_RA_CLASS_ANDROID_SC";
+    case Episode3::CriterionCode::HUNTER_FO_CLASS_FEMALE_SC:
+      return "HUNTER_FO_CLASS_FEMALE_SC";
+    case Episode3::CriterionCode::HUNTER_HUMAN_FEMALE_SC:
+      return "HUNTER_HUMAN_FEMALE_SC";
+    case Episode3::CriterionCode::HUNTER_ANDROID_SC:
+      return "HUNTER_ANDROID_SC";
+    case Episode3::CriterionCode::HU_OR_FO_CLASS_SC:
+      return "HU_OR_FO_CLASS_SC";
+    case Episode3::CriterionCode::RA_OR_FO_CLASS_SC:
+      return "RA_OR_FO_CLASS_SC";
+    case Episode3::CriterionCode::PHYSICAL_OR_UNKNOWN_ATTACK_MEDIUM:
+      return "PHYSICAL_OR_UNKNOWN_ATTACK_MEDIUM";
+    case Episode3::CriterionCode::TECH_OR_UNKNOWN_ATTACK_MEDIUM:
+      return "TECH_OR_UNKNOWN_ATTACK_MEDIUM";
+    case Episode3::CriterionCode::PHYSICAL_OR_TECH_OR_UNKNOWN_ATTACK_MEDIUM:
+      return "PHYSICAL_OR_TECH_OR_UNKNOWN_ATTACK_MEDIUM";
+    case Episode3::CriterionCode::NON_PHYSICAL_NON_UNKNOWN_ATTACK_MEDIUM_NON_SC:
+      return "NON_PHYSICAL_NON_UNKNOWN_ATTACK_MEDIUM_NON_SC";
+    case Episode3::CriterionCode::NON_PHYSICAL_NON_TECH_ATTACK_MEDIUM_NON_SC:
+      return "NON_PHYSICAL_NON_TECH_ATTACK_MEDIUM_NON_SC";
+    case Episode3::CriterionCode::NON_PHYSICAL_NON_TECH_NON_UNKNOWN_ATTACK_MEDIUM_NON_SC:
+      return "NON_PHYSICAL_NON_TECH_NON_UNKNOWN_ATTACK_MEDIUM_NON_SC";
+    default:
+      return "__UNKNOWN__";
+  }
+}
+
+template <>
+const char* phosg::name_for_enum<Episode3::CardType>(Episode3::CardType type) {
+  switch (type) {
+    case Episode3::CardType::HUNTERS_SC:
+      return "HUNTERS_SC";
+    case Episode3::CardType::ARKZ_SC:
+      return "ARKZ_SC";
+    case Episode3::CardType::ITEM:
+      return "ITEM";
+    case Episode3::CardType::CREATURE:
+      return "CREATURE";
+    case Episode3::CardType::ACTION:
+      return "ACTION";
+    case Episode3::CardType::ASSIST:
+      return "ASSIST";
+    case Episode3::CardType::INVALID_FF:
+      return "INVALID_FF";
+    default:
+      return "__UNKNOWN__";
+  }
+}
+
+template <>
+const char* phosg::name_for_enum<Episode3::CardClass>(Episode3::CardClass cc) {
+  switch (cc) {
+    case Episode3::CardClass::HU_SC:
+      return "HU_SC";
+    case Episode3::CardClass::RA_SC:
+      return "RA_SC";
+    case Episode3::CardClass::FO_SC:
+      return "FO_SC";
+    case Episode3::CardClass::NATIVE_CREATURE:
+      return "NATIVE_CREATURE";
+    case Episode3::CardClass::A_BEAST_CREATURE:
+      return "A_BEAST_CREATURE";
+    case Episode3::CardClass::MACHINE_CREATURE:
+      return "MACHINE_CREATURE";
+    case Episode3::CardClass::DARK_CREATURE:
+      return "DARK_CREATURE";
+    case Episode3::CardClass::GUARD_ITEM:
+      return "GUARD_ITEM";
+    case Episode3::CardClass::MAG_ITEM:
+      return "MAG_ITEM";
+    case Episode3::CardClass::SWORD_ITEM:
+      return "SWORD_ITEM";
+    case Episode3::CardClass::GUN_ITEM:
+      return "GUN_ITEM";
+    case Episode3::CardClass::CANE_ITEM:
+      return "CANE_ITEM";
+    case Episode3::CardClass::ATTACK_ACTION:
+      return "ATTACK_ACTION";
+    case Episode3::CardClass::DEFENSE_ACTION:
+      return "DEFENSE_ACTION";
+    case Episode3::CardClass::TECH:
+      return "TECH";
+    case Episode3::CardClass::PHOTON_BLAST:
+      return "PHOTON_BLAST";
+    case Episode3::CardClass::CONNECT_ONLY_ATTACK_ACTION:
+      return "CONNECT_ONLY_ATTACK_ACTION";
+    case Episode3::CardClass::BOSS_ATTACK_ACTION:
+      return "BOSS_ATTACK_ACTION";
+    case Episode3::CardClass::BOSS_TECH:
+      return "BOSS_TECH";
+    case Episode3::CardClass::ASSIST:
+      return "ASSIST";
+    default:
+      return "__INVALID__";
+  }
+}
+
+template <>
+const char* phosg::name_for_enum<Episode3::ConditionType>(Episode3::ConditionType cond_type) {
+  try {
+    return Episode3::description_for_condition_type.at(static_cast<size_t>(cond_type)).name;
+  } catch (const std::out_of_range&) {
+    return "__INVALID__";
+  }
+}
+
+template <>
+const char* phosg::name_for_enum<Episode3::EffectWhen>(Episode3::EffectWhen when) {
+  switch (when) {
+    case Episode3::EffectWhen::NONE:
+      return "NONE";
+    case Episode3::EffectWhen::CARD_SET:
+      return "CARD_SET";
+    case Episode3::EffectWhen::AFTER_ANY_CARD_ATTACK:
+      return "AFTER_ANY_CARD_ATTACK";
+    case Episode3::EffectWhen::BEFORE_ANY_CARD_ATTACK:
+      return "BEFORE_ANY_CARD_ATTACK";
+    case Episode3::EffectWhen::BEFORE_DICE_PHASE_THIS_TEAM_TURN:
+      return "BEFORE_DICE_PHASE_THIS_TEAM_TURN";
+    case Episode3::EffectWhen::CARD_DESTROYED:
+      return "CARD_DESTROYED";
+    case Episode3::EffectWhen::AFTER_SET_PHASE:
+      return "AFTER_SET_PHASE";
+    case Episode3::EffectWhen::BEFORE_MOVE_PHASE:
+      return "BEFORE_MOVE_PHASE";
+    case Episode3::EffectWhen::UNKNOWN_0A:
+      return "UNKNOWN_0A";
+    case Episode3::EffectWhen::AFTER_ATTACK_TARGET_RESOLUTION:
+      return "AFTER_ATTACK_TARGET_RESOLUTION";
+    case Episode3::EffectWhen::AFTER_THIS_CARD_ATTACK:
+      return "AFTER_THIS_CARD_ATTACK";
+    case Episode3::EffectWhen::BEFORE_THIS_CARD_ATTACK:
+      return "BEFORE_THIS_CARD_ATTACK";
+    case Episode3::EffectWhen::BEFORE_ACT_PHASE:
+      return "BEFORE_ACT_PHASE";
+    case Episode3::EffectWhen::BEFORE_DRAW_PHASE:
+      return "BEFORE_DRAW_PHASE";
+    case Episode3::EffectWhen::AFTER_CARD_MOVE:
+      return "AFTER_CARD_MOVE";
+    case Episode3::EffectWhen::UNKNOWN_15:
+      return "UNKNOWN_15";
+    case Episode3::EffectWhen::AFTER_THIS_CARD_ATTACKED:
+      return "AFTER_THIS_CARD_ATTACKED";
+    case Episode3::EffectWhen::BEFORE_THIS_CARD_ATTACKED:
+      return "BEFORE_THIS_CARD_ATTACKED";
+    case Episode3::EffectWhen::AFTER_CREATURE_OR_HUNTER_SC_ATTACK:
+      return "AFTER_CREATURE_OR_HUNTER_SC_ATTACK";
+    case Episode3::EffectWhen::BEFORE_CREATURE_OR_HUNTER_SC_ATTACK:
+      return "BEFORE_CREATURE_OR_HUNTER_SC_ATTACK";
+    case Episode3::EffectWhen::UNKNOWN_22:
+      return "UNKNOWN_22";
+    case Episode3::EffectWhen::BEFORE_MOVE_PHASE_AND_AFTER_CARD_MOVE_FINAL:
+      return "BEFORE_MOVE_PHASE_AND_AFTER_CARD_MOVE_FINAL";
+    case Episode3::EffectWhen::UNKNOWN_29:
+      return "UNKNOWN_29";
+    case Episode3::EffectWhen::UNKNOWN_2A:
+      return "UNKNOWN_2A";
+    case Episode3::EffectWhen::UNKNOWN_2B:
+      return "UNKNOWN_2B";
+    case Episode3::EffectWhen::UNKNOWN_33:
+      return "UNKNOWN_33";
+    case Episode3::EffectWhen::UNKNOWN_34:
+      return "UNKNOWN_34";
+    case Episode3::EffectWhen::UNKNOWN_35:
+      return "UNKNOWN_35";
+    case Episode3::EffectWhen::ATTACK_STAT_OVERRIDES:
+      return "ATTACK_STAT_OVERRIDES";
+    case Episode3::EffectWhen::ATTACK_DAMAGE_ADJUSTMENT:
+      return "ATTACK_DAMAGE_ADJUSTMENT";
+    case Episode3::EffectWhen::DEFENSE_DAMAGE_ADJUSTMENT:
+      return "DEFENSE_DAMAGE_ADJUSTMENT";
+    case Episode3::EffectWhen::BEFORE_DICE_PHASE_ALL_TURNS_FINAL:
+      return "BEFORE_DICE_PHASE_ALL_TURNS_FINAL";
+    default:
+      return "__INVALID__";
+  }
+}
+
+template <>
+const char* phosg::name_for_enum<Episode3::Direction>(Episode3::Direction d) {
+  switch (d) {
+    case Episode3::Direction::RIGHT:
+      return "LEFT";
+    case Episode3::Direction::UP:
+      return "DOWN";
+    case Episode3::Direction::LEFT:
+      return "RIGHT";
+    case Episode3::Direction::DOWN:
+      return "UP";
+    case Episode3::Direction::INVALID_FF:
+      return "INVALID_FF";
+    default:
+      return "__INVALID__";
   }
 }

@@ -8,7 +8,10 @@
 #include <unordered_map>
 #include <vector>
 
-struct PatchFileIndex {
+class PatchFileIndex {
+public:
+  static constexpr size_t CHUNK_SIZE = 0x6000;
+
   explicit PatchFileIndex(const std::string& root_dir);
 
   struct File {
@@ -45,8 +48,6 @@ struct PatchFileChecksumRequest {
         size(0),
         response_received(false) {}
   inline bool needs_update() const {
-    return !this->response_received ||
-        (this->crc32 != this->file->crc32) ||
-        (this->size != this->file->size);
+    return !this->response_received || (this->crc32 != this->file->crc32) || (this->size != this->file->size);
   }
 };
